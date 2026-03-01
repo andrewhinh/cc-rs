@@ -1,27 +1,63 @@
 use std::{env, process};
 
 fn usage(bin: &str) -> String {
-    format!("Usage: {bin} <integer>")
+    format!("Usage: {bin} <expression>")
 }
 
-fn parse_integer(src: &str) -> Result<u8, String> {
-    src.trim()
-        .parse::<u8>()
-        .map_err(|_| format!("Expected 0-255 integer, got: {src}"))
-}
-
-fn emit_assembly(value: u8) -> String {
+fn emit_assembly(src: &str) -> Result<String, String> {
     if !cfg!(target_arch = "x86_64") {
-        return String::from("Unsupported target architecture: require x86_64");
+        return Err(String::from(
+            "Unsupported target architecture: require x86_64",
+        ));
     }
 
-    format!(
-        ".text\n\
-            .globl main\n\
-            main:\n\
-            mov ${value}, %eax\n\
-            ret\n"
-    )
+    let mut chars = src.chars().peekable();
+    let mut result = String::new();
+
+    result.push_str(".text\n");
+    result.push_str(".globl main\n");
+    result.push_str("main:\n");
+
+    let first = parse_number(&mut chars)?;
+    result.push_str(&format!("  mov ${first}, %rax\n"));
+
+    while let Some(&c) = chars.peek() {
+        match c {
+            '+' => {
+                chars.next();
+                let n = parse_number(&mut chars)?;
+                result.push_str(&format!("  add ${n}, %rax\n"));
+            }
+            '-' => {
+                chars.next();
+                let n = parse_number(&mut chars)?;
+                result.push_str(&format!("  sub ${n}, %rax\n"));
+            }
+            _ => return Err(format!("Unexpected character: '{c}'")),
+        }
+    }
+
+    result.push_str("  ret\n");
+    Ok(result)
+}
+
+fn parse_number(chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<i64, String> {
+    let mut num = String::new();
+    while let Some(&c) = chars.peek() {
+        if c.is_ascii_digit() {
+            num.push(c);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+
+    if num.is_empty() {
+        return Err("Expected number".to_string());
+    }
+
+    num.parse::<i64>()
+        .map_err(|_| format!("Invalid number: {num}"))
 }
 
 fn run() -> Result<String, String> {
@@ -32,8 +68,7 @@ fn run() -> Result<String, String> {
         return Err(usage(&bin));
     }
 
-    let value = parse_integer(&src)?;
-    Ok(emit_assembly(value))
+    emit_assembly(&src)
 }
 
 fn main() {
