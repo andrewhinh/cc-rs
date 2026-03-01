@@ -126,7 +126,9 @@ PUBLIC_IP="$(aws ec2 describe-instances --region "$REGION" --instance-ids "$INST
 rsync -av -e "ssh -i cc-rs.pem" --exclude target --exclude .git . ubuntu@"$PUBLIC_IP":~/cc-rs
 
 if [[ -n "${REMOTE_CMD}" ]]; then
-  ssh -i cc-rs.pem ubuntu@"$PUBLIC_IP" "sudo usermod -aG docker \$USER && newgrp docker && sudo chown -R \$USER:\$USER ~/cc-rs/target 2>/dev/null || true && chmod -R u+rwX ~/cc-rs/target 2>/dev/null || true && cd ~/cc-rs && ${REMOTE_CMD}"
+  ssh -i cc-rs.pem ubuntu@"$PUBLIC_IP" bash -s << REMOTE_SCRIPT
+sudo usermod -aG docker \$USER && newgrp docker && sudo chown -R \$USER:\$USER ~/cc-rs/target 2>/dev/null || true && chmod -R u+rwX ~/cc-rs/target 2>/dev/null || true && cd ~/cc-rs && ${REMOTE_CMD}
+REMOTE_SCRIPT
 else
   ssh -i cc-rs.pem ubuntu@"$PUBLIC_IP" -t 'sudo usermod -aG docker "$USER" && newgrp docker && docker ps && sudo chown -R "$USER":"$USER" ~/cc-rs/target && chmod -R u+rwX ~/cc-rs/target; exec bash -l'
 fi
