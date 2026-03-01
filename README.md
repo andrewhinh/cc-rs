@@ -52,7 +52,7 @@ cargo run
 - [x] Add a tokenizer to allow space characters between tokens
 - [x] Improve error message
 - [x] Add \*, / and ()
-- [ ] Add unary plus and minus
+- [x] Add unary plus and minus
 - [ ] Add ==, !=, <= and >= operators
 - [ ] Read code from a file instead of argv[1]
 
