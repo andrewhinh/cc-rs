@@ -47,7 +47,7 @@ cargo run
 
 ### Arithmetic and Basic Parsing
 
-- [ ] Compile an integer to an executable that exits with the given number
+- [x] Compile an integer to an executable that exits with the given number
 - [ ] Add + and - operators
 - [ ] Add a tokenizer to allow space characters between tokens
 - [ ] Improve error message
