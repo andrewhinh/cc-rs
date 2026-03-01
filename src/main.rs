@@ -107,6 +107,7 @@ enum NodeKind {
     Sub,
     Mul,
     Div,
+    Neg,
     Num,
 }
 
@@ -131,6 +132,12 @@ fn new_binary(kind: NodeKind, lhs: Node, rhs: Node) -> Node {
     let mut node = new_node(kind);
     node.lhs = Some(Box::new(lhs));
     node.rhs = Some(Box::new(rhs));
+    node
+}
+
+fn new_unary(kind: NodeKind, expr: Node) -> Node {
+    let mut node = new_node(kind);
+    node.lhs = Some(Box::new(expr));
     node
 }
 
@@ -163,18 +170,18 @@ fn expr(src: &str, tok: &Token) -> Result<(Node, Token), String> {
 }
 
 fn mul(src: &str, tok: &Token) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = primary(src, tok)?;
+    let (mut node, mut tok) = unary(src, tok)?;
 
     loop {
         if equal(src, &tok, "*") {
-            let (rhs, new_tok) = primary(src, tok.next.as_ref().unwrap())?;
+            let (rhs, new_tok) = unary(src, tok.next.as_ref().unwrap())?;
             node = new_binary(NodeKind::Mul, node, rhs);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, "/") {
-            let (rhs, new_tok) = primary(src, tok.next.as_ref().unwrap())?;
+            let (rhs, new_tok) = unary(src, tok.next.as_ref().unwrap())?;
             node = new_binary(NodeKind::Div, node, rhs);
             tok = new_tok;
             continue;
@@ -182,6 +189,19 @@ fn mul(src: &str, tok: &Token) -> Result<(Node, Token), String> {
 
         return Ok((node, tok));
     }
+}
+
+fn unary(src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    if equal(src, tok, "+") {
+        return unary(src, tok.next.as_ref().unwrap());
+    }
+
+    if equal(src, tok, "-") {
+        let (node, tok) = unary(src, tok.next.as_ref().unwrap())?;
+        return Ok((new_unary(NodeKind::Neg, node), tok));
+    }
+
+    primary(src, tok)
 }
 
 fn primary(src: &str, tok: &Token) -> Result<(Node, Token), String> {
@@ -200,9 +220,17 @@ fn primary(src: &str, tok: &Token) -> Result<(Node, Token), String> {
 }
 
 fn gen_expr(node: &Node, result: &mut String) {
-    if node.kind == NodeKind::Num {
-        result.push_str(&format!("  mov ${}, %rax\n", node.val));
-        return;
+    match node.kind {
+        NodeKind::Num => {
+            result.push_str(&format!("  mov ${}, %rax\n", node.val));
+            return;
+        }
+        NodeKind::Neg => {
+            gen_expr(node.lhs.as_ref().unwrap(), result);
+            result.push_str("  neg %rax\n");
+            return;
+        }
+        _ => {}
     }
 
     gen_expr(node.rhs.as_ref().unwrap(), result);
@@ -218,7 +246,7 @@ fn gen_expr(node: &Node, result: &mut String) {
             result.push_str("  cqo\n");
             result.push_str("  idiv %rdi\n");
         }
-        NodeKind::Num => unreachable!(),
+        NodeKind::Neg | NodeKind::Num => unreachable!(),
     }
 }
 
