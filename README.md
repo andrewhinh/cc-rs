@@ -51,7 +51,7 @@ cargo run
 - [x] Add + and - operators
 - [x] Add a tokenizer to allow space characters between tokens
 - [x] Improve error message
-- [ ] Add \*, / and ()
+- [x] Add \*, / and ()
 - [ ] Add unary plus and minus
 - [ ] Add ==, !=, <= and >= operators
 - [ ] Read code from a file instead of argv[1]
