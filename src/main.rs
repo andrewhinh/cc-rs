@@ -4,6 +4,95 @@ fn usage(bin: &str) -> String {
     format!("Usage: {bin} <expression>")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokenKind {
+    Punct,
+    Num,
+    Eof,
+}
+
+#[derive(Debug)]
+struct Token {
+    kind: TokenKind,
+    next: Option<Box<Token>>,
+    val: i64,
+    loc: usize,
+    len: usize,
+}
+
+fn new_token(kind: TokenKind, start: usize, end: usize) -> Token {
+    Token {
+        kind,
+        next: None,
+        val: 0,
+        loc: start,
+        len: end - start,
+    }
+}
+
+fn tokenize(src: &str) -> Result<Token, String> {
+    let mut head = Token {
+        kind: TokenKind::Eof,
+        next: None,
+        val: 0,
+        loc: 0,
+        len: 0,
+    };
+    let mut cur = &mut head;
+    let chars: Vec<char> = src.chars().collect();
+    let mut pos = 0;
+
+    while pos < chars.len() {
+        if chars[pos].is_whitespace() {
+            pos += 1;
+            continue;
+        }
+
+        if chars[pos].is_ascii_digit() {
+            let start = pos;
+            let mut num_str = String::new();
+            while pos < chars.len() && chars[pos].is_ascii_digit() {
+                num_str.push(chars[pos]);
+                pos += 1;
+            }
+            let val = num_str
+                .parse::<i64>()
+                .map_err(|_| format!("Invalid number: {num_str}"))?;
+            let mut tok = new_token(TokenKind::Num, start, pos);
+            tok.val = val;
+            cur.next = Some(Box::new(tok));
+            cur = cur.next.as_mut().unwrap();
+            continue;
+        }
+
+        if chars[pos] == '+' || chars[pos] == '-' {
+            let tok = new_token(TokenKind::Punct, pos, pos + 1);
+            cur.next = Some(Box::new(tok));
+            cur = cur.next.as_mut().unwrap();
+            pos += 1;
+            continue;
+        }
+
+        return Err(format!("Invalid token at position {pos}"));
+    }
+
+    cur.next = Some(Box::new(new_token(TokenKind::Eof, pos, pos)));
+    Ok(*head.next.unwrap())
+}
+
+fn equal(src: &str, tok: &Token, s: &str) -> bool {
+    tok.kind == TokenKind::Punct
+        && tok.len == s.len()
+        && src.chars().skip(tok.loc).take(tok.len).eq(s.chars())
+}
+
+fn get_number(tok: &Token) -> Result<i64, String> {
+    if tok.kind != TokenKind::Num {
+        return Err("Expected a number".to_string());
+    }
+    Ok(tok.val)
+}
+
 fn emit_assembly(src: &str) -> Result<String, String> {
     if !cfg!(target_arch = "x86_64") {
         return Err(String::from(
@@ -11,53 +100,39 @@ fn emit_assembly(src: &str) -> Result<String, String> {
         ));
     }
 
-    let mut chars = src.chars().peekable();
+    let mut tok = tokenize(src)?;
     let mut result = String::new();
 
     result.push_str(".text\n");
     result.push_str(".globl main\n");
     result.push_str("main:\n");
 
-    let first = parse_number(&mut chars)?;
+    let first = get_number(&tok)?;
     result.push_str(&format!("  mov ${first}, %rax\n"));
+    tok = *tok.next.unwrap();
 
-    while let Some(&c) = chars.peek() {
-        match c {
-            '+' => {
-                chars.next();
-                let n = parse_number(&mut chars)?;
-                result.push_str(&format!("  add ${n}, %rax\n"));
-            }
-            '-' => {
-                chars.next();
-                let n = parse_number(&mut chars)?;
-                result.push_str(&format!("  sub ${n}, %rax\n"));
-            }
-            _ => return Err(format!("Unexpected character: '{c}'")),
+    while tok.kind != TokenKind::Eof {
+        if equal(src, &tok, "+") {
+            tok = *tok.next.unwrap();
+            let n = get_number(&tok)?;
+            result.push_str(&format!("  add ${n}, %rax\n"));
+            tok = *tok.next.unwrap();
+            continue;
         }
+
+        if equal(src, &tok, "-") {
+            tok = *tok.next.unwrap();
+            let n = get_number(&tok)?;
+            result.push_str(&format!("  sub ${n}, %rax\n"));
+            tok = *tok.next.unwrap();
+            continue;
+        }
+
+        return Err(format!("Unexpected token at position {}", tok.loc));
     }
 
     result.push_str("  ret\n");
     Ok(result)
-}
-
-fn parse_number(chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<i64, String> {
-    let mut num = String::new();
-    while let Some(&c) = chars.peek() {
-        if c.is_ascii_digit() {
-            num.push(c);
-            chars.next();
-        } else {
-            break;
-        }
-    }
-
-    if num.is_empty() {
-        return Err("Expected number".to_string());
-    }
-
-    num.parse::<i64>()
-        .map_err(|_| format!("Invalid number: {num}"))
 }
 
 fn run() -> Result<String, String> {
