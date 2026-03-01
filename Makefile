@@ -1,10 +1,11 @@
 .PHONY: help conn create delete list reboot aws-setup ec2-setup start stop
 
 ARG := $(word 2,$(MAKECMDGOALS))
+CMD ?=
 HOST ?=
 
 help:
-	@echo "conn       connect to instance <instance-id>"
+	@echo "conn       connect to instance [instance-id] [CMD=...]"
 	@echo "create     create instance"
 	@echo "delete     delete instance <instance-id>"
 	@echo "list       list instances"
@@ -15,7 +16,11 @@ help:
 	@echo "stop       stop instance <instance-id>"
 
 conn:
+ifdef CMD
+	bash scripts/conn.sh $(ARG) --cmd '$(CMD)'
+else
 	bash scripts/conn.sh $(ARG)
+endif
 
 create:
 	bash scripts/create.sh

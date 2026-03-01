@@ -4,6 +4,14 @@ fn usage(bin: &str) -> String {
     format!("Usage: {bin} <expression>")
 }
 
+fn error_at(src: &str, loc: usize, msg: &str) -> String {
+    format!("{}\n{:width$}^ {msg}\n", src, "", width = loc)
+}
+
+fn error_tok(src: &str, tok: &Token, msg: &str) -> String {
+    error_at(src, tok.loc, msg)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TokenKind {
     Punct,
@@ -73,7 +81,7 @@ fn tokenize(src: &str) -> Result<Token, String> {
             continue;
         }
 
-        return Err(format!("Invalid token at position {pos}"));
+        return Err(error_at(src, pos, "invalid token"));
     }
 
     cur.next = Some(Box::new(new_token(TokenKind::Eof, pos, pos)));
@@ -86,9 +94,9 @@ fn equal(src: &str, tok: &Token, s: &str) -> bool {
         && src.chars().skip(tok.loc).take(tok.len).eq(s.chars())
 }
 
-fn get_number(tok: &Token) -> Result<i64, String> {
+fn get_number(src: &str, tok: &Token) -> Result<i64, String> {
     if tok.kind != TokenKind::Num {
-        return Err("Expected a number".to_string());
+        return Err(error_tok(src, tok, "expected a number"));
     }
     Ok(tok.val)
 }
@@ -107,14 +115,14 @@ fn emit_assembly(src: &str) -> Result<String, String> {
     result.push_str(".globl main\n");
     result.push_str("main:\n");
 
-    let first = get_number(&tok)?;
+    let first = get_number(src, &tok)?;
     result.push_str(&format!("  mov ${first}, %rax\n"));
     tok = *tok.next.unwrap();
 
     while tok.kind != TokenKind::Eof {
         if equal(src, &tok, "+") {
             tok = *tok.next.unwrap();
-            let n = get_number(&tok)?;
+            let n = get_number(src, &tok)?;
             result.push_str(&format!("  add ${n}, %rax\n"));
             tok = *tok.next.unwrap();
             continue;
@@ -122,13 +130,13 @@ fn emit_assembly(src: &str) -> Result<String, String> {
 
         if equal(src, &tok, "-") {
             tok = *tok.next.unwrap();
-            let n = get_number(&tok)?;
+            let n = get_number(src, &tok)?;
             result.push_str(&format!("  sub ${n}, %rax\n"));
             tok = *tok.next.unwrap();
             continue;
         }
 
-        return Err(format!("Unexpected token at position {}", tok.loc));
+        return Err(error_tok(src, &tok, "unexpected token"));
     }
 
     result.push_str("  ret\n");
