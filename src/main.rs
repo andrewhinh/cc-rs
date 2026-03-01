@@ -38,6 +38,21 @@ fn new_token(kind: TokenKind, start: usize, end: usize) -> Token {
     }
 }
 
+fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
+    let remaining: String = chars[pos..].iter().collect();
+    if remaining.starts_with("==")
+        || remaining.starts_with("!=")
+        || remaining.starts_with("<=")
+        || remaining.starts_with(">=")
+    {
+        return Some(2);
+    }
+    if chars[pos].is_ascii_punctuation() {
+        return Some(1);
+    }
+    None
+}
+
 fn tokenize(src: &str) -> Result<Token, String> {
     let mut head = Token {
         kind: TokenKind::Eof,
@@ -73,11 +88,11 @@ fn tokenize(src: &str) -> Result<Token, String> {
             continue;
         }
 
-        if chars[pos].is_ascii_punctuation() {
-            let tok = new_token(TokenKind::Punct, pos, pos + 1);
+        if let Some(len) = read_punct(&chars, pos) {
+            let tok = new_token(TokenKind::Punct, pos, pos + len);
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
-            pos += 1;
+            pos += len;
             continue;
         }
 
@@ -108,6 +123,10 @@ enum NodeKind {
     Mul,
     Div,
     Neg,
+    Eq,
+    Ne,
+    Lt,
+    Le,
     Num,
 }
 
@@ -148,6 +167,68 @@ fn new_num(val: i64) -> Node {
 }
 
 fn expr(src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    equality(src, tok)
+}
+
+fn equality(src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    let (mut node, mut tok) = relational(src, tok)?;
+
+    loop {
+        if equal(src, &tok, "==") {
+            let (rhs, new_tok) = relational(src, tok.next.as_ref().unwrap())?;
+            node = new_binary(NodeKind::Eq, node, rhs);
+            tok = new_tok;
+            continue;
+        }
+
+        if equal(src, &tok, "!=") {
+            let (rhs, new_tok) = relational(src, tok.next.as_ref().unwrap())?;
+            node = new_binary(NodeKind::Ne, node, rhs);
+            tok = new_tok;
+            continue;
+        }
+
+        return Ok((node, tok));
+    }
+}
+
+fn relational(src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    let (mut node, mut tok) = add(src, tok)?;
+
+    loop {
+        if equal(src, &tok, "<") {
+            let (rhs, new_tok) = add(src, tok.next.as_ref().unwrap())?;
+            node = new_binary(NodeKind::Lt, node, rhs);
+            tok = new_tok;
+            continue;
+        }
+
+        if equal(src, &tok, "<=") {
+            let (rhs, new_tok) = add(src, tok.next.as_ref().unwrap())?;
+            node = new_binary(NodeKind::Le, node, rhs);
+            tok = new_tok;
+            continue;
+        }
+
+        if equal(src, &tok, ">") {
+            let (lhs, new_tok) = add(src, tok.next.as_ref().unwrap())?;
+            node = new_binary(NodeKind::Lt, lhs, node);
+            tok = new_tok;
+            continue;
+        }
+
+        if equal(src, &tok, ">=") {
+            let (lhs, new_tok) = add(src, tok.next.as_ref().unwrap())?;
+            node = new_binary(NodeKind::Le, lhs, node);
+            tok = new_tok;
+            continue;
+        }
+
+        return Ok((node, tok));
+    }
+}
+
+fn add(src: &str, tok: &Token) -> Result<(Node, Token), String> {
     let (mut node, mut tok) = mul(src, tok)?;
 
     loop {
@@ -245,6 +326,17 @@ fn gen_expr(node: &Node, result: &mut String) {
         NodeKind::Div => {
             result.push_str("  cqo\n");
             result.push_str("  idiv %rdi\n");
+        }
+        NodeKind::Eq | NodeKind::Ne | NodeKind::Lt | NodeKind::Le => {
+            result.push_str("  cmp %rdi, %rax\n");
+            match node.kind {
+                NodeKind::Eq => result.push_str("  sete %al\n"),
+                NodeKind::Ne => result.push_str("  setne %al\n"),
+                NodeKind::Lt => result.push_str("  setl %al\n"),
+                NodeKind::Le => result.push_str("  setle %al\n"),
+                _ => unreachable!(),
+            }
+            result.push_str("  movzb %al, %rax\n");
         }
         NodeKind::Neg | NodeKind::Num => unreachable!(),
     }
