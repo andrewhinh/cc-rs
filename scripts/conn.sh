@@ -2,12 +2,14 @@
 set -euo pipefail
 
 INSTANCE_ID=""
+REMOTE_CMD=""
 SYNC="${SYNC:-1}"
 
 usage() {
   echo "Usage: $(basename "$0") [options] [instance-id]"
   echo ""
   echo "Options:"
+  echo "  --cmd <command>   Command to run non-interactively"
   echo "  --no-sync         Skip rsync before connecting"
   echo "  -h, --help            Show this help message"
 }
@@ -17,6 +19,14 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       usage
       exit 0
+      ;;
+    --cmd)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --cmd requires an argument"
+        exit 1
+      fi
+      REMOTE_CMD="$2"
+      shift 2
       ;;
     --no-sync)
       SYNC=0
@@ -144,4 +154,8 @@ else
   echo "Skipping rsync (SYNC=0)"
 fi
 
-ssh "${SSH_OPTS[@]}" ubuntu@"$PUBLIC_IP" -t 'if getent group docker >/dev/null; then sudo usermod -aG docker "$USER" || true; docker ps || true; fi; sudo chown -R "$USER":"$USER" ~/cc-rs/target 2>/dev/null || true; chmod -R u+rwX ~/cc-rs/target 2>/dev/null || true; exec bash -l'
+if [[ -n "${REMOTE_CMD}" ]]; then
+  ssh "${SSH_OPTS[@]}" ubuntu@"$PUBLIC_IP" "if getent group docker >/dev/null; then sudo usermod -aG docker \$USER || true; fi; sudo chown -R \$USER:\$USER ~/cc-rs/target 2>/dev/null || true; chmod -R u+rwX ~/cc-rs/target 2>/dev/null || true; cd ~/cc-rs && ${REMOTE_CMD}"
+else
+  ssh "${SSH_OPTS[@]}" ubuntu@"$PUBLIC_IP" -t 'if getent group docker >/dev/null; then sudo usermod -aG docker "$USER" || true; docker ps || true; fi; sudo chown -R "$USER":"$USER" ~/cc-rs/target 2>/dev/null || true; chmod -R u+rwX ~/cc-rs/target 2>/dev/null || true; exec bash -l'
+fi
