@@ -50,7 +50,7 @@ cargo run
 - [x] Compile an integer to an executable that exits with the given number
 - [x] Add + and - operators
 - [x] Add a tokenizer to allow space characters between tokens
-- [ ] Improve error message
+- [x] Improve error message
 - [ ] Add \*, / and ()
 - [ ] Add unary plus and minus
 - [ ] Add ==, !=, <= and >= operators
