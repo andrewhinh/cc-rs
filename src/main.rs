@@ -19,7 +19,7 @@ enum TokenKind {
     Eof,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Token {
     kind: TokenKind,
     next: Option<Box<Token>>,
@@ -73,7 +73,7 @@ fn tokenize(src: &str) -> Result<Token, String> {
             continue;
         }
 
-        if chars[pos] == '+' || chars[pos] == '-' {
+        if chars[pos].is_ascii_punctuation() {
             let tok = new_token(TokenKind::Punct, pos, pos + 1);
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
@@ -94,11 +94,132 @@ fn equal(src: &str, tok: &Token, s: &str) -> bool {
         && src.chars().skip(tok.loc).take(tok.len).eq(s.chars())
 }
 
-fn get_number(src: &str, tok: &Token) -> Result<i64, String> {
-    if tok.kind != TokenKind::Num {
-        return Err(error_tok(src, tok, "expected a number"));
+fn skip(src: &str, tok: &Token, s: &str) -> Result<Token, String> {
+    if equal(src, tok, s) {
+        return Ok(*tok.next.as_ref().unwrap().clone());
     }
-    Ok(tok.val)
+    Err(error_tok(src, tok, &format!("expected '{s}'")))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NodeKind {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Num,
+}
+
+#[derive(Debug)]
+struct Node {
+    kind: NodeKind,
+    lhs: Option<Box<Node>>,
+    rhs: Option<Box<Node>>,
+    val: i64,
+}
+
+fn new_node(kind: NodeKind) -> Node {
+    Node {
+        kind,
+        lhs: None,
+        rhs: None,
+        val: 0,
+    }
+}
+
+fn new_binary(kind: NodeKind, lhs: Node, rhs: Node) -> Node {
+    let mut node = new_node(kind);
+    node.lhs = Some(Box::new(lhs));
+    node.rhs = Some(Box::new(rhs));
+    node
+}
+
+fn new_num(val: i64) -> Node {
+    let mut node = new_node(NodeKind::Num);
+    node.val = val;
+    node
+}
+
+fn expr(src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    let (mut node, mut tok) = mul(src, tok)?;
+
+    loop {
+        if equal(src, &tok, "+") {
+            let (rhs, new_tok) = mul(src, tok.next.as_ref().unwrap())?;
+            node = new_binary(NodeKind::Add, node, rhs);
+            tok = new_tok;
+            continue;
+        }
+
+        if equal(src, &tok, "-") {
+            let (rhs, new_tok) = mul(src, tok.next.as_ref().unwrap())?;
+            node = new_binary(NodeKind::Sub, node, rhs);
+            tok = new_tok;
+            continue;
+        }
+
+        return Ok((node, tok));
+    }
+}
+
+fn mul(src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    let (mut node, mut tok) = primary(src, tok)?;
+
+    loop {
+        if equal(src, &tok, "*") {
+            let (rhs, new_tok) = primary(src, tok.next.as_ref().unwrap())?;
+            node = new_binary(NodeKind::Mul, node, rhs);
+            tok = new_tok;
+            continue;
+        }
+
+        if equal(src, &tok, "/") {
+            let (rhs, new_tok) = primary(src, tok.next.as_ref().unwrap())?;
+            node = new_binary(NodeKind::Div, node, rhs);
+            tok = new_tok;
+            continue;
+        }
+
+        return Ok((node, tok));
+    }
+}
+
+fn primary(src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    if equal(src, tok, "(") {
+        let (node, tok) = expr(src, tok.next.as_ref().unwrap())?;
+        let tok = skip(src, &tok, ")")?;
+        return Ok((node, tok));
+    }
+
+    if tok.kind == TokenKind::Num {
+        let node = new_num(tok.val);
+        return Ok((node, *tok.next.as_ref().unwrap().clone()));
+    }
+
+    Err(error_tok(src, tok, "expected an expression"))
+}
+
+fn gen_expr(node: &Node, result: &mut String) {
+    if node.kind == NodeKind::Num {
+        result.push_str(&format!("  mov ${}, %rax\n", node.val));
+        return;
+    }
+
+    gen_expr(node.rhs.as_ref().unwrap(), result);
+    result.push_str("  push %rax\n");
+    gen_expr(node.lhs.as_ref().unwrap(), result);
+    result.push_str("  pop %rdi\n");
+
+    match node.kind {
+        NodeKind::Add => result.push_str("  add %rdi, %rax\n"),
+        NodeKind::Sub => result.push_str("  sub %rdi, %rax\n"),
+        NodeKind::Mul => result.push_str("  imul %rdi, %rax\n"),
+        NodeKind::Div => {
+            result.push_str("  cqo\n");
+            result.push_str("  idiv %rdi\n");
+        }
+        NodeKind::Num => unreachable!(),
+    }
 }
 
 fn emit_assembly(src: &str) -> Result<String, String> {
@@ -108,37 +229,18 @@ fn emit_assembly(src: &str) -> Result<String, String> {
         ));
     }
 
-    let mut tok = tokenize(src)?;
-    let mut result = String::new();
+    let tok = tokenize(src)?;
+    let (node, tok) = expr(src, &tok)?;
 
+    if tok.kind != TokenKind::Eof {
+        return Err(error_tok(src, &tok, "extra token"));
+    }
+
+    let mut result = String::new();
     result.push_str(".text\n");
     result.push_str(".globl main\n");
     result.push_str("main:\n");
-
-    let first = get_number(src, &tok)?;
-    result.push_str(&format!("  mov ${first}, %rax\n"));
-    tok = *tok.next.unwrap();
-
-    while tok.kind != TokenKind::Eof {
-        if equal(src, &tok, "+") {
-            tok = *tok.next.unwrap();
-            let n = get_number(src, &tok)?;
-            result.push_str(&format!("  add ${n}, %rax\n"));
-            tok = *tok.next.unwrap();
-            continue;
-        }
-
-        if equal(src, &tok, "-") {
-            tok = *tok.next.unwrap();
-            let n = get_number(src, &tok)?;
-            result.push_str(&format!("  sub ${n}, %rax\n"));
-            tok = *tok.next.unwrap();
-            continue;
-        }
-
-        return Err(error_tok(src, &tok, "unexpected token"));
-    }
-
+    gen_expr(&node, &mut result);
     result.push_str("  ret\n");
     Ok(result)
 }
