@@ -155,7 +155,14 @@ else
 fi
 
 if [[ -n "${REMOTE_CMD}" ]]; then
-  ssh "${SSH_OPTS[@]}" ubuntu@"$PUBLIC_IP" "if getent group docker >/dev/null; then sudo usermod -aG docker \$USER || true; fi; sudo chown -R \$USER:\$USER ~/cc-rs/target 2>/dev/null || true; chmod -R u+rwX ~/cc-rs/target 2>/dev/null || true; cd ~/cc-rs && ${REMOTE_CMD}"
+  ssh "${SSH_OPTS[@]}" ubuntu@"$PUBLIC_IP" bash -s << REMOTE_SCRIPT
+if getent group docker >/dev/null; then
+  sudo usermod -aG docker \$USER || true
+fi
+sudo chown -R \$USER:\$USER ~/cc-rs/target 2>/dev/null || true
+chmod -R u+rwX ~/cc-rs/target 2>/dev/null || true
+cd ~/cc-rs && ${REMOTE_CMD}
+REMOTE_SCRIPT
 else
   ssh "${SSH_OPTS[@]}" ubuntu@"$PUBLIC_IP" -t 'if getent group docker >/dev/null; then sudo usermod -aG docker "$USER" || true; docker ps || true; fi; sudo chown -R "$USER":"$USER" ~/cc-rs/target 2>/dev/null || true; chmod -R u+rwX ~/cc-rs/target 2>/dev/null || true; exec bash -l'
 fi

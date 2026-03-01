@@ -1,12 +1,13 @@
 .PHONY: help conn conn-nosync create delete list reboot aws-setup ec2-setup start stop stage2 test-stage2 test-all clean FORCE
 
 ARG := $(word 2,$(MAKECMDGOALS))
+CMD ?=
 HOST ?=
 SYNC ?= 1
 
 help:
-	@echo "conn        sync and connect to instance <instance-id> [SYNC=0]"
-	@echo "conn-nosync connect to instance without rsync <instance-id>"
+	@echo "conn        sync and connect to instance [instance-id] [CMD=...] [SYNC=0]"
+	@echo "conn-nosync connect to instance without rsync [instance-id] [CMD=...]"
 	@echo "create      create instance"
 	@echo "delete      delete instance <instance-id>"
 	@echo "list        list instances"
@@ -17,10 +18,18 @@ help:
 	@echo "stop        stop instance <instance-id>"
 
 conn:
+ifdef CMD
+	SYNC=$(SYNC) bash scripts/conn.sh $(ARG) --cmd '$(CMD)'
+else
 	SYNC=$(SYNC) bash scripts/conn.sh $(ARG)
+endif
 
 conn-nosync:
+ifdef CMD
+	bash scripts/conn.sh $(ARG) --no-sync --cmd '$(CMD)'
+else
 	bash scripts/conn.sh $(ARG) --no-sync
+endif
 
 create:
 	bash scripts/create.sh
