@@ -2,19 +2,47 @@
 set -euo pipefail
 
 INSTANCE_ID=""
+REMOTE_CMD=""
 
-if [[ $# -gt 1 ]]; then
-  echo "Usage: $(basename "$0") [instance-id]"
-  exit 1
-fi
+usage() {
+  echo "Usage: $(basename "$0") [options] [instance-id]"
+  echo ""
+  echo "Options:"
+  echo "  --cmd <command>   Command to run non-interactively"
+  echo "  -h, --help            Show this help message"
+}
 
-if [[ $# -eq 1 ]]; then
-  if [[ "$1" == "-h" || "$1" == "--help" ]]; then
-    echo "Usage: $(basename "$0") [instance-id]"
-    exit 0
-  fi
-  INSTANCE_ID="$1"
-fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --cmd)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --cmd requires an argument"
+        exit 1
+      fi
+      REMOTE_CMD="$2"
+      shift 2
+      ;;
+    -*)
+      echo "Unknown option: $1"
+      usage
+      exit 1
+      ;;
+    *)
+      if [[ -z "${INSTANCE_ID}" ]]; then
+        INSTANCE_ID="$1"
+      else
+        echo "Error: Too many arguments"
+        usage
+        exit 1
+      fi
+      shift
+      ;;
+  esac
+done
 
 REGION=$(aws configure get region)
 
@@ -97,4 +125,8 @@ PUBLIC_IP="$(aws ec2 describe-instances --region "$REGION" --instance-ids "$INST
   --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)"
 rsync -av -e "ssh -i cc-rs.pem" --exclude target --exclude .git . ubuntu@"$PUBLIC_IP":~/cc-rs
 
-ssh -i cc-rs.pem ubuntu@"$PUBLIC_IP" -t 'sudo usermod -aG docker "$USER" && newgrp docker && docker ps && sudo chown -R "$USER":"$USER" ~/cc-rs/target && chmod -R u+rwX ~/cc-rs/target; exec bash -l'
+if [[ -n "${REMOTE_CMD}" ]]; then
+  ssh -i cc-rs.pem ubuntu@"$PUBLIC_IP" "sudo usermod -aG docker \$USER && newgrp docker && sudo chown -R \$USER:\$USER ~/cc-rs/target 2>/dev/null || true && chmod -R u+rwX ~/cc-rs/target 2>/dev/null || true && cd ~/cc-rs && ${REMOTE_CMD}"
+else
+  ssh -i cc-rs.pem ubuntu@"$PUBLIC_IP" -t 'sudo usermod -aG docker "$USER" && newgrp docker && docker ps && sudo chown -R "$USER":"$USER" ~/cc-rs/target && chmod -R u+rwX ~/cc-rs/target; exec bash -l'
+fi
