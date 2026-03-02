@@ -1,15 +1,64 @@
-use std::{env, process};
+use std::{
+    env, fs,
+    io::{self, Read},
+    process,
+};
 
 fn usage(bin: &str) -> String {
-    format!("Usage: {bin} <expression>")
+    format!("Usage: {bin} <filename>")
 }
 
-fn error_at(src: &str, loc: usize, msg: &str) -> String {
-    format!("{}\n{:width$}^ {msg}\n", src, "", width = loc)
+fn read_file(path: &str) -> Result<(String, String), String> {
+    let filename = if path == "-" {
+        String::from("<stdin>")
+    } else {
+        String::from(path)
+    };
+
+    let contents = if path == "-" {
+        let mut buf = String::new();
+        io::stdin()
+            .read_to_string(&mut buf)
+            .map_err(|e| format!("cannot read stdin: {e}"))?;
+        buf
+    } else {
+        fs::read_to_string(path).map_err(|e| format!("cannot open {path}: {e}"))?
+    };
+
+    let mut contents = contents;
+    if !contents.is_empty() && !contents.ends_with('\n') {
+        contents.push('\n');
+    }
+
+    Ok((filename, contents))
 }
 
-fn error_tok(src: &str, tok: &Token, msg: &str) -> String {
-    error_at(src, tok.loc, msg)
+fn error_at(filename: &str, src: &str, loc: usize, msg: &str) -> String {
+    let mut line_start = loc;
+    while line_start > 0 && src.as_bytes()[line_start - 1] != b'\n' {
+        line_start -= 1;
+    }
+
+    let mut line_end = loc;
+    while line_end < src.len() && src.as_bytes()[line_end] != b'\n' {
+        line_end += 1;
+    }
+
+    let line_no = src[..loc].matches('\n').count() + 1;
+    let line = &src[line_start..line_end];
+
+    let indent = format!("{filename}:{line_no}: ").len();
+    let pos = loc - line_start + indent;
+
+    format!(
+        "{filename}:{line_no}: {line}\n{:width$}^ {msg}\n",
+        "",
+        width = pos
+    )
+}
+
+fn error_tok(filename: &str, src: &str, tok: &Token, msg: &str) -> String {
+    error_at(filename, src, tok.loc, msg)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,7 +102,7 @@ fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
     None
 }
 
-fn tokenize(src: &str) -> Result<Token, String> {
+fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
     let mut head = Token {
         kind: TokenKind::Eof,
         next: None,
@@ -96,7 +145,7 @@ fn tokenize(src: &str) -> Result<Token, String> {
             continue;
         }
 
-        return Err(error_at(src, pos, "invalid token"));
+        return Err(error_at(filename, src, pos, "invalid token"));
     }
 
     cur.next = Some(Box::new(new_token(TokenKind::Eof, pos, pos)));
@@ -109,11 +158,11 @@ fn equal(src: &str, tok: &Token, s: &str) -> bool {
         && src.chars().skip(tok.loc).take(tok.len).eq(s.chars())
 }
 
-fn skip(src: &str, tok: &Token, s: &str) -> Result<Token, String> {
+fn skip(filename: &str, src: &str, tok: &Token, s: &str) -> Result<Token, String> {
     if equal(src, tok, s) {
         return Ok(*tok.next.as_ref().unwrap().clone());
     }
-    Err(error_tok(src, tok, &format!("expected '{s}'")))
+    Err(error_tok(filename, src, tok, &format!("expected '{s}'")))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,23 +215,23 @@ fn new_num(val: i64) -> Node {
     node
 }
 
-fn expr(src: &str, tok: &Token) -> Result<(Node, Token), String> {
-    equality(src, tok)
+fn expr(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    equality(filename, src, tok)
 }
 
-fn equality(src: &str, tok: &Token) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = relational(src, tok)?;
+fn equality(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    let (mut node, mut tok) = relational(filename, src, tok)?;
 
     loop {
         if equal(src, &tok, "==") {
-            let (rhs, new_tok) = relational(src, tok.next.as_ref().unwrap())?;
+            let (rhs, new_tok) = relational(filename, src, tok.next.as_ref().unwrap())?;
             node = new_binary(NodeKind::Eq, node, rhs);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, "!=") {
-            let (rhs, new_tok) = relational(src, tok.next.as_ref().unwrap())?;
+            let (rhs, new_tok) = relational(filename, src, tok.next.as_ref().unwrap())?;
             node = new_binary(NodeKind::Ne, node, rhs);
             tok = new_tok;
             continue;
@@ -192,33 +241,33 @@ fn equality(src: &str, tok: &Token) -> Result<(Node, Token), String> {
     }
 }
 
-fn relational(src: &str, tok: &Token) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = add(src, tok)?;
+fn relational(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    let (mut node, mut tok) = add(filename, src, tok)?;
 
     loop {
         if equal(src, &tok, "<") {
-            let (rhs, new_tok) = add(src, tok.next.as_ref().unwrap())?;
+            let (rhs, new_tok) = add(filename, src, tok.next.as_ref().unwrap())?;
             node = new_binary(NodeKind::Lt, node, rhs);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, "<=") {
-            let (rhs, new_tok) = add(src, tok.next.as_ref().unwrap())?;
+            let (rhs, new_tok) = add(filename, src, tok.next.as_ref().unwrap())?;
             node = new_binary(NodeKind::Le, node, rhs);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, ">") {
-            let (lhs, new_tok) = add(src, tok.next.as_ref().unwrap())?;
+            let (lhs, new_tok) = add(filename, src, tok.next.as_ref().unwrap())?;
             node = new_binary(NodeKind::Lt, lhs, node);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, ">=") {
-            let (lhs, new_tok) = add(src, tok.next.as_ref().unwrap())?;
+            let (lhs, new_tok) = add(filename, src, tok.next.as_ref().unwrap())?;
             node = new_binary(NodeKind::Le, lhs, node);
             tok = new_tok;
             continue;
@@ -228,19 +277,19 @@ fn relational(src: &str, tok: &Token) -> Result<(Node, Token), String> {
     }
 }
 
-fn add(src: &str, tok: &Token) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = mul(src, tok)?;
+fn add(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    let (mut node, mut tok) = mul(filename, src, tok)?;
 
     loop {
         if equal(src, &tok, "+") {
-            let (rhs, new_tok) = mul(src, tok.next.as_ref().unwrap())?;
+            let (rhs, new_tok) = mul(filename, src, tok.next.as_ref().unwrap())?;
             node = new_binary(NodeKind::Add, node, rhs);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, "-") {
-            let (rhs, new_tok) = mul(src, tok.next.as_ref().unwrap())?;
+            let (rhs, new_tok) = mul(filename, src, tok.next.as_ref().unwrap())?;
             node = new_binary(NodeKind::Sub, node, rhs);
             tok = new_tok;
             continue;
@@ -250,19 +299,19 @@ fn add(src: &str, tok: &Token) -> Result<(Node, Token), String> {
     }
 }
 
-fn mul(src: &str, tok: &Token) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = unary(src, tok)?;
+fn mul(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    let (mut node, mut tok) = unary(filename, src, tok)?;
 
     loop {
         if equal(src, &tok, "*") {
-            let (rhs, new_tok) = unary(src, tok.next.as_ref().unwrap())?;
+            let (rhs, new_tok) = unary(filename, src, tok.next.as_ref().unwrap())?;
             node = new_binary(NodeKind::Mul, node, rhs);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, "/") {
-            let (rhs, new_tok) = unary(src, tok.next.as_ref().unwrap())?;
+            let (rhs, new_tok) = unary(filename, src, tok.next.as_ref().unwrap())?;
             node = new_binary(NodeKind::Div, node, rhs);
             tok = new_tok;
             continue;
@@ -272,23 +321,23 @@ fn mul(src: &str, tok: &Token) -> Result<(Node, Token), String> {
     }
 }
 
-fn unary(src: &str, tok: &Token) -> Result<(Node, Token), String> {
+fn unary(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
     if equal(src, tok, "+") {
-        return unary(src, tok.next.as_ref().unwrap());
+        return unary(filename, src, tok.next.as_ref().unwrap());
     }
 
     if equal(src, tok, "-") {
-        let (node, tok) = unary(src, tok.next.as_ref().unwrap())?;
+        let (node, tok) = unary(filename, src, tok.next.as_ref().unwrap())?;
         return Ok((new_unary(NodeKind::Neg, node), tok));
     }
 
-    primary(src, tok)
+    primary(filename, src, tok)
 }
 
-fn primary(src: &str, tok: &Token) -> Result<(Node, Token), String> {
+fn primary(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
     if equal(src, tok, "(") {
-        let (node, tok) = expr(src, tok.next.as_ref().unwrap())?;
-        let tok = skip(src, &tok, ")")?;
+        let (node, tok) = expr(filename, src, tok.next.as_ref().unwrap())?;
+        let tok = skip(filename, src, &tok, ")")?;
         return Ok((node, tok));
     }
 
@@ -297,7 +346,7 @@ fn primary(src: &str, tok: &Token) -> Result<(Node, Token), String> {
         return Ok((node, *tok.next.as_ref().unwrap().clone()));
     }
 
-    Err(error_tok(src, tok, "expected an expression"))
+    Err(error_tok(filename, src, tok, "expected an expression"))
 }
 
 fn gen_expr(node: &Node, result: &mut String) {
@@ -342,18 +391,18 @@ fn gen_expr(node: &Node, result: &mut String) {
     }
 }
 
-fn emit_assembly(src: &str) -> Result<String, String> {
+fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
     if !cfg!(target_arch = "x86_64") {
         return Err(String::from(
             "Unsupported target architecture: require x86_64",
         ));
     }
 
-    let tok = tokenize(src)?;
-    let (node, tok) = expr(src, &tok)?;
+    let tok = tokenize(filename, src)?;
+    let (node, tok) = expr(filename, src, &tok)?;
 
     if tok.kind != TokenKind::Eof {
-        return Err(error_tok(src, &tok, "extra token"));
+        return Err(error_tok(filename, src, &tok, "extra token"));
     }
 
     let mut result = String::new();
@@ -368,12 +417,13 @@ fn emit_assembly(src: &str) -> Result<String, String> {
 fn run() -> Result<String, String> {
     let mut args = env::args();
     let bin = args.next().unwrap_or_else(|| String::from("cc-rs"));
-    let src = args.next().ok_or_else(|| usage(&bin))?;
+    let path = args.next().ok_or_else(|| usage(&bin))?;
     if args.next().is_some() {
         return Err(usage(&bin));
     }
 
-    emit_assembly(&src)
+    let (filename, src) = read_file(&path)?;
+    emit_assembly(&filename, &src)
 }
 
 fn main() {
