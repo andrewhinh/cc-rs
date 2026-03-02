@@ -384,3 +384,4 @@ cargo run
 
 - [An Incremental Approach to Compiler Construction](http://scheme2006.cs.uchicago.edu/11-ghuloum.pdf)
 - [chibicc](https://github.com/rui314/chibicc)
+- [Writing a Compiler in Rust](https://thume.ca/2019/04/18/writing-a-compiler-in-rust/)
