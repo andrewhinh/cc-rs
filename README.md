@@ -54,7 +54,7 @@ cargo run
 - [x] Add \*, / and ()
 - [x] Add unary plus and minus
 - [x] Add ==, !=, <= and >= operators
-- [ ] Read code from a file instead of argv[1]
+- [x] Read code from a file instead of argv[1]
 
 ### Statements, Control Flow, and Scopes
 
