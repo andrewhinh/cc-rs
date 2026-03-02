@@ -61,7 +61,7 @@ cargo run
 - [x] Accept multiple statements separated by semicolons
 - [x] Support single-letter local variables
 - [x] Support multi-letter local variables
-- [ ] Add "return" statement
+- [x] Add "return" statement
 - [ ] Add { ... }
 - [ ] Add null statement
 - [ ] Add "if" statement

@@ -66,6 +66,7 @@ fn error_tok(filename: &str, src: &str, tok: &Token, msg: &str) -> String {
 enum TokenKind {
     Ident,
     Punct,
+    Keyword,
     Num,
     Eof,
 }
@@ -102,6 +103,22 @@ fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
         return Some(1);
     }
     None
+}
+
+fn convert_keywords(src: &str, tok: &mut Token) {
+    let mut cur = tok;
+    loop {
+        if cur.kind == TokenKind::Ident {
+            let name: String = src.chars().skip(cur.loc).take(cur.len).collect();
+            if name == "return" {
+                cur.kind = TokenKind::Keyword;
+            }
+        }
+        if cur.next.is_none() {
+            break;
+        }
+        cur = cur.next.as_mut().unwrap();
+    }
 }
 
 fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
@@ -162,11 +179,13 @@ fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
     }
 
     cur.next = Some(Box::new(new_token(TokenKind::Eof, pos, pos)));
-    Ok(*head.next.unwrap())
+    let mut tok = head.next.unwrap();
+    convert_keywords(src, &mut tok);
+    Ok(*tok)
 }
 
 fn equal(src: &str, tok: &Token, s: &str) -> bool {
-    tok.kind == TokenKind::Punct
+    (tok.kind == TokenKind::Punct || tok.kind == TokenKind::Keyword)
         && tok.len == s.len()
         && src.chars().skip(tok.loc).take(tok.len).eq(s.chars())
 }
@@ -190,6 +209,7 @@ enum NodeKind {
     Lt,
     Le,
     Assign,
+    Return,
     ExprStmt,
     Var,
     Num,
@@ -240,6 +260,12 @@ fn new_var_node(varname: String) -> Node {
 }
 
 fn stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    if equal(src, tok, "return") {
+        let (expr_node, tok) = expr(filename, src, tok.next.as_ref().unwrap())?;
+        let tok = skip(filename, src, &tok, ";")?;
+        let node = new_unary(NodeKind::Return, expr_node);
+        return Ok((node, tok));
+    }
     expr_stmt(filename, src, tok)
 }
 
@@ -460,18 +486,26 @@ fn gen_expr(node: &Node, var_offsets: &HashMap<String, i64>, result: &mut String
             }
             result.push_str("  movzb %al, %rax\n");
         }
-        NodeKind::Neg | NodeKind::Num | NodeKind::ExprStmt | NodeKind::Var | NodeKind::Assign => {
-            unreachable!()
-        }
+        NodeKind::Neg
+        | NodeKind::Num
+        | NodeKind::ExprStmt
+        | NodeKind::Var
+        | NodeKind::Assign
+        | NodeKind::Return => unreachable!(),
     }
 }
 
 fn gen_stmt(node: &Node, var_offsets: &HashMap<String, i64>, result: &mut String) {
-    if node.kind == NodeKind::ExprStmt {
-        gen_expr(node.lhs.as_ref().unwrap(), var_offsets, result);
-        return;
+    match node.kind {
+        NodeKind::Return => {
+            gen_expr(node.lhs.as_ref().unwrap(), var_offsets, result);
+            result.push_str("  jmp .L.return\n");
+        }
+        NodeKind::ExprStmt => {
+            gen_expr(node.lhs.as_ref().unwrap(), var_offsets, result);
+        }
+        _ => panic!("invalid statement"),
     }
-    panic!("invalid statement");
 }
 
 fn align_to(n: i64, align: i64) -> i64 {
@@ -486,7 +520,7 @@ fn collect_var_names(node: &Node, var_names: &mut Vec<String>) {
             }
         }
         NodeKind::Num => {}
-        NodeKind::Neg | NodeKind::ExprStmt => {
+        NodeKind::Neg | NodeKind::ExprStmt | NodeKind::Return => {
             collect_var_names(node.lhs.as_ref().unwrap(), var_names);
         }
         NodeKind::Assign
@@ -548,6 +582,7 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         gen_stmt(node, &var_offsets, &mut result);
     }
 
+    result.push_str(".L.return:\n");
     result.push_str("  mov %rbp, %rsp\n");
     result.push_str("  pop %rbp\n");
     result.push_str("  ret\n");
