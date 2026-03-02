@@ -62,7 +62,7 @@ cargo run
 - [x] Support single-letter local variables
 - [x] Support multi-letter local variables
 - [x] Add "return" statement
-- [ ] Add { ... }
+- [x] Add { ... }
 - [ ] Add null statement
 - [ ] Add "if" statement
 - [ ] Add "for" statement

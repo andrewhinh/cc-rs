@@ -210,6 +210,7 @@ enum NodeKind {
     Le,
     Assign,
     Return,
+    Block,
     ExprStmt,
     Var,
     Num,
@@ -218,8 +219,10 @@ enum NodeKind {
 #[derive(Debug)]
 struct Node {
     kind: NodeKind,
+    next: Option<Box<Node>>,
     lhs: Option<Box<Node>>,
     rhs: Option<Box<Node>>,
+    body: Option<Box<Node>>,
     varname: String,
     val: i64,
 }
@@ -227,8 +230,10 @@ struct Node {
 fn new_node(kind: NodeKind) -> Node {
     Node {
         kind,
+        next: None,
         lhs: None,
         rhs: None,
+        body: None,
         varname: String::new(),
         val: 0,
     }
@@ -259,12 +264,40 @@ fn new_var_node(varname: String) -> Node {
     node
 }
 
+fn compound_stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    let mut head = Node {
+        kind: NodeKind::Num,
+        next: None,
+        lhs: None,
+        rhs: None,
+        body: None,
+        varname: String::new(),
+        val: 0,
+    };
+    let mut cur = &mut head;
+
+    let mut tok = tok.clone();
+    while !equal(src, &tok, "}") {
+        let (node, new_tok) = stmt(filename, src, &tok)?;
+        tok = new_tok;
+        cur.next = Some(Box::new(node));
+        cur = cur.next.as_mut().unwrap();
+    }
+
+    let mut node = new_node(NodeKind::Block);
+    node.body = head.next;
+    Ok((node, *tok.next.as_ref().unwrap().clone()))
+}
+
 fn stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
     if equal(src, tok, "return") {
         let (expr_node, tok) = expr(filename, src, tok.next.as_ref().unwrap())?;
         let tok = skip(filename, src, &tok, ";")?;
         let node = new_unary(NodeKind::Return, expr_node);
         return Ok((node, tok));
+    }
+    if equal(src, tok, "{") {
+        return compound_stmt(filename, src, tok.next.as_ref().unwrap());
     }
     expr_stmt(filename, src, tok)
 }
@@ -491,12 +524,20 @@ fn gen_expr(node: &Node, var_offsets: &HashMap<String, i64>, result: &mut String
         | NodeKind::ExprStmt
         | NodeKind::Var
         | NodeKind::Assign
-        | NodeKind::Return => unreachable!(),
+        | NodeKind::Return
+        | NodeKind::Block => unreachable!(),
     }
 }
 
 fn gen_stmt(node: &Node, var_offsets: &HashMap<String, i64>, result: &mut String) {
     match node.kind {
+        NodeKind::Block => {
+            let mut n = node.body.as_ref();
+            while let Some(stmt_node) = n {
+                gen_stmt(stmt_node, var_offsets, result);
+                n = stmt_node.next.as_ref();
+            }
+        }
         NodeKind::Return => {
             gen_expr(node.lhs.as_ref().unwrap(), var_offsets, result);
             result.push_str("  jmp .L.return\n");
@@ -520,6 +561,13 @@ fn collect_var_names(node: &Node, var_names: &mut Vec<String>) {
             }
         }
         NodeKind::Num => {}
+        NodeKind::Block => {
+            let mut n = node.body.as_ref();
+            while let Some(stmt_node) = n {
+                collect_var_names(stmt_node, var_names);
+                n = stmt_node.next.as_ref();
+            }
+        }
         NodeKind::Neg | NodeKind::ExprStmt | NodeKind::Return => {
             collect_var_names(node.lhs.as_ref().unwrap(), var_names);
         }
@@ -546,20 +594,15 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
     }
 
     let tok = tokenize(filename, src)?;
+    let tok = skip(filename, src, &tok, "{")?;
+    let (prog, tok) = compound_stmt(filename, src, &tok)?;
 
-    let mut stmts: Vec<Node> = Vec::new();
-    let mut tok = tok;
-
-    while tok.kind != TokenKind::Eof {
-        let (node, new_tok) = stmt(filename, src, &tok)?;
-        tok = new_tok;
-        stmts.push(node);
+    if tok.kind != TokenKind::Eof {
+        return Err(error_tok(filename, src, &tok, "extra token"));
     }
 
     let mut var_names: Vec<String> = Vec::new();
-    for node in &stmts {
-        collect_var_names(node, &mut var_names);
-    }
+    collect_var_names(&prog, &mut var_names);
 
     let mut var_offsets: HashMap<String, i64> = HashMap::new();
     for (i, name) in var_names.iter().enumerate() {
@@ -578,9 +621,7 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
     result.push_str("  mov %rsp, %rbp\n");
     result.push_str(&format!("  sub ${}, %rsp\n", stack_size));
 
-    for node in &stmts {
-        gen_stmt(node, &var_offsets, &mut result);
-    }
+    gen_stmt(&prog, &var_offsets, &mut result);
 
     result.push_str(".L.return:\n");
     result.push_str("  mov %rbp, %rsp\n");
