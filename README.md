@@ -63,7 +63,7 @@ cargo run
 - [x] Support multi-letter local variables
 - [x] Add "return" statement
 - [x] Add { ... }
-- [ ] Add null statement
+- [x] Add null statement
 - [ ] Add "if" statement
 - [ ] Add "for" statement
 - [ ] Add "while" statement
