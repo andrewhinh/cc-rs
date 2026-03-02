@@ -58,7 +58,7 @@ cargo run
 
 ### Statements, Control Flow, and Scopes
 
-- [ ] Accept multiple statements separated by semicolons
+- [x] Accept multiple statements separated by semicolons
 - [ ] Support single-letter local variables
 - [ ] Support multi-letter local variables
 - [ ] Add "return" statement
