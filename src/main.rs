@@ -176,6 +176,7 @@ enum NodeKind {
     Ne,
     Lt,
     Le,
+    ExprStmt,
     Num,
 }
 
@@ -213,6 +214,17 @@ fn new_num(val: i64) -> Node {
     let mut node = new_node(NodeKind::Num);
     node.val = val;
     node
+}
+
+fn stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    expr_stmt(filename, src, tok)
+}
+
+fn expr_stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    let (expr_node, tok) = expr(filename, src, tok)?;
+    let tok = skip(filename, src, &tok, ";")?;
+    let node = new_unary(NodeKind::ExprStmt, expr_node);
+    Ok((node, tok))
 }
 
 fn expr(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
@@ -387,8 +399,16 @@ fn gen_expr(node: &Node, result: &mut String) {
             }
             result.push_str("  movzb %al, %rax\n");
         }
-        NodeKind::Neg | NodeKind::Num => unreachable!(),
+        NodeKind::Neg | NodeKind::Num | NodeKind::ExprStmt => unreachable!(),
     }
+}
+
+fn gen_stmt(node: &Node, result: &mut String) {
+    if node.kind == NodeKind::ExprStmt {
+        gen_expr(node.lhs.as_ref().unwrap(), result);
+        return;
+    }
+    panic!("invalid statement");
 }
 
 fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
@@ -399,17 +419,25 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
     }
 
     let tok = tokenize(filename, src)?;
-    let (node, tok) = expr(filename, src, &tok)?;
 
-    if tok.kind != TokenKind::Eof {
-        return Err(error_tok(filename, src, &tok, "extra token"));
+    let mut stmts: Vec<Node> = Vec::new();
+    let mut tok = tok;
+
+    while tok.kind != TokenKind::Eof {
+        let (node, new_tok) = stmt(filename, src, &tok)?;
+        tok = new_tok;
+        stmts.push(node);
     }
 
     let mut result = String::new();
     result.push_str(".text\n");
     result.push_str(".globl main\n");
     result.push_str("main:\n");
-    gen_expr(&node, &mut result);
+
+    for node in &stmts {
+        gen_stmt(node, &mut result);
+    }
+
     result.push_str("  ret\n");
     Ok(result)
 }
