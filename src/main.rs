@@ -303,6 +303,10 @@ fn stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String>
 }
 
 fn expr_stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    if equal(src, tok, ";") {
+        let tok = *tok.next.as_ref().unwrap().clone();
+        return Ok((new_node(NodeKind::Block), tok));
+    }
     let (expr_node, tok) = expr(filename, src, tok)?;
     let tok = skip(filename, src, &tok, ";")?;
     let node = new_unary(NodeKind::ExprStmt, expr_node);
