@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     env, fs,
     io::{self, Read},
     process,
@@ -138,11 +139,14 @@ fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
             continue;
         }
 
-        if chars[pos].is_ascii_lowercase() {
-            let tok = new_token(TokenKind::Ident, pos, pos + 1);
+        if chars[pos].is_ascii_alphabetic() || chars[pos] == '_' {
+            let start = pos;
+            while pos < chars.len() && (chars[pos].is_ascii_alphanumeric() || chars[pos] == '_') {
+                pos += 1;
+            }
+            let tok = new_token(TokenKind::Ident, start, pos);
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
-            pos += 1;
             continue;
         }
 
@@ -196,7 +200,7 @@ struct Node {
     kind: NodeKind,
     lhs: Option<Box<Node>>,
     rhs: Option<Box<Node>>,
-    name: char,
+    varname: String,
     val: i64,
 }
 
@@ -205,7 +209,7 @@ fn new_node(kind: NodeKind) -> Node {
         kind,
         lhs: None,
         rhs: None,
-        name: '\0',
+        varname: String::new(),
         val: 0,
     }
 }
@@ -229,9 +233,9 @@ fn new_num(val: i64) -> Node {
     node
 }
 
-fn new_var_node(name: char) -> Node {
+fn new_var_node(varname: String) -> Node {
     let mut node = new_node(NodeKind::Var);
-    node.name = name;
+    node.varname = varname;
     node
 }
 
@@ -383,8 +387,8 @@ fn primary(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), Stri
     }
 
     if tok.kind == TokenKind::Ident {
-        let name = src.chars().nth(tok.loc).unwrap();
-        let node = new_var_node(name);
+        let varname: String = src.chars().skip(tok.loc).take(tok.len).collect();
+        let node = new_var_node(varname);
         return Ok((node, *tok.next.as_ref().unwrap().clone()));
     }
 
@@ -396,35 +400,35 @@ fn primary(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), Stri
     Err(error_tok(filename, src, tok, "expected an expression"))
 }
 
-fn gen_addr(node: &Node, result: &mut String) {
+fn gen_addr(node: &Node, var_offsets: &HashMap<String, i64>, result: &mut String) {
     if node.kind == NodeKind::Var {
-        let offset = (node.name as i64 - 'a' as i64 + 1) * 8;
+        let offset = var_offsets.get(&node.varname).unwrap();
         result.push_str(&format!("  lea -{}(%rbp), %rax\n", offset));
         return;
     }
     panic!("not an lvalue");
 }
 
-fn gen_expr(node: &Node, result: &mut String) {
+fn gen_expr(node: &Node, var_offsets: &HashMap<String, i64>, result: &mut String) {
     match node.kind {
         NodeKind::Num => {
             result.push_str(&format!("  mov ${}, %rax\n", node.val));
             return;
         }
         NodeKind::Neg => {
-            gen_expr(node.lhs.as_ref().unwrap(), result);
+            gen_expr(node.lhs.as_ref().unwrap(), var_offsets, result);
             result.push_str("  neg %rax\n");
             return;
         }
         NodeKind::Var => {
-            gen_addr(node, result);
+            gen_addr(node, var_offsets, result);
             result.push_str("  mov (%rax), %rax\n");
             return;
         }
         NodeKind::Assign => {
-            gen_addr(node.lhs.as_ref().unwrap(), result);
+            gen_addr(node.lhs.as_ref().unwrap(), var_offsets, result);
             result.push_str("  push %rax\n");
-            gen_expr(node.rhs.as_ref().unwrap(), result);
+            gen_expr(node.rhs.as_ref().unwrap(), var_offsets, result);
             result.push_str("  pop %rdi\n");
             result.push_str("  mov %rax, (%rdi)\n");
             return;
@@ -432,9 +436,9 @@ fn gen_expr(node: &Node, result: &mut String) {
         _ => {}
     }
 
-    gen_expr(node.rhs.as_ref().unwrap(), result);
+    gen_expr(node.rhs.as_ref().unwrap(), var_offsets, result);
     result.push_str("  push %rax\n");
-    gen_expr(node.lhs.as_ref().unwrap(), result);
+    gen_expr(node.lhs.as_ref().unwrap(), var_offsets, result);
     result.push_str("  pop %rdi\n");
 
     match node.kind {
@@ -462,12 +466,42 @@ fn gen_expr(node: &Node, result: &mut String) {
     }
 }
 
-fn gen_stmt(node: &Node, result: &mut String) {
+fn gen_stmt(node: &Node, var_offsets: &HashMap<String, i64>, result: &mut String) {
     if node.kind == NodeKind::ExprStmt {
-        gen_expr(node.lhs.as_ref().unwrap(), result);
+        gen_expr(node.lhs.as_ref().unwrap(), var_offsets, result);
         return;
     }
     panic!("invalid statement");
+}
+
+fn align_to(n: i64, align: i64) -> i64 {
+    (n + align - 1) / align * align
+}
+
+fn collect_var_names(node: &Node, var_names: &mut Vec<String>) {
+    match node.kind {
+        NodeKind::Var => {
+            if !var_names.contains(&node.varname) {
+                var_names.push(node.varname.clone());
+            }
+        }
+        NodeKind::Num => {}
+        NodeKind::Neg | NodeKind::ExprStmt => {
+            collect_var_names(node.lhs.as_ref().unwrap(), var_names);
+        }
+        NodeKind::Assign
+        | NodeKind::Add
+        | NodeKind::Sub
+        | NodeKind::Mul
+        | NodeKind::Div
+        | NodeKind::Eq
+        | NodeKind::Ne
+        | NodeKind::Lt
+        | NodeKind::Le => {
+            collect_var_names(node.lhs.as_ref().unwrap(), var_names);
+            collect_var_names(node.rhs.as_ref().unwrap(), var_names);
+        }
+    }
 }
 
 fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
@@ -488,6 +522,19 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         stmts.push(node);
     }
 
+    let mut var_names: Vec<String> = Vec::new();
+    for node in &stmts {
+        collect_var_names(node, &mut var_names);
+    }
+
+    let mut var_offsets: HashMap<String, i64> = HashMap::new();
+    for (i, name) in var_names.iter().enumerate() {
+        let offset = ((i + 1) * 8) as i64;
+        var_offsets.insert(name.clone(), offset);
+    }
+
+    let stack_size = align_to((var_offsets.len() * 8) as i64, 16);
+
     let mut result = String::new();
     result.push_str(".text\n");
     result.push_str(".globl main\n");
@@ -495,10 +542,10 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
 
     result.push_str("  push %rbp\n");
     result.push_str("  mov %rsp, %rbp\n");
-    result.push_str("  sub $208, %rsp\n");
+    result.push_str(&format!("  sub ${}, %rsp\n", stack_size));
 
     for node in &stmts {
-        gen_stmt(node, &mut result);
+        gen_stmt(node, &var_offsets, &mut result);
     }
 
     result.push_str("  mov %rbp, %rsp\n");
