@@ -63,6 +63,7 @@ fn error_tok(filename: &str, src: &str, tok: &Token, msg: &str) -> String {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TokenKind {
+    Ident,
     Punct,
     Num,
     Eof,
@@ -137,6 +138,14 @@ fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
             continue;
         }
 
+        if chars[pos].is_ascii_lowercase() {
+            let tok = new_token(TokenKind::Ident, pos, pos + 1);
+            cur.next = Some(Box::new(tok));
+            cur = cur.next.as_mut().unwrap();
+            pos += 1;
+            continue;
+        }
+
         if let Some(len) = read_punct(&chars, pos) {
             let tok = new_token(TokenKind::Punct, pos, pos + len);
             cur.next = Some(Box::new(tok));
@@ -176,7 +185,9 @@ enum NodeKind {
     Ne,
     Lt,
     Le,
+    Assign,
     ExprStmt,
+    Var,
     Num,
 }
 
@@ -185,6 +196,7 @@ struct Node {
     kind: NodeKind,
     lhs: Option<Box<Node>>,
     rhs: Option<Box<Node>>,
+    name: char,
     val: i64,
 }
 
@@ -193,6 +205,7 @@ fn new_node(kind: NodeKind) -> Node {
         kind,
         lhs: None,
         rhs: None,
+        name: '\0',
         val: 0,
     }
 }
@@ -216,6 +229,12 @@ fn new_num(val: i64) -> Node {
     node
 }
 
+fn new_var_node(name: char) -> Node {
+    let mut node = new_node(NodeKind::Var);
+    node.name = name;
+    node
+}
+
 fn stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
     expr_stmt(filename, src, tok)
 }
@@ -228,7 +247,17 @@ fn expr_stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), St
 }
 
 fn expr(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
-    equality(filename, src, tok)
+    assign(filename, src, tok)
+}
+
+fn assign(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    let (mut node, tok) = equality(filename, src, tok)?;
+    if equal(src, &tok, "=") {
+        let (rhs, tok) = assign(filename, src, tok.next.as_ref().unwrap())?;
+        node = new_binary(NodeKind::Assign, node, rhs);
+        return Ok((node, tok));
+    }
+    Ok((node, tok))
 }
 
 fn equality(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
@@ -353,12 +382,27 @@ fn primary(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), Stri
         return Ok((node, tok));
     }
 
+    if tok.kind == TokenKind::Ident {
+        let name = src.chars().nth(tok.loc).unwrap();
+        let node = new_var_node(name);
+        return Ok((node, *tok.next.as_ref().unwrap().clone()));
+    }
+
     if tok.kind == TokenKind::Num {
         let node = new_num(tok.val);
         return Ok((node, *tok.next.as_ref().unwrap().clone()));
     }
 
     Err(error_tok(filename, src, tok, "expected an expression"))
+}
+
+fn gen_addr(node: &Node, result: &mut String) {
+    if node.kind == NodeKind::Var {
+        let offset = (node.name as i64 - 'a' as i64 + 1) * 8;
+        result.push_str(&format!("  lea -{}(%rbp), %rax\n", offset));
+        return;
+    }
+    panic!("not an lvalue");
 }
 
 fn gen_expr(node: &Node, result: &mut String) {
@@ -370,6 +414,19 @@ fn gen_expr(node: &Node, result: &mut String) {
         NodeKind::Neg => {
             gen_expr(node.lhs.as_ref().unwrap(), result);
             result.push_str("  neg %rax\n");
+            return;
+        }
+        NodeKind::Var => {
+            gen_addr(node, result);
+            result.push_str("  mov (%rax), %rax\n");
+            return;
+        }
+        NodeKind::Assign => {
+            gen_addr(node.lhs.as_ref().unwrap(), result);
+            result.push_str("  push %rax\n");
+            gen_expr(node.rhs.as_ref().unwrap(), result);
+            result.push_str("  pop %rdi\n");
+            result.push_str("  mov %rax, (%rdi)\n");
             return;
         }
         _ => {}
@@ -399,7 +456,9 @@ fn gen_expr(node: &Node, result: &mut String) {
             }
             result.push_str("  movzb %al, %rax\n");
         }
-        NodeKind::Neg | NodeKind::Num | NodeKind::ExprStmt => unreachable!(),
+        NodeKind::Neg | NodeKind::Num | NodeKind::ExprStmt | NodeKind::Var | NodeKind::Assign => {
+            unreachable!()
+        }
     }
 }
 
@@ -434,10 +493,16 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
     result.push_str(".globl main\n");
     result.push_str("main:\n");
 
+    result.push_str("  push %rbp\n");
+    result.push_str("  mov %rsp, %rbp\n");
+    result.push_str("  sub $208, %rsp\n");
+
     for node in &stmts {
         gen_stmt(node, &mut result);
     }
 
+    result.push_str("  mov %rbp, %rsp\n");
+    result.push_str("  pop %rbp\n");
     result.push_str("  ret\n");
     Ok(result)
 }
