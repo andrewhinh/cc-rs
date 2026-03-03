@@ -105,12 +105,16 @@ fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
     None
 }
 
+fn is_keyword(name: &str) -> bool {
+    matches!(name, "return" | "if" | "else")
+}
+
 fn convert_keywords(src: &str, tok: &mut Token) {
     let mut cur = tok;
     loop {
         if cur.kind == TokenKind::Ident {
             let name: String = src.chars().skip(cur.loc).take(cur.len).collect();
-            if name == "return" {
+            if is_keyword(&name) {
                 cur.kind = TokenKind::Keyword;
             }
         }
@@ -210,6 +214,7 @@ enum NodeKind {
     Le,
     Assign,
     Return,
+    If,
     Block,
     ExprStmt,
     Var,
@@ -222,6 +227,9 @@ struct Node {
     next: Option<Box<Node>>,
     lhs: Option<Box<Node>>,
     rhs: Option<Box<Node>>,
+    cond: Option<Box<Node>>,
+    then: Option<Box<Node>>,
+    els: Option<Box<Node>>,
     body: Option<Box<Node>>,
     varname: String,
     val: i64,
@@ -233,6 +241,9 @@ fn new_node(kind: NodeKind) -> Node {
         next: None,
         lhs: None,
         rhs: None,
+        cond: None,
+        then: None,
+        els: None,
         body: None,
         varname: String::new(),
         val: 0,
@@ -270,6 +281,9 @@ fn compound_stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token)
         next: None,
         lhs: None,
         rhs: None,
+        cond: None,
+        then: None,
+        els: None,
         body: None,
         varname: String::new(),
         val: 0,
@@ -294,6 +308,22 @@ fn stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String>
         let (expr_node, tok) = expr(filename, src, tok.next.as_ref().unwrap())?;
         let tok = skip(filename, src, &tok, ";")?;
         let node = new_unary(NodeKind::Return, expr_node);
+        return Ok((node, tok));
+    }
+    if equal(src, tok, "if") {
+        let mut node = new_node(NodeKind::If);
+        let tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
+        let (cond, tok) = expr(filename, src, &tok)?;
+        node.cond = Some(Box::new(cond));
+        let tok = skip(filename, src, &tok, ")")?;
+        let (then, tok) = stmt(filename, src, &tok)?;
+        node.then = Some(Box::new(then));
+        let mut tok = tok;
+        if equal(src, &tok, "else") {
+            let (els, new_tok) = stmt(filename, src, tok.next.as_ref().unwrap())?;
+            node.els = Some(Box::new(els));
+            tok = new_tok;
+        }
         return Ok((node, tok));
     }
     if equal(src, tok, "{") {
@@ -529,12 +559,35 @@ fn gen_expr(node: &Node, var_offsets: &HashMap<String, i64>, result: &mut String
         | NodeKind::Var
         | NodeKind::Assign
         | NodeKind::Return
-        | NodeKind::Block => unreachable!(),
+        | NodeKind::Block
+        | NodeKind::If => unreachable!(),
+    }
+}
+
+static mut LABEL_COUNT: i32 = 0;
+
+fn count() -> i32 {
+    unsafe {
+        LABEL_COUNT += 1;
+        LABEL_COUNT
     }
 }
 
 fn gen_stmt(node: &Node, var_offsets: &HashMap<String, i64>, result: &mut String) {
     match node.kind {
+        NodeKind::If => {
+            let c = count();
+            gen_expr(node.cond.as_ref().unwrap(), var_offsets, result);
+            result.push_str("  cmp $0, %rax\n");
+            result.push_str(&format!("  je .L.else.{}\n", c));
+            gen_stmt(node.then.as_ref().unwrap(), var_offsets, result);
+            result.push_str(&format!("  jmp .L.end.{}\n", c));
+            result.push_str(&format!(".L.else.{}:\n", c));
+            if let Some(els) = node.els.as_ref() {
+                gen_stmt(els, var_offsets, result);
+            }
+            result.push_str(&format!(".L.end.{}:\n", c));
+        }
         NodeKind::Block => {
             let mut n = node.body.as_ref();
             while let Some(stmt_node) = n {
@@ -565,6 +618,13 @@ fn collect_var_names(node: &Node, var_names: &mut Vec<String>) {
             }
         }
         NodeKind::Num => {}
+        NodeKind::If => {
+            collect_var_names(node.cond.as_ref().unwrap(), var_names);
+            collect_var_names(node.then.as_ref().unwrap(), var_names);
+            if let Some(els) = node.els.as_ref() {
+                collect_var_names(els, var_names);
+            }
+        }
         NodeKind::Block => {
             let mut n = node.body.as_ref();
             while let Some(stmt_node) = n {

@@ -64,7 +64,7 @@ cargo run
 - [x] Add "return" statement
 - [x] Add { ... }
 - [x] Add null statement
-- [ ] Add "if" statement
+- [x] Add "if" statement
 - [ ] Add "for" statement
 - [ ] Add "while" statement
 - [ ] Add a representative node to each Node to improve error messages
