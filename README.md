@@ -186,7 +186,7 @@ cargo run
 ### Pointers, Arrays, Structs, Unions, and Initializers
 
 - [x] Add unary & and \*
-- [ ] Make pointer arithmetic work
+- [x] Make pointer arithmetic work
 - [ ] Add one dimensional arrays
 - [ ] Add arrays of arrays
 - [ ] Add [] operator
