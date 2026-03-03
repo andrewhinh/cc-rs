@@ -213,6 +213,8 @@ enum NodeKind {
     Lt,
     Le,
     Assign,
+    Addr,
+    Deref,
     Return,
     If,
     For,
@@ -535,6 +537,18 @@ fn unary(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String
         return Ok((new_unary(NodeKind::Neg, node, tok_loc), tok));
     }
 
+    if equal(src, tok, "&") {
+        let tok_loc = tok.loc;
+        let (node, tok) = unary(filename, src, tok.next.as_ref().unwrap())?;
+        return Ok((new_unary(NodeKind::Addr, node, tok_loc), tok));
+    }
+
+    if equal(src, tok, "*") {
+        let tok_loc = tok.loc;
+        let (node, tok) = unary(filename, src, tok.next.as_ref().unwrap())?;
+        return Ok((new_unary(NodeKind::Deref, node, tok_loc), tok));
+    }
+
     primary(filename, src, tok)
 }
 
@@ -568,12 +582,23 @@ fn gen_addr(
     filename: &str,
     src: &str,
 ) -> Result<(), String> {
-    if node.kind == NodeKind::Var {
-        let offset = var_offsets.get(&node.varname).unwrap();
-        result.push_str(&format!("  lea -{}(%rbp), %rax\n", offset));
-        return Ok(());
+    match node.kind {
+        NodeKind::Var => {
+            let offset = var_offsets.get(&node.varname).unwrap();
+            result.push_str(&format!("  lea -{}(%rbp), %rax\n", offset));
+        }
+        NodeKind::Deref => {
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                var_offsets,
+                result,
+                filename,
+                src,
+            )?;
+        }
+        _ => return Err(error_at(filename, src, node.tok_loc, "not an lvalue")),
     }
-    Err(error_at(filename, src, node.tok_loc, "not an lvalue"))
+    Ok(())
 }
 
 fn gen_expr(
@@ -601,6 +626,27 @@ fn gen_expr(
         }
         NodeKind::Var => {
             gen_addr(node, var_offsets, result, filename, src)?;
+            result.push_str("  mov (%rax), %rax\n");
+            return Ok(());
+        }
+        NodeKind::Addr => {
+            gen_addr(
+                node.lhs.as_ref().unwrap(),
+                var_offsets,
+                result,
+                filename,
+                src,
+            )?;
+            return Ok(());
+        }
+        NodeKind::Deref => {
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                var_offsets,
+                result,
+                filename,
+                src,
+            )?;
             result.push_str("  mov (%rax), %rax\n");
             return Ok(());
         }
@@ -668,6 +714,8 @@ fn gen_expr(
         | NodeKind::ExprStmt
         | NodeKind::Var
         | NodeKind::Assign
+        | NodeKind::Addr
+        | NodeKind::Deref
         | NodeKind::Return
         | NodeKind::Block
         | NodeKind::If
@@ -840,7 +888,11 @@ fn collect_var_names(node: &Node, var_names: &mut Vec<String>) {
                 n = stmt_node.next.as_ref();
             }
         }
-        NodeKind::Neg | NodeKind::ExprStmt | NodeKind::Return => {
+        NodeKind::Neg
+        | NodeKind::ExprStmt
+        | NodeKind::Return
+        | NodeKind::Addr
+        | NodeKind::Deref => {
             collect_var_names(node.lhs.as_ref().unwrap(), var_names);
         }
         NodeKind::Assign
@@ -875,6 +927,7 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
 
     let mut var_names: Vec<String> = Vec::new();
     collect_var_names(&prog, &mut var_names);
+    var_names.reverse();
 
     let mut var_offsets: HashMap<String, i64> = HashMap::new();
     for (i, name) in var_names.iter().enumerate() {
