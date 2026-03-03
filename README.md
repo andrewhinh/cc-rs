@@ -66,7 +66,7 @@ cargo run
 - [x] Add null statement
 - [x] Add "if" statement
 - [x] Add "for" statement
-- [ ] Add "while" statement
+- [x] Add "while" statement
 - [ ] Add a representative node to each Node to improve error messages
 - [ ] Handle block scope
 - [ ] Use hashmap for block-scope lookup
