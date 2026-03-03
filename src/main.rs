@@ -106,7 +106,7 @@ fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
 }
 
 fn is_keyword(name: &str) -> bool {
-    matches!(name, "return" | "if" | "else" | "for")
+    matches!(name, "return" | "if" | "else" | "for" | "while")
 }
 
 fn convert_keywords(src: &str, tok: &mut Token) {
@@ -216,6 +216,7 @@ enum NodeKind {
     Return,
     If,
     For,
+    While,
     Block,
     ExprStmt,
     Var,
@@ -355,6 +356,16 @@ fn stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String>
         }
         tok = skip(filename, src, &tok, ")")?;
 
+        let (then, tok) = stmt(filename, src, &tok)?;
+        node.then = Some(Box::new(then));
+        return Ok((node, tok));
+    }
+    if equal(src, tok, "while") {
+        let mut node = new_node(NodeKind::While);
+        let tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
+        let (cond, tok) = expr(filename, src, &tok)?;
+        node.cond = Some(Box::new(cond));
+        let tok = skip(filename, src, &tok, ")")?;
         let (then, tok) = stmt(filename, src, &tok)?;
         node.then = Some(Box::new(then));
         return Ok((node, tok));
@@ -594,7 +605,8 @@ fn gen_expr(node: &Node, var_offsets: &HashMap<String, i64>, result: &mut String
         | NodeKind::Return
         | NodeKind::Block
         | NodeKind::If
-        | NodeKind::For => unreachable!(),
+        | NodeKind::For
+        | NodeKind::While => unreachable!(),
     }
 }
 
@@ -635,6 +647,16 @@ fn gen_stmt(node: &Node, var_offsets: &HashMap<String, i64>, result: &mut String
             if let Some(inc) = node.inc.as_ref() {
                 gen_expr(inc, var_offsets, result);
             }
+            result.push_str(&format!("  jmp .L.begin.{}\n", c));
+            result.push_str(&format!(".L.end.{}:\n", c));
+        }
+        NodeKind::While => {
+            let c = count();
+            result.push_str(&format!(".L.begin.{}:\n", c));
+            gen_expr(node.cond.as_ref().unwrap(), var_offsets, result);
+            result.push_str("  cmp $0, %rax\n");
+            result.push_str(&format!("  je .L.end.{}\n", c));
+            gen_stmt(node.then.as_ref().unwrap(), var_offsets, result);
             result.push_str(&format!("  jmp .L.begin.{}\n", c));
             result.push_str(&format!(".L.end.{}:\n", c));
         }
@@ -684,6 +706,10 @@ fn collect_var_names(node: &Node, var_names: &mut Vec<String>) {
             if let Some(inc) = node.inc.as_ref() {
                 collect_var_names(inc, var_names);
             }
+        }
+        NodeKind::While => {
+            collect_var_names(node.cond.as_ref().unwrap(), var_names);
+            collect_var_names(node.then.as_ref().unwrap(), var_names);
         }
         NodeKind::Block => {
             let mut n = node.body.as_ref();
