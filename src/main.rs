@@ -225,10 +225,43 @@ enum NodeKind {
     Num,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TypeKind {
+    Int,
+    Ptr,
+}
+
+#[derive(Debug, Clone)]
+struct Type {
+    kind: TypeKind,
+    base: Option<Box<Type>>,
+}
+
+impl Type {
+    fn new_int() -> Type {
+        Type {
+            kind: TypeKind::Int,
+            base: None,
+        }
+    }
+
+    fn new_ptr(base: Type) -> Type {
+        Type {
+            kind: TypeKind::Ptr,
+            base: Some(Box::new(base)),
+        }
+    }
+}
+
+fn is_integer(ty: &Type) -> bool {
+    ty.kind == TypeKind::Int
+}
+
 #[derive(Debug)]
 struct Node {
     kind: NodeKind,
     tok_loc: usize,
+    ty: Option<Type>,
     next: Option<Box<Node>>,
     lhs: Option<Box<Node>>,
     rhs: Option<Box<Node>>,
@@ -246,6 +279,7 @@ fn new_node(kind: NodeKind, tok_loc: usize) -> Node {
     Node {
         kind,
         tok_loc,
+        ty: None,
         next: None,
         lhs: None,
         rhs: None,
@@ -290,6 +324,7 @@ fn compound_stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token)
     let mut head = Node {
         kind: NodeKind::Num,
         tok_loc,
+        ty: None,
         next: None,
         lhs: None,
         rhs: None,
@@ -485,7 +520,7 @@ fn add(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> 
         if equal(src, &tok, "+") {
             let tok_loc = tok.loc;
             let (rhs, new_tok) = mul(filename, src, tok.next.as_ref().unwrap())?;
-            node = new_binary(NodeKind::Add, node, rhs, tok_loc);
+            node = new_add(node, rhs, tok_loc, filename, src)?;
             tok = new_tok;
             continue;
         }
@@ -493,7 +528,7 @@ fn add(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> 
         if equal(src, &tok, "-") {
             let tok_loc = tok.loc;
             let (rhs, new_tok) = mul(filename, src, tok.next.as_ref().unwrap())?;
-            node = new_binary(NodeKind::Sub, node, rhs, tok_loc);
+            node = new_sub(node, rhs, tok_loc, filename, src)?;
             tok = new_tok;
             continue;
         }
@@ -910,6 +945,156 @@ fn collect_var_names(node: &Node, var_names: &mut Vec<String>) {
     }
 }
 
+fn add_type(node: &mut Node) {
+    if node.ty.is_some() {
+        return;
+    }
+
+    if let Some(lhs) = &mut node.lhs {
+        add_type(lhs);
+    }
+    if let Some(rhs) = &mut node.rhs {
+        add_type(rhs);
+    }
+    if let Some(cond) = &mut node.cond {
+        add_type(cond);
+    }
+    if let Some(then) = &mut node.then {
+        add_type(then);
+    }
+    if let Some(els) = &mut node.els {
+        add_type(els);
+    }
+    if let Some(init) = &mut node.init {
+        add_type(init);
+    }
+    if let Some(inc) = &mut node.inc {
+        add_type(inc);
+    }
+
+    if let Some(body) = &mut node.body {
+        let mut n = body;
+        loop {
+            add_type(n);
+            if let Some(next) = &mut n.next {
+                n = next;
+            } else {
+                break;
+            }
+        }
+    }
+
+    match node.kind {
+        NodeKind::Add | NodeKind::Sub | NodeKind::Mul | NodeKind::Div | NodeKind::Neg => {
+            node.ty = node.lhs.as_ref().unwrap().ty.clone();
+        }
+        NodeKind::Assign => {
+            node.ty = node.lhs.as_ref().unwrap().ty.clone();
+        }
+        NodeKind::Eq
+        | NodeKind::Ne
+        | NodeKind::Lt
+        | NodeKind::Le
+        | NodeKind::Num
+        | NodeKind::Var => {
+            node.ty = Some(Type::new_int());
+        }
+        NodeKind::Addr => {
+            if let Some(lhs_ty) = &node.lhs.as_ref().unwrap().ty {
+                node.ty = Some(Type::new_ptr(lhs_ty.clone()));
+            } else {
+                node.ty = Some(Type::new_int());
+            }
+        }
+        NodeKind::Deref => {
+            if let Some(lhs_ty) = &node.lhs.as_ref().unwrap().ty {
+                if lhs_ty.kind == TypeKind::Ptr {
+                    node.ty = Some(lhs_ty.base.as_ref().unwrap().as_ref().clone());
+                } else {
+                    node.ty = Some(Type::new_int());
+                }
+            } else {
+                node.ty = Some(Type::new_int());
+            }
+        }
+        NodeKind::Return
+        | NodeKind::If
+        | NodeKind::For
+        | NodeKind::While
+        | NodeKind::Block
+        | NodeKind::ExprStmt => {}
+    }
+}
+
+fn new_add(
+    lhs: Node,
+    rhs: Node,
+    tok_loc: usize,
+    filename: &str,
+    src: &str,
+) -> Result<Node, String> {
+    let mut lhs = lhs;
+    let mut rhs = rhs;
+    add_type(&mut lhs);
+    add_type(&mut rhs);
+
+    let lhs_ty = lhs.ty.as_ref().unwrap();
+    let rhs_ty = rhs.ty.as_ref().unwrap();
+
+    if is_integer(lhs_ty) && is_integer(rhs_ty) {
+        return Ok(new_binary(NodeKind::Add, lhs, rhs, tok_loc));
+    }
+
+    if lhs_ty.kind == TypeKind::Ptr && rhs_ty.kind == TypeKind::Ptr {
+        return Err(error_at(filename, src, tok_loc, "invalid operands"));
+    }
+
+    if lhs_ty.kind != TypeKind::Ptr && rhs_ty.kind == TypeKind::Ptr {
+        std::mem::swap(&mut lhs, &mut rhs);
+    }
+
+    let rhs = new_binary(NodeKind::Mul, rhs, new_num(8, tok_loc), tok_loc);
+    Ok(new_binary(NodeKind::Add, lhs, rhs, tok_loc))
+}
+
+fn new_sub(
+    lhs: Node,
+    rhs: Node,
+    tok_loc: usize,
+    filename: &str,
+    src: &str,
+) -> Result<Node, String> {
+    let mut lhs = lhs;
+    let mut rhs = rhs;
+    add_type(&mut lhs);
+    add_type(&mut rhs);
+
+    let lhs_ty = lhs.ty.as_ref().unwrap();
+    let rhs_ty = rhs.ty.as_ref().unwrap();
+
+    if is_integer(lhs_ty) && is_integer(rhs_ty) {
+        return Ok(new_binary(NodeKind::Sub, lhs, rhs, tok_loc));
+    }
+
+    if lhs_ty.kind == TypeKind::Ptr && is_integer(rhs_ty) {
+        let lhs_ty = lhs.ty.clone();
+        let rhs = new_binary(NodeKind::Mul, rhs, new_num(8, tok_loc), tok_loc);
+        let mut node = new_binary(NodeKind::Sub, lhs, rhs, tok_loc);
+        node.ty = lhs_ty;
+        return Ok(node);
+    }
+
+    if lhs_ty.kind == TypeKind::Ptr && rhs_ty.kind == TypeKind::Ptr {
+        let mut node = new_binary(NodeKind::Sub, lhs, rhs, tok_loc);
+        node.ty = Some(Type::new_int());
+        let mut result = new_binary(NodeKind::Div, node, new_num(8, tok_loc), tok_loc);
+        result.ty = Some(Type::new_int());
+        return Ok(result);
+    }
+
+    Err(error_at(filename, src, tok_loc, "invalid operands"))
+}
+
 fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
     if !cfg!(target_arch = "x86_64") {
         return Err(String::from(
@@ -919,11 +1104,13 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
 
     let tok = tokenize(filename, src)?;
     let tok = skip(filename, src, &tok, "{")?;
-    let (prog, tok) = compound_stmt(filename, src, &tok)?;
+    let (mut prog, tok) = compound_stmt(filename, src, &tok)?;
 
     if tok.kind != TokenKind::Eof {
         return Err(error_tok(filename, src, &tok, "extra token"));
     }
+
+    add_type(&mut prog);
 
     let mut var_names: Vec<String> = Vec::new();
     collect_var_names(&prog, &mut var_names);
