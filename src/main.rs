@@ -226,6 +226,7 @@ enum NodeKind {
 #[derive(Debug)]
 struct Node {
     kind: NodeKind,
+    tok_loc: usize,
     next: Option<Box<Node>>,
     lhs: Option<Box<Node>>,
     rhs: Option<Box<Node>>,
@@ -239,9 +240,10 @@ struct Node {
     val: i64,
 }
 
-fn new_node(kind: NodeKind) -> Node {
+fn new_node(kind: NodeKind, tok_loc: usize) -> Node {
     Node {
         kind,
+        tok_loc,
         next: None,
         lhs: None,
         rhs: None,
@@ -256,34 +258,36 @@ fn new_node(kind: NodeKind) -> Node {
     }
 }
 
-fn new_binary(kind: NodeKind, lhs: Node, rhs: Node) -> Node {
-    let mut node = new_node(kind);
+fn new_binary(kind: NodeKind, lhs: Node, rhs: Node, tok_loc: usize) -> Node {
+    let mut node = new_node(kind, tok_loc);
     node.lhs = Some(Box::new(lhs));
     node.rhs = Some(Box::new(rhs));
     node
 }
 
-fn new_unary(kind: NodeKind, expr: Node) -> Node {
-    let mut node = new_node(kind);
+fn new_unary(kind: NodeKind, expr: Node, tok_loc: usize) -> Node {
+    let mut node = new_node(kind, tok_loc);
     node.lhs = Some(Box::new(expr));
     node
 }
 
-fn new_num(val: i64) -> Node {
-    let mut node = new_node(NodeKind::Num);
+fn new_num(val: i64, tok_loc: usize) -> Node {
+    let mut node = new_node(NodeKind::Num, tok_loc);
     node.val = val;
     node
 }
 
-fn new_var_node(varname: String) -> Node {
-    let mut node = new_node(NodeKind::Var);
+fn new_var_node(varname: String, tok_loc: usize) -> Node {
+    let mut node = new_node(NodeKind::Var, tok_loc);
     node.varname = varname;
     node
 }
 
 fn compound_stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
+    let tok_loc = tok.loc;
     let mut head = Node {
         kind: NodeKind::Num,
+        tok_loc,
         next: None,
         lhs: None,
         rhs: None,
@@ -306,20 +310,22 @@ fn compound_stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token)
         cur = cur.next.as_mut().unwrap();
     }
 
-    let mut node = new_node(NodeKind::Block);
+    let mut node = new_node(NodeKind::Block, tok_loc);
     node.body = head.next;
     Ok((node, *tok.next.as_ref().unwrap().clone()))
 }
 
 fn stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
     if equal(src, tok, "return") {
+        let tok_loc = tok.loc;
         let (expr_node, tok) = expr(filename, src, tok.next.as_ref().unwrap())?;
         let tok = skip(filename, src, &tok, ";")?;
-        let node = new_unary(NodeKind::Return, expr_node);
+        let node = new_unary(NodeKind::Return, expr_node, tok_loc);
         return Ok((node, tok));
     }
     if equal(src, tok, "if") {
-        let mut node = new_node(NodeKind::If);
+        let tok_loc = tok.loc;
+        let mut node = new_node(NodeKind::If, tok_loc);
         let tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
         let (cond, tok) = expr(filename, src, &tok)?;
         node.cond = Some(Box::new(cond));
@@ -335,7 +341,8 @@ fn stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String>
         return Ok((node, tok));
     }
     if equal(src, tok, "for") {
-        let mut node = new_node(NodeKind::For);
+        let tok_loc = tok.loc;
+        let mut node = new_node(NodeKind::For, tok_loc);
         let mut tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
 
         let (init, new_tok) = expr_stmt(filename, src, &tok)?;
@@ -361,7 +368,8 @@ fn stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String>
         return Ok((node, tok));
     }
     if equal(src, tok, "while") {
-        let mut node = new_node(NodeKind::While);
+        let tok_loc = tok.loc;
+        let mut node = new_node(NodeKind::While, tok_loc);
         let tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
         let (cond, tok) = expr(filename, src, &tok)?;
         node.cond = Some(Box::new(cond));
@@ -378,12 +386,14 @@ fn stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String>
 
 fn expr_stmt(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
     if equal(src, tok, ";") {
+        let tok_loc = tok.loc;
         let tok = *tok.next.as_ref().unwrap().clone();
-        return Ok((new_node(NodeKind::Block), tok));
+        return Ok((new_node(NodeKind::Block, tok_loc), tok));
     }
+    let tok_loc = tok.loc;
     let (expr_node, tok) = expr(filename, src, tok)?;
     let tok = skip(filename, src, &tok, ";")?;
-    let node = new_unary(NodeKind::ExprStmt, expr_node);
+    let node = new_unary(NodeKind::ExprStmt, expr_node, tok_loc);
     Ok((node, tok))
 }
 
@@ -394,8 +404,9 @@ fn expr(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String>
 fn assign(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> {
     let (mut node, tok) = equality(filename, src, tok)?;
     if equal(src, &tok, "=") {
+        let tok_loc = tok.loc;
         let (rhs, tok) = assign(filename, src, tok.next.as_ref().unwrap())?;
-        node = new_binary(NodeKind::Assign, node, rhs);
+        node = new_binary(NodeKind::Assign, node, rhs, tok_loc);
         return Ok((node, tok));
     }
     Ok((node, tok))
@@ -406,15 +417,17 @@ fn equality(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), Str
 
     loop {
         if equal(src, &tok, "==") {
+            let tok_loc = tok.loc;
             let (rhs, new_tok) = relational(filename, src, tok.next.as_ref().unwrap())?;
-            node = new_binary(NodeKind::Eq, node, rhs);
+            node = new_binary(NodeKind::Eq, node, rhs, tok_loc);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, "!=") {
+            let tok_loc = tok.loc;
             let (rhs, new_tok) = relational(filename, src, tok.next.as_ref().unwrap())?;
-            node = new_binary(NodeKind::Ne, node, rhs);
+            node = new_binary(NodeKind::Ne, node, rhs, tok_loc);
             tok = new_tok;
             continue;
         }
@@ -428,29 +441,33 @@ fn relational(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), S
 
     loop {
         if equal(src, &tok, "<") {
+            let tok_loc = tok.loc;
             let (rhs, new_tok) = add(filename, src, tok.next.as_ref().unwrap())?;
-            node = new_binary(NodeKind::Lt, node, rhs);
+            node = new_binary(NodeKind::Lt, node, rhs, tok_loc);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, "<=") {
+            let tok_loc = tok.loc;
             let (rhs, new_tok) = add(filename, src, tok.next.as_ref().unwrap())?;
-            node = new_binary(NodeKind::Le, node, rhs);
+            node = new_binary(NodeKind::Le, node, rhs, tok_loc);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, ">") {
+            let tok_loc = tok.loc;
             let (lhs, new_tok) = add(filename, src, tok.next.as_ref().unwrap())?;
-            node = new_binary(NodeKind::Lt, lhs, node);
+            node = new_binary(NodeKind::Lt, lhs, node, tok_loc);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, ">=") {
+            let tok_loc = tok.loc;
             let (lhs, new_tok) = add(filename, src, tok.next.as_ref().unwrap())?;
-            node = new_binary(NodeKind::Le, lhs, node);
+            node = new_binary(NodeKind::Le, lhs, node, tok_loc);
             tok = new_tok;
             continue;
         }
@@ -464,15 +481,17 @@ fn add(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> 
 
     loop {
         if equal(src, &tok, "+") {
+            let tok_loc = tok.loc;
             let (rhs, new_tok) = mul(filename, src, tok.next.as_ref().unwrap())?;
-            node = new_binary(NodeKind::Add, node, rhs);
+            node = new_binary(NodeKind::Add, node, rhs, tok_loc);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, "-") {
+            let tok_loc = tok.loc;
             let (rhs, new_tok) = mul(filename, src, tok.next.as_ref().unwrap())?;
-            node = new_binary(NodeKind::Sub, node, rhs);
+            node = new_binary(NodeKind::Sub, node, rhs, tok_loc);
             tok = new_tok;
             continue;
         }
@@ -486,15 +505,17 @@ fn mul(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String> 
 
     loop {
         if equal(src, &tok, "*") {
+            let tok_loc = tok.loc;
             let (rhs, new_tok) = unary(filename, src, tok.next.as_ref().unwrap())?;
-            node = new_binary(NodeKind::Mul, node, rhs);
+            node = new_binary(NodeKind::Mul, node, rhs, tok_loc);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, "/") {
+            let tok_loc = tok.loc;
             let (rhs, new_tok) = unary(filename, src, tok.next.as_ref().unwrap())?;
-            node = new_binary(NodeKind::Div, node, rhs);
+            node = new_binary(NodeKind::Div, node, rhs, tok_loc);
             tok = new_tok;
             continue;
         }
@@ -509,8 +530,9 @@ fn unary(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), String
     }
 
     if equal(src, tok, "-") {
+        let tok_loc = tok.loc;
         let (node, tok) = unary(filename, src, tok.next.as_ref().unwrap())?;
-        return Ok((new_unary(NodeKind::Neg, node), tok));
+        return Ok((new_unary(NodeKind::Neg, node, tok_loc), tok));
     }
 
     primary(filename, src, tok)
@@ -524,58 +546,102 @@ fn primary(filename: &str, src: &str, tok: &Token) -> Result<(Node, Token), Stri
     }
 
     if tok.kind == TokenKind::Ident {
+        let tok_loc = tok.loc;
         let varname: String = src.chars().skip(tok.loc).take(tok.len).collect();
-        let node = new_var_node(varname);
+        let node = new_var_node(varname, tok_loc);
         return Ok((node, *tok.next.as_ref().unwrap().clone()));
     }
 
     if tok.kind == TokenKind::Num {
-        let node = new_num(tok.val);
+        let tok_loc = tok.loc;
+        let node = new_num(tok.val, tok_loc);
         return Ok((node, *tok.next.as_ref().unwrap().clone()));
     }
 
     Err(error_tok(filename, src, tok, "expected an expression"))
 }
 
-fn gen_addr(node: &Node, var_offsets: &HashMap<String, i64>, result: &mut String) {
+fn gen_addr(
+    node: &Node,
+    var_offsets: &HashMap<String, i64>,
+    result: &mut String,
+    filename: &str,
+    src: &str,
+) -> Result<(), String> {
     if node.kind == NodeKind::Var {
         let offset = var_offsets.get(&node.varname).unwrap();
         result.push_str(&format!("  lea -{}(%rbp), %rax\n", offset));
-        return;
+        return Ok(());
     }
-    panic!("not an lvalue");
+    Err(error_at(filename, src, node.tok_loc, "not an lvalue"))
 }
 
-fn gen_expr(node: &Node, var_offsets: &HashMap<String, i64>, result: &mut String) {
+fn gen_expr(
+    node: &Node,
+    var_offsets: &HashMap<String, i64>,
+    result: &mut String,
+    filename: &str,
+    src: &str,
+) -> Result<(), String> {
     match node.kind {
         NodeKind::Num => {
             result.push_str(&format!("  mov ${}, %rax\n", node.val));
-            return;
+            return Ok(());
         }
         NodeKind::Neg => {
-            gen_expr(node.lhs.as_ref().unwrap(), var_offsets, result);
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                var_offsets,
+                result,
+                filename,
+                src,
+            )?;
             result.push_str("  neg %rax\n");
-            return;
+            return Ok(());
         }
         NodeKind::Var => {
-            gen_addr(node, var_offsets, result);
+            gen_addr(node, var_offsets, result, filename, src)?;
             result.push_str("  mov (%rax), %rax\n");
-            return;
+            return Ok(());
         }
         NodeKind::Assign => {
-            gen_addr(node.lhs.as_ref().unwrap(), var_offsets, result);
+            gen_addr(
+                node.lhs.as_ref().unwrap(),
+                var_offsets,
+                result,
+                filename,
+                src,
+            )?;
             result.push_str("  push %rax\n");
-            gen_expr(node.rhs.as_ref().unwrap(), var_offsets, result);
+            gen_expr(
+                node.rhs.as_ref().unwrap(),
+                var_offsets,
+                result,
+                filename,
+                src,
+            )?;
             result.push_str("  pop %rdi\n");
             result.push_str("  mov %rax, (%rdi)\n");
-            return;
+            return Ok(());
         }
         _ => {}
     }
 
-    gen_expr(node.rhs.as_ref().unwrap(), var_offsets, result);
+    gen_expr(
+        node.rhs.as_ref().unwrap(),
+        var_offsets,
+        result,
+        filename,
+        src,
+    )?;
     result.push_str("  push %rax\n");
-    gen_expr(node.lhs.as_ref().unwrap(), var_offsets, result);
+    gen_expr(
+        node.lhs.as_ref().unwrap(),
+        var_offsets,
+        result,
+        filename,
+        src,
+    )?;
     result.push_str("  pop %rdi\n");
 
     match node.kind {
@@ -608,6 +674,7 @@ fn gen_expr(node: &Node, var_offsets: &HashMap<String, i64>, result: &mut String
         | NodeKind::For
         | NodeKind::While => unreachable!(),
     }
+    Ok(())
 }
 
 static mut LABEL_COUNT: i32 = 0;
@@ -619,33 +686,63 @@ fn count() -> i32 {
     }
 }
 
-fn gen_stmt(node: &Node, var_offsets: &HashMap<String, i64>, result: &mut String) {
+fn gen_stmt(
+    node: &Node,
+    var_offsets: &HashMap<String, i64>,
+    result: &mut String,
+    filename: &str,
+    src: &str,
+) -> Result<(), String> {
     match node.kind {
         NodeKind::If => {
             let c = count();
-            gen_expr(node.cond.as_ref().unwrap(), var_offsets, result);
+            gen_expr(
+                node.cond.as_ref().unwrap(),
+                var_offsets,
+                result,
+                filename,
+                src,
+            )?;
             result.push_str("  cmp $0, %rax\n");
             result.push_str(&format!("  je .L.else.{}\n", c));
-            gen_stmt(node.then.as_ref().unwrap(), var_offsets, result);
+            gen_stmt(
+                node.then.as_ref().unwrap(),
+                var_offsets,
+                result,
+                filename,
+                src,
+            )?;
             result.push_str(&format!("  jmp .L.end.{}\n", c));
             result.push_str(&format!(".L.else.{}:\n", c));
             if let Some(els) = node.els.as_ref() {
-                gen_stmt(els, var_offsets, result);
+                gen_stmt(els, var_offsets, result, filename, src)?;
             }
             result.push_str(&format!(".L.end.{}:\n", c));
         }
         NodeKind::For => {
             let c = count();
-            gen_stmt(node.init.as_ref().unwrap(), var_offsets, result);
+            gen_stmt(
+                node.init.as_ref().unwrap(),
+                var_offsets,
+                result,
+                filename,
+                src,
+            )?;
             result.push_str(&format!(".L.begin.{}:\n", c));
             if let Some(cond) = node.cond.as_ref() {
-                gen_expr(cond, var_offsets, result);
+                gen_expr(cond, var_offsets, result, filename, src)?;
                 result.push_str("  cmp $0, %rax\n");
                 result.push_str(&format!("  je .L.end.{}\n", c));
             }
-            gen_stmt(node.then.as_ref().unwrap(), var_offsets, result);
+            gen_stmt(
+                node.then.as_ref().unwrap(),
+                var_offsets,
+                result,
+                filename,
+                src,
+            )?;
             if let Some(inc) = node.inc.as_ref() {
-                gen_expr(inc, var_offsets, result);
+                gen_expr(inc, var_offsets, result, filename, src)?;
             }
             result.push_str(&format!("  jmp .L.begin.{}\n", c));
             result.push_str(&format!(".L.end.{}:\n", c));
@@ -653,29 +750,54 @@ fn gen_stmt(node: &Node, var_offsets: &HashMap<String, i64>, result: &mut String
         NodeKind::While => {
             let c = count();
             result.push_str(&format!(".L.begin.{}:\n", c));
-            gen_expr(node.cond.as_ref().unwrap(), var_offsets, result);
+            gen_expr(
+                node.cond.as_ref().unwrap(),
+                var_offsets,
+                result,
+                filename,
+                src,
+            )?;
             result.push_str("  cmp $0, %rax\n");
             result.push_str(&format!("  je .L.end.{}\n", c));
-            gen_stmt(node.then.as_ref().unwrap(), var_offsets, result);
+            gen_stmt(
+                node.then.as_ref().unwrap(),
+                var_offsets,
+                result,
+                filename,
+                src,
+            )?;
             result.push_str(&format!("  jmp .L.begin.{}\n", c));
             result.push_str(&format!(".L.end.{}:\n", c));
         }
         NodeKind::Block => {
             let mut n = node.body.as_ref();
             while let Some(stmt_node) = n {
-                gen_stmt(stmt_node, var_offsets, result);
+                gen_stmt(stmt_node, var_offsets, result, filename, src)?;
                 n = stmt_node.next.as_ref();
             }
         }
         NodeKind::Return => {
-            gen_expr(node.lhs.as_ref().unwrap(), var_offsets, result);
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                var_offsets,
+                result,
+                filename,
+                src,
+            )?;
             result.push_str("  jmp .L.return\n");
         }
         NodeKind::ExprStmt => {
-            gen_expr(node.lhs.as_ref().unwrap(), var_offsets, result);
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                var_offsets,
+                result,
+                filename,
+                src,
+            )?;
         }
-        _ => panic!("invalid statement"),
+        _ => return Err(error_at(filename, src, node.tok_loc, "invalid statement")),
     }
+    Ok(())
 }
 
 fn align_to(n: i64, align: i64) -> i64 {
@@ -771,7 +893,7 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
     result.push_str("  mov %rsp, %rbp\n");
     result.push_str(&format!("  sub ${}, %rsp\n", stack_size));
 
-    gen_stmt(&prog, &var_offsets, &mut result);
+    gen_stmt(&prog, &var_offsets, &mut result, filename, src)?;
 
     result.push_str(".L.return:\n");
     result.push_str("  mov %rbp, %rsp\n");
