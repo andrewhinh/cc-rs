@@ -294,6 +294,7 @@ struct Node {
     inc: Option<Box<Node>>,
     body: Option<Box<Node>>,
     funcname: Option<String>,
+    args: Option<Box<Node>>,
     var: Option<Obj>,
     val: i64,
 }
@@ -313,6 +314,7 @@ fn new_node(kind: NodeKind, tok_loc: usize) -> Node {
         inc: None,
         body: None,
         funcname: None,
+        args: None,
         var: None,
         val: 0,
     }
@@ -420,6 +422,7 @@ fn declaration(
         inc: None,
         body: None,
         funcname: None,
+        args: None,
         var: None,
         val: 0,
     };
@@ -478,6 +481,7 @@ fn compound_stmt(
         inc: None,
         body: None,
         funcname: None,
+        args: None,
         var: None,
         val: 0,
     };
@@ -783,6 +787,54 @@ fn unary(
     primary(filename, src, tok, locals)
 }
 
+fn funcall(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    locals: &mut Vec<Obj>,
+) -> Result<(Node, Token), String> {
+    let tok_loc = tok.loc;
+    let funcname: String = src.chars().skip(tok.loc).take(tok.len).collect();
+    let mut tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
+
+    let mut head = Node {
+        kind: NodeKind::Num,
+        tok_loc,
+        ty: None,
+        next: None,
+        lhs: None,
+        rhs: None,
+        cond: None,
+        then: None,
+        els: None,
+        init: None,
+        inc: None,
+        body: None,
+        funcname: None,
+        args: None,
+        var: None,
+        val: 0,
+    };
+    let mut cur = &mut head;
+
+    while !equal(src, &tok, ")") {
+        if cur.tok_loc != tok_loc || cur.kind != NodeKind::Num {
+            tok = skip(filename, src, &tok, ",")?;
+        }
+        let (arg, new_tok) = assign(filename, src, &tok, locals)?;
+        tok = new_tok;
+        cur.next = Some(Box::new(arg));
+        cur = cur.next.as_mut().unwrap();
+    }
+
+    let tok = skip(filename, src, &tok, ")")?;
+
+    let mut node = new_node(NodeKind::FuncCall, tok_loc);
+    node.funcname = Some(funcname);
+    node.args = head.next;
+    Ok((node, tok))
+}
+
 fn primary(
     filename: &str,
     src: &str,
@@ -796,20 +848,12 @@ fn primary(
     }
 
     if tok.kind == TokenKind::Ident {
+        if equal(src, tok.next.as_ref().unwrap(), "(") {
+            return funcall(filename, src, tok, locals);
+        }
+
         let tok_loc = tok.loc;
         let funcname: String = src.chars().skip(tok.loc).take(tok.len).collect();
-
-        if equal(src, tok.next.as_ref().unwrap(), "(") {
-            let mut node = new_node(NodeKind::FuncCall, tok_loc);
-            node.funcname = Some(funcname);
-            let tok = skip(
-                filename,
-                src,
-                tok.next.as_ref().unwrap().next.as_ref().unwrap(),
-                ")",
-            )?;
-            return Ok((node, tok));
-        }
 
         let var = find_var(locals, &funcname)
             .ok_or_else(|| error_tok(filename, src, tok, "undefined variable"))?;
@@ -874,6 +918,20 @@ fn gen_expr(node: &Node, result: &mut String, filename: &str, src: &str) -> Resu
             return Ok(());
         }
         NodeKind::FuncCall => {
+            let argreg = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
+            let mut nargs = 0;
+            let mut arg = node.args.as_ref();
+            while let Some(arg_node) = arg {
+                gen_expr(arg_node, result, filename, src)?;
+                result.push_str("  push %rax\n");
+                nargs += 1;
+                arg = arg_node.next.as_ref();
+            }
+
+            for i in (0..nargs).rev() {
+                result.push_str(&format!("  pop {}\n", argreg[i]));
+            }
+
             result.push_str("  mov $0, %rax\n");
             result.push_str(&format!("  call {}\n", node.funcname.as_ref().unwrap()));
             return Ok(());
