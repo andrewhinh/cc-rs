@@ -296,6 +296,7 @@ enum NodeKind {
 enum TypeKind {
     Int,
     Ptr,
+    Func,
 }
 
 #[derive(Debug, Clone)]
@@ -303,6 +304,8 @@ struct Type {
     kind: TypeKind,
     base: Option<Box<Type>>,
     name: Option<Box<Token>>,
+    #[allow(unused)]
+    return_ty: Option<Box<Type>>,
 }
 
 impl Type {
@@ -311,6 +314,7 @@ impl Type {
             kind: TypeKind::Int,
             base: None,
             name: None,
+            return_ty: None,
         }
     }
 
@@ -319,12 +323,22 @@ impl Type {
             kind: TypeKind::Ptr,
             base: Some(Box::new(base)),
             name: None,
+            return_ty: None,
         }
     }
 }
 
 fn pointer_to(base: Type) -> Type {
     Type::new_ptr(base)
+}
+
+fn func_type(return_ty: Type) -> Type {
+    Type {
+        kind: TypeKind::Func,
+        base: None,
+        name: None,
+        return_ty: Some(Box::new(return_ty)),
+    }
 }
 
 fn is_integer(ty: &Type) -> bool {
@@ -336,6 +350,16 @@ struct Obj {
     name: String,
     ty: Type,
     offset: i64,
+}
+
+#[derive(Debug)]
+struct Function {
+    next: Option<Box<Function>>,
+    name: String,
+    body: Node,
+    locals: Vec<Obj>,
+    #[allow(unused)]
+    stack_size: i64,
 }
 
 #[derive(Debug)]
@@ -434,6 +458,15 @@ fn declspec(filename: &str, src: &str, tok: &Token) -> Result<(Type, Token), Str
     Ok((Type::new_int(), tok))
 }
 
+fn type_suffix(filename: &str, src: &str, tok: &Token, ty: Type) -> Result<(Type, Token), String> {
+    if equal(src, tok, "(") {
+        let rest = tok.next.as_ref().unwrap();
+        let rest = skip(filename, src, rest, ")")?;
+        return Ok((func_type(ty), rest));
+    }
+    Ok((ty, tok.clone()))
+}
+
 fn declarator(
     filename: &str,
     src: &str,
@@ -454,9 +487,11 @@ fn declarator(
         return Err(error_tok(filename, src, &tok, "expected a variable name"));
     }
 
+    let name_tok = tok.clone();
+    let (ty, tok) = type_suffix(filename, src, tok.next.as_ref().unwrap(), ty)?;
     let mut ty = ty;
-    ty.name = Some(Box::new(tok.clone()));
-    Ok((ty, *tok.next.as_ref().unwrap().clone()))
+    ty.name = Some(Box::new(name_tok));
+    Ok((ty, tok))
 }
 
 fn declaration(
@@ -517,6 +552,27 @@ fn declaration(
     let mut node = new_node(NodeKind::Block, tok_loc);
     node.body = head.next;
     Ok((node, *tok.next.as_ref().unwrap().clone()))
+}
+
+fn function(filename: &str, src: &str, tok: &Token) -> Result<(Function, Token), String> {
+    let (ty, tok) = declspec(filename, src, tok)?;
+    let (ty, tok) = declarator(filename, src, &tok, ty)?;
+    let name = get_ident(src, ty.name.as_ref().unwrap())?;
+
+    let tok = skip(filename, src, &tok, "{")?;
+    let mut locals: Vec<Obj> = Vec::new();
+    let (mut body, tok) = compound_stmt(filename, src, &tok, &mut locals)?;
+
+    add_type(&mut body);
+
+    let func = Function {
+        next: None,
+        name,
+        body,
+        locals,
+        stack_size: 0,
+    };
+    Ok((func, tok))
 }
 
 fn compound_stmt(
@@ -1048,31 +1104,55 @@ fn count() -> i32 {
     }
 }
 
-fn gen_stmt(node: &Node, result: &mut String, filename: &str, src: &str) -> Result<(), String> {
+fn gen_stmt(
+    node: &Node,
+    result: &mut String,
+    filename: &str,
+    src: &str,
+    current_fn: &str,
+) -> Result<(), String> {
     match node.kind {
         NodeKind::If => {
             let c = count();
             gen_expr(node.cond.as_ref().unwrap(), result, filename, src)?;
             result.push_str("  cmp $0, %rax\n");
             result.push_str(&format!("  je .L.else.{}\n", c));
-            gen_stmt(node.then.as_ref().unwrap(), result, filename, src)?;
+            gen_stmt(
+                node.then.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
             result.push_str(&format!("  jmp .L.end.{}\n", c));
             result.push_str(&format!(".L.else.{}:\n", c));
             if let Some(els) = node.els.as_ref() {
-                gen_stmt(els, result, filename, src)?;
+                gen_stmt(els, result, filename, src, current_fn)?;
             }
             result.push_str(&format!(".L.end.{}:\n", c));
         }
         NodeKind::For => {
             let c = count();
-            gen_stmt(node.init.as_ref().unwrap(), result, filename, src)?;
+            gen_stmt(
+                node.init.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
             result.push_str(&format!(".L.begin.{}:\n", c));
             if let Some(cond) = node.cond.as_ref() {
                 gen_expr(cond, result, filename, src)?;
                 result.push_str("  cmp $0, %rax\n");
                 result.push_str(&format!("  je .L.end.{}\n", c));
             }
-            gen_stmt(node.then.as_ref().unwrap(), result, filename, src)?;
+            gen_stmt(
+                node.then.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
             if let Some(inc) = node.inc.as_ref() {
                 gen_expr(inc, result, filename, src)?;
             }
@@ -1085,20 +1165,26 @@ fn gen_stmt(node: &Node, result: &mut String, filename: &str, src: &str) -> Resu
             gen_expr(node.cond.as_ref().unwrap(), result, filename, src)?;
             result.push_str("  cmp $0, %rax\n");
             result.push_str(&format!("  je .L.end.{}\n", c));
-            gen_stmt(node.then.as_ref().unwrap(), result, filename, src)?;
+            gen_stmt(
+                node.then.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
             result.push_str(&format!("  jmp .L.begin.{}\n", c));
             result.push_str(&format!(".L.end.{}:\n", c));
         }
         NodeKind::Block => {
             let mut n = node.body.as_ref();
             while let Some(stmt_node) = n {
-                gen_stmt(stmt_node, result, filename, src)?;
+                gen_stmt(stmt_node, result, filename, src, current_fn)?;
                 n = stmt_node.next.as_ref();
             }
         }
         NodeKind::Return => {
             gen_expr(node.lhs.as_ref().unwrap(), result, filename, src)?;
-            result.push_str("  jmp .L.return\n");
+            result.push_str(&format!("  jmp .L.return.{}\n", current_fn));
         }
         NodeKind::ExprStmt => {
             gen_expr(node.lhs.as_ref().unwrap(), result, filename, src)?;
@@ -1273,33 +1359,54 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
     }
 
     let tok = tokenize(filename, src)?;
-    let tok = skip(filename, src, &tok, "{")?;
-    let mut locals: Vec<Obj> = Vec::new();
-    let (mut prog, tok) = compound_stmt(filename, src, &tok, &mut locals)?;
 
-    if tok.kind != TokenKind::Eof {
-        return Err(error_tok(filename, src, &tok, "extra token"));
+    let mut head = Function {
+        next: None,
+        name: String::new(),
+        body: new_node(NodeKind::Block, 0),
+        locals: Vec::new(),
+        stack_size: 0,
+    };
+    let mut cur = &mut head;
+
+    let mut tok = tok;
+    while tok.kind != TokenKind::Eof {
+        let (func, new_tok) = function(filename, src, &tok)?;
+        tok = new_tok;
+        cur.next = Some(Box::new(func));
+        cur = cur.next.as_mut().unwrap();
     }
 
-    add_type(&mut prog);
-
-    let stack_size = align_to((locals.len() * 8) as i64, 16);
+    let prog = head.next.unwrap();
 
     let mut result = String::new();
     result.push_str(".text\n");
-    result.push_str(".globl main\n");
-    result.push_str("main:\n");
 
-    result.push_str("  push %rbp\n");
-    result.push_str("  mov %rsp, %rbp\n");
-    result.push_str(&format!("  sub ${}, %rsp\n", stack_size));
+    let mut func = &prog;
+    loop {
+        let stack_size = align_to((func.locals.len() * 8) as i64, 16);
 
-    gen_stmt(&prog, &mut result, filename, src)?;
+        result.push_str(&format!("  .globl {}\n", func.name));
+        result.push_str(&format!("{}:\n", func.name));
 
-    result.push_str(".L.return:\n");
-    result.push_str("  mov %rbp, %rsp\n");
-    result.push_str("  pop %rbp\n");
-    result.push_str("  ret\n");
+        result.push_str("  push %rbp\n");
+        result.push_str("  mov %rsp, %rbp\n");
+        result.push_str(&format!("  sub ${}, %rsp\n", stack_size));
+
+        gen_stmt(&func.body, &mut result, filename, src, &func.name)?;
+
+        result.push_str(&format!(".L.return.{}:\n", func.name));
+        result.push_str("  mov %rbp, %rsp\n");
+        result.push_str("  pop %rbp\n");
+        result.push_str("  ret\n");
+
+        if let Some(next) = &func.next {
+            func = next;
+        } else {
+            break;
+        }
+    }
+
     Ok(result)
 }
 
