@@ -333,7 +333,7 @@ cargo run
 
 ### Driver, Toolchain Integration, and Build Flags
 
-- [ ] Add -o and --help options
+- [x] Add -o and --help options
 - [ ] Rewrite tests in shell script in C
 - [ ] Emit .file and .loc assembler directives
 - [ ] Add stage2 build
