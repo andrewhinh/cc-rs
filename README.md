@@ -84,7 +84,7 @@ cargo run
 
 ### Functions, Calls, and Calling Convention
 
-- [ ] Support zero-arity function calls
+- [x] Support zero-arity function calls
 - [ ] Support function call with up to 6 arguments
 - [ ] Support zero-arity function definition
 - [ ] Support function definition up to 6 parameters
