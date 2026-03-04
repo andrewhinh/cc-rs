@@ -227,6 +227,7 @@ enum NodeKind {
     For,
     While,
     Block,
+    FuncCall,
     ExprStmt,
     Var,
     Num,
@@ -292,6 +293,7 @@ struct Node {
     init: Option<Box<Node>>,
     inc: Option<Box<Node>>,
     body: Option<Box<Node>>,
+    funcname: Option<String>,
     var: Option<Obj>,
     val: i64,
 }
@@ -310,6 +312,7 @@ fn new_node(kind: NodeKind, tok_loc: usize) -> Node {
         init: None,
         inc: None,
         body: None,
+        funcname: None,
         var: None,
         val: 0,
     }
@@ -416,6 +419,7 @@ fn declaration(
         init: None,
         inc: None,
         body: None,
+        funcname: None,
         var: None,
         val: 0,
     };
@@ -473,6 +477,7 @@ fn compound_stmt(
         init: None,
         inc: None,
         body: None,
+        funcname: None,
         var: None,
         val: 0,
     };
@@ -792,8 +797,21 @@ fn primary(
 
     if tok.kind == TokenKind::Ident {
         let tok_loc = tok.loc;
-        let varname: String = src.chars().skip(tok.loc).take(tok.len).collect();
-        let var = find_var(locals, &varname)
+        let funcname: String = src.chars().skip(tok.loc).take(tok.len).collect();
+
+        if equal(src, tok.next.as_ref().unwrap(), "(") {
+            let mut node = new_node(NodeKind::FuncCall, tok_loc);
+            node.funcname = Some(funcname);
+            let tok = skip(
+                filename,
+                src,
+                tok.next.as_ref().unwrap().next.as_ref().unwrap(),
+                ")",
+            )?;
+            return Ok((node, tok));
+        }
+
+        let var = find_var(locals, &funcname)
             .ok_or_else(|| error_tok(filename, src, tok, "undefined variable"))?;
         let node = new_var_node(var, tok_loc);
         return Ok((node, *tok.next.as_ref().unwrap().clone()));
@@ -855,6 +873,11 @@ fn gen_expr(node: &Node, result: &mut String, filename: &str, src: &str) -> Resu
             result.push_str("  mov %rax, (%rdi)\n");
             return Ok(());
         }
+        NodeKind::FuncCall => {
+            result.push_str("  mov $0, %rax\n");
+            result.push_str(&format!("  call {}\n", node.funcname.as_ref().unwrap()));
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -884,6 +907,7 @@ fn gen_expr(node: &Node, result: &mut String, filename: &str, src: &str) -> Resu
         }
         NodeKind::Neg
         | NodeKind::Num
+        | NodeKind::FuncCall
         | NodeKind::ExprStmt
         | NodeKind::Var
         | NodeKind::Assign
@@ -1017,7 +1041,12 @@ fn add_type(node: &mut Node) {
         NodeKind::Assign => {
             node.ty = node.lhs.as_ref().unwrap().ty.clone();
         }
-        NodeKind::Eq | NodeKind::Ne | NodeKind::Lt | NodeKind::Le | NodeKind::Num => {
+        NodeKind::Eq
+        | NodeKind::Ne
+        | NodeKind::Lt
+        | NodeKind::Le
+        | NodeKind::Num
+        | NodeKind::FuncCall => {
             node.ty = Some(Type::new_int());
         }
         NodeKind::Var => {
