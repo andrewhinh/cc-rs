@@ -121,7 +121,7 @@ cargo run
 
 ### Type System, Declarations, and Semantics
 
-- [ ] Add keyword "int" and make variable definition mandatory
+- [x] Add keyword "int" and make variable definition mandatory
 - [ ] Add char type
 - [ ] Add comma operator
 - [ ] Change size of int from 8 to 4
