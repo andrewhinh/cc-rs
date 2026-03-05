@@ -2,9 +2,7 @@ pub mod codegen;
 pub mod parse;
 pub mod tokenize;
 
-pub use parse::{
-    add_type, declspec, find_var, function, global_variable, is_function, is_typename,
-};
+pub use parse::{add_type, declspec, function, global_variable, is_function, is_typename};
 pub use tokenize::{consume, equal, skip, tokenize};
 
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -201,4 +199,10 @@ static UNIQUE_ID: AtomicI32 = AtomicI32::new(0);
 pub fn new_unique_name() -> String {
     let id = UNIQUE_ID.fetch_add(1, Ordering::SeqCst);
     format!(".L..{}", id)
+}
+
+#[derive(Debug, Clone)]
+pub struct VarScope {
+    pub name: String,
+    pub var: Obj,
 }
