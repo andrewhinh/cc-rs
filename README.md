@@ -253,7 +253,7 @@ cargo run
 - [ ] Concatenate adjacent string literals
 - [ ] Recognize wide character literal
 - [ ] Tokenize numeric tokens as pp-numbers
-- [ ] Precompute line number for each token
+- [x] Precompute line number for each token
 - [ ] Use hashmap for keyword lookup
 - [ ] Canonicalize newline character
 - [ ] Add \u and \U escape sequences
