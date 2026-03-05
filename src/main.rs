@@ -164,7 +164,10 @@ fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
 }
 
 fn is_keyword(name: &str) -> bool {
-    matches!(name, "return" | "if" | "else" | "for" | "while" | "int")
+    matches!(
+        name,
+        "return" | "if" | "else" | "for" | "while" | "int" | "sizeof"
+    )
 }
 
 fn convert_keywords(src: &str, tok: &mut Token) {
@@ -1095,6 +1098,14 @@ fn primary(
         let (node, tok) = expr(filename, src, tok.next.as_ref().unwrap(), locals)?;
         let tok = skip(filename, src, &tok, ")")?;
         return Ok((node, tok));
+    }
+
+    if equal(src, tok, "sizeof") {
+        let tok_loc = tok.loc;
+        let (mut node, tok) = unary(filename, src, tok.next.as_ref().unwrap(), locals)?;
+        add_type(&mut node);
+        let size = node.ty.as_ref().unwrap().size;
+        return Ok((new_num(size, tok_loc), tok));
     }
 
     if tok.kind == TokenKind::Ident {
