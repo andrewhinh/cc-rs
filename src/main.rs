@@ -385,23 +385,20 @@ fn copy_type(ty: &Type) -> Type {
 
 #[derive(Debug, Clone)]
 struct Obj {
+    next: Option<Box<Obj>>,
     name: String,
     ty: Type,
+    is_local: bool,
     offset: i64,
-}
-
-#[derive(Debug)]
-struct Function {
-    next: Option<Box<Function>>,
-    name: String,
+    is_function: bool,
     params: Vec<Obj>,
-    body: Node,
+    body: Option<Box<Node>>,
     locals: Vec<Obj>,
-    #[allow(unused)]
+    #[allow(dead_code)]
     stack_size: i64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Node {
     kind: NodeKind,
     tok_loc: usize,
@@ -417,7 +414,7 @@ struct Node {
     body: Option<Box<Node>>,
     funcname: Option<String>,
     args: Option<Box<Node>>,
-    var: Option<Obj>,
+    var: Option<Box<Obj>>,
     val: i64,
 }
 
@@ -463,7 +460,7 @@ fn new_num(val: i64, tok_loc: usize) -> Node {
 
 fn new_var_node(var: Obj, tok_loc: usize) -> Node {
     let mut node = new_node(NodeKind::Var, tok_loc);
-    node.var = Some(var.clone());
+    node.var = Some(Box::new(var.clone()));
     node.ty = Some(var.ty);
     node
 }
@@ -477,14 +474,37 @@ fn find_var(locals: &[Obj], name: &str) -> Option<Obj> {
     None
 }
 
-fn new_lvar(name: String, ty: Type, locals: &mut Vec<Obj>) -> Obj {
-    let mut offset = 0;
-    for var in locals.iter() {
-        offset += var.ty.size;
+fn new_var(name: String, ty: Type) -> Obj {
+    Obj {
+        next: None,
+        name,
+        ty,
+        is_local: false,
+        offset: 0,
+        is_function: false,
+        params: Vec::new(),
+        body: None,
+        locals: Vec::new(),
+        stack_size: 0,
     }
-    offset += ty.size;
-    let var = Obj { name, ty, offset };
+}
+
+fn new_lvar(name: String, ty: Type, locals: &mut Vec<Obj>) -> Obj {
+    let mut var = new_var(name, ty);
+    var.is_local = true;
+    let mut offset = 0;
+    for v in locals.iter() {
+        offset += v.ty.size;
+    }
+    offset += var.ty.size;
+    var.offset = offset;
     locals.push(var.clone());
+    var
+}
+
+fn new_gvar(name: String, ty: Type) -> Obj {
+    let mut var = new_var(name, ty);
+    var.is_local = false;
     var
 }
 
@@ -522,11 +542,13 @@ fn func_params(filename: &str, src: &str, tok: &Token, ty: Type) -> Result<(Type
         array_len: 0,
     };
     let mut cur = &mut head;
+    let mut first = true;
 
     while !equal(src, &tok, ")") {
-        if cur.next.is_some() {
+        if !first {
             tok = skip(filename, src, &tok, ",")?;
         }
+        first = false;
 
         let (basety, new_tok) = declspec(filename, src, &tok)?;
         tok = new_tok;
@@ -662,10 +684,12 @@ fn create_param_lvars(src: &str, param: &Type, locals: &mut Vec<Obj>) {
     }
 }
 
-fn function(filename: &str, src: &str, tok: &Token) -> Result<(Function, Token), String> {
-    let (ty, tok) = declspec(filename, src, tok)?;
-    let (ty, tok) = declarator(filename, src, &tok, ty)?;
+fn function(filename: &str, src: &str, tok: &Token, basety: Type) -> Result<(Obj, Token), String> {
+    let (ty, tok) = declarator(filename, src, tok, basety)?;
     let name = get_ident(src, ty.name.as_ref().unwrap())?;
+
+    let mut fn_obj = new_gvar(name, ty.clone());
+    fn_obj.is_function = true;
 
     let mut locals: Vec<Obj> = Vec::new();
 
@@ -673,22 +697,17 @@ fn function(filename: &str, src: &str, tok: &Token) -> Result<(Function, Token),
         create_param_lvars(src, params, &mut locals);
     }
 
-    let params = locals.clone();
+    fn_obj.params = locals.clone();
 
     let tok = skip(filename, src, &tok, "{")?;
     let (mut body, tok) = compound_stmt(filename, src, &tok, &mut locals)?;
 
     add_type(&mut body);
 
-    let func = Function {
-        next: None,
-        name,
-        params,
-        body,
-        locals,
-        stack_size: 0,
-    };
-    Ok((func, tok))
+    fn_obj.body = Some(Box::new(body));
+    fn_obj.locals = locals;
+
+    Ok((fn_obj, tok))
 }
 
 fn compound_stmt(
@@ -1555,11 +1574,15 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
 
     let tok = tokenize(filename, src)?;
 
-    let mut head = Function {
+    let mut head = Obj {
         next: None,
         name: String::new(),
+        ty: Type::new_int(),
+        is_local: false,
+        offset: 0,
+        is_function: false,
         params: Vec::new(),
-        body: new_node(NodeKind::Block, 0),
+        body: None,
         locals: Vec::new(),
         stack_size: 0,
     };
@@ -1567,7 +1590,9 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
 
     let mut tok = tok;
     while tok.kind != TokenKind::Eof {
-        let (func, new_tok) = function(filename, src, &tok)?;
+        let (basety, new_tok) = declspec(filename, src, &tok)?;
+        tok = new_tok;
+        let (func, new_tok) = function(filename, src, &tok, basety)?;
         tok = new_tok;
         cur.next = Some(Box::new(func));
         cur = cur.next.as_mut().unwrap();
@@ -1576,16 +1601,25 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
     let prog = head.next.unwrap();
 
     let mut result = String::new();
-    result.push_str(".text\n");
 
     let mut func = &prog;
     loop {
+        if !func.is_function {
+            if let Some(next) = &func.next {
+                func = next;
+                continue;
+            } else {
+                break;
+            }
+        }
+
         let mut stack_size = 0;
         for var in func.locals.iter() {
             stack_size += var.ty.size;
         }
         let stack_size = align_to(stack_size, 16);
 
+        result.push_str("  .text\n");
         result.push_str(&format!("  .globl {}\n", func.name));
         result.push_str(&format!("{}:\n", func.name));
 
@@ -1598,7 +1632,13 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
             result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg[i], var.offset));
         }
 
-        gen_stmt(&func.body, &mut result, filename, src, &func.name)?;
+        gen_stmt(
+            func.body.as_ref().unwrap(),
+            &mut result,
+            filename,
+            src,
+            &func.name,
+        )?;
 
         result.push_str(&format!(".L.return.{}:\n", func.name));
         result.push_str("  mov %rbp, %rsp\n");
