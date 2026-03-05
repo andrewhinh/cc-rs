@@ -154,6 +154,20 @@ fn new_token(kind: TokenKind, start: usize, end: usize) -> Token {
     }
 }
 
+fn read_escaped_char(c: char) -> char {
+    match c {
+        'a' => '\x07',
+        'b' => '\x08',
+        't' => '\x09',
+        'n' => '\x0A',
+        'v' => '\x0B',
+        'f' => '\x0C',
+        'r' => '\x0D',
+        'e' => '\x1B',
+        _ => c,
+    }
+}
+
 fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
     let remaining: String = chars[pos..].iter().collect();
     if remaining.starts_with("==")
@@ -217,10 +231,18 @@ fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
             pos += 1;
             let mut str_content = String::new();
             while pos < chars.len() && chars[pos] != '"' {
-                if chars[pos] == '\n' {
+                if chars[pos] == '\n' || chars[pos] == '\0' {
                     return Err(error_at(filename, src, start, "unclosed string literal"));
                 }
-                str_content.push(chars[pos]);
+                if chars[pos] == '\\' {
+                    pos += 1;
+                    if pos >= chars.len() {
+                        return Err(error_at(filename, src, start, "unclosed string literal"));
+                    }
+                    str_content.push(read_escaped_char(chars[pos]));
+                } else {
+                    str_content.push(chars[pos]);
+                }
                 pos += 1;
             }
             if pos >= chars.len() {
