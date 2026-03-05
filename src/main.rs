@@ -166,7 +166,7 @@ fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
 fn is_keyword(name: &str) -> bool {
     matches!(
         name,
-        "return" | "if" | "else" | "for" | "while" | "int" | "sizeof"
+        "return" | "if" | "else" | "for" | "while" | "int" | "sizeof" | "char"
     )
 }
 
@@ -297,6 +297,7 @@ enum NodeKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TypeKind {
+    Char,
     Int,
     Ptr,
     Func,
@@ -318,6 +319,19 @@ struct Type {
 }
 
 impl Type {
+    fn new_char() -> Type {
+        Type {
+            kind: TypeKind::Char,
+            size: 1,
+            base: None,
+            name: None,
+            return_ty: None,
+            params: None,
+            next: None,
+            array_len: 0,
+        }
+    }
+
     fn new_int() -> Type {
         Type {
             kind: TypeKind::Int,
@@ -376,7 +390,7 @@ fn func_type(return_ty: Type) -> Type {
 }
 
 fn is_integer(ty: &Type) -> bool {
-    ty.kind == TypeKind::Int
+    ty.kind == TypeKind::Char || ty.kind == TypeKind::Int
 }
 
 fn copy_type(ty: &Type) -> Type {
@@ -520,8 +534,15 @@ fn get_ident(src: &str, tok: &Token) -> Result<String, String> {
 }
 
 fn declspec(filename: &str, src: &str, tok: &Token) -> Result<(Type, Token), String> {
+    if equal(src, tok, "char") {
+        return Ok((Type::new_char(), *tok.next.as_ref().unwrap().clone()));
+    }
     let tok = skip(filename, src, tok, "int")?;
     Ok((Type::new_int(), tok))
+}
+
+fn is_typename(src: &str, tok: &Token) -> bool {
+    equal(src, tok, "char") || equal(src, tok, "int")
 }
 
 fn get_number(tok: &Token) -> Result<i64, String> {
@@ -786,7 +807,7 @@ fn compound_stmt(
 
     let mut tok = tok.clone();
     while !equal(src, &tok, "}") {
-        if equal(src, &tok, "int") {
+        if is_typename(src, &tok) {
             let (node, new_tok) = declaration(filename, src, &tok, locals, globals)?;
             tok = new_tok;
             cur.next = Some(Box::new(node));
@@ -1233,12 +1254,20 @@ fn load(ty: &Type, result: &mut String) {
     if ty.kind == TypeKind::Array {
         return;
     }
-    result.push_str("  mov (%rax), %rax\n");
+    if ty.size == 1 {
+        result.push_str("  movsbq (%rax), %rax\n");
+    } else {
+        result.push_str("  mov (%rax), %rax\n");
+    }
 }
 
-fn store(result: &mut String) {
+fn store(ty: &Type, result: &mut String) {
     result.push_str("  pop %rdi\n");
-    result.push_str("  mov %rax, (%rdi)\n");
+    if ty.size == 1 {
+        result.push_str("  mov %al, (%rdi)\n");
+    } else {
+        result.push_str("  mov %rax, (%rdi)\n");
+    }
 }
 
 fn gen_expr(node: &Node, result: &mut String, filename: &str, src: &str) -> Result<(), String> {
@@ -1270,7 +1299,7 @@ fn gen_expr(node: &Node, result: &mut String, filename: &str, src: &str) -> Resu
             gen_addr(node.lhs.as_ref().unwrap(), result, filename, src)?;
             result.push_str("  push %rax\n");
             gen_expr(node.rhs.as_ref().unwrap(), result, filename, src)?;
-            store(result);
+            store(node.ty.as_ref().unwrap(), result);
             return Ok(());
         }
         NodeKind::FuncCall => {
@@ -1692,9 +1721,14 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         result.push_str("  mov %rsp, %rbp\n");
         result.push_str(&format!("  sub ${}, %rsp\n", stack_size));
 
-        let argreg = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
+        let argreg8 = ["%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"];
+        let argreg64 = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
         for (i, var) in func.params.iter().enumerate() {
-            result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg[i], var.offset));
+            if var.ty.size == 1 {
+                result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg8[i], var.offset));
+            } else {
+                result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg64[i], var.offset));
+            }
         }
 
         gen_stmt(
