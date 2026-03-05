@@ -68,7 +68,7 @@ cargo run
 - [x] Add "for" statement
 - [x] Add "while" statement
 - [x] Add a representative node to each Node to improve error messages
-- [ ] Handle block scope
+- [x] Handle block scope
 - [ ] Use hashmap for block-scope lookup
 - [ ] Allow for-loops to define local variables
 - [ ] Add goto and labeled statement
