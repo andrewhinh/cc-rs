@@ -297,39 +297,60 @@ enum TypeKind {
     Int,
     Ptr,
     Func,
+    Array,
 }
 
 #[derive(Debug, Clone)]
 struct Type {
     kind: TypeKind,
+    size: i64,
     base: Option<Box<Type>>,
     name: Option<Box<Token>>,
     #[allow(unused)]
     return_ty: Option<Box<Type>>,
     params: Option<Box<Type>>,
     next: Option<Box<Type>>,
+    #[allow(dead_code)]
+    array_len: i64,
 }
 
 impl Type {
     fn new_int() -> Type {
         Type {
             kind: TypeKind::Int,
+            size: 8,
             base: None,
             name: None,
             return_ty: None,
             params: None,
             next: None,
+            array_len: 0,
         }
     }
 
     fn new_ptr(base: Type) -> Type {
         Type {
             kind: TypeKind::Ptr,
+            size: 8,
             base: Some(Box::new(base)),
             name: None,
             return_ty: None,
             params: None,
             next: None,
+            array_len: 0,
+        }
+    }
+
+    fn new_array(base: Type, len: i64) -> Type {
+        Type {
+            kind: TypeKind::Array,
+            size: base.size * len,
+            base: Some(Box::new(base)),
+            name: None,
+            return_ty: None,
+            params: None,
+            next: None,
+            array_len: len,
         }
     }
 }
@@ -341,11 +362,13 @@ fn pointer_to(base: Type) -> Type {
 fn func_type(return_ty: Type) -> Type {
     Type {
         kind: TypeKind::Func,
+        size: 0,
         base: None,
         name: None,
         return_ty: Some(Box::new(return_ty)),
         params: None,
         next: None,
+        array_len: 0,
     }
 }
 
@@ -452,7 +475,11 @@ fn find_var(locals: &[Obj], name: &str) -> Option<Obj> {
 }
 
 fn new_lvar(name: String, ty: Type, locals: &mut Vec<Obj>) -> Obj {
-    let offset = ((locals.len() + 1) * 8) as i64;
+    let mut offset = 0;
+    for var in locals.iter() {
+        offset += var.ty.size;
+    }
+    offset += ty.size;
     let var = Obj { name, ty, offset };
     locals.push(var.clone());
     var
@@ -471,41 +498,64 @@ fn declspec(filename: &str, src: &str, tok: &Token) -> Result<(Type, Token), Str
     Ok((Type::new_int(), tok))
 }
 
-fn type_suffix(filename: &str, src: &str, tok: &Token, ty: Type) -> Result<(Type, Token), String> {
-    if equal(src, tok, "(") {
-        let mut tok = tok.next.as_ref().unwrap().as_ref().clone();
+fn get_number(tok: &Token) -> Result<i64, String> {
+    if tok.kind != TokenKind::Num {
+        return Err("expected a number".to_string());
+    }
+    Ok(tok.val)
+}
 
-        let mut head = Type {
-            kind: TypeKind::Int,
-            base: None,
-            name: None,
-            return_ty: None,
-            params: None,
-            next: None,
-        };
-        let mut cur = &mut head;
-        let mut first = true;
+fn func_params(filename: &str, src: &str, tok: &Token, ty: Type) -> Result<(Type, Token), String> {
+    let mut tok = tok.clone();
 
-        while !equal(src, &tok, ")") {
-            if !first {
-                tok = skip(filename, src, &tok, ",")?;
-            }
-            first = false;
+    let mut head = Type {
+        kind: TypeKind::Int,
+        size: 0,
+        base: None,
+        name: None,
+        return_ty: None,
+        params: None,
+        next: None,
+        array_len: 0,
+    };
+    let mut cur = &mut head;
 
-            let (basety, new_tok) = declspec(filename, src, &tok)?;
-            tok = new_tok;
-            let (param_ty, new_tok) = declarator(filename, src, &tok, basety)?;
-            tok = new_tok;
-            let param_copy = copy_type(&param_ty);
-            cur.next = Some(Box::new(param_copy));
-            cur = cur.next.as_mut().unwrap();
+    while !equal(src, &tok, ")") {
+        if cur.next.is_some() {
+            tok = skip(filename, src, &tok, ",")?;
         }
 
-        let mut func_ty = func_type(ty);
-        func_ty.params = head.next;
-        let rest = tok.next.as_ref().unwrap().as_ref().clone();
-        return Ok((func_ty, rest));
+        let (basety, new_tok) = declspec(filename, src, &tok)?;
+        tok = new_tok;
+        let (param_ty, new_tok) = declarator(filename, src, &tok, basety)?;
+        tok = new_tok;
+        let param_copy = copy_type(&param_ty);
+        cur.next = Some(Box::new(param_copy));
+        cur = cur.next.as_mut().unwrap();
     }
+
+    let mut func_ty = func_type(ty);
+    func_ty.params = head.next;
+    let rest = tok.next.as_ref().unwrap().as_ref().clone();
+    Ok((func_ty, rest))
+}
+
+fn type_suffix(filename: &str, src: &str, tok: &Token, ty: Type) -> Result<(Type, Token), String> {
+    if equal(src, tok, "(") {
+        return func_params(filename, src, tok.next.as_ref().unwrap(), ty);
+    }
+
+    if equal(src, tok, "[") {
+        let sz = get_number(tok.next.as_ref().unwrap())?;
+        let rest = skip(
+            filename,
+            src,
+            tok.next.as_ref().unwrap().next.as_ref().unwrap(),
+            "]",
+        )?;
+        return Ok((Type::new_array(ty, sz), rest));
+    }
+
     Ok((ty, tok.clone()))
 }
 
@@ -1061,6 +1111,18 @@ fn gen_addr(node: &Node, result: &mut String, filename: &str, src: &str) -> Resu
     Ok(())
 }
 
+fn load(ty: &Type, result: &mut String) {
+    if ty.kind == TypeKind::Array {
+        return;
+    }
+    result.push_str("  mov (%rax), %rax\n");
+}
+
+fn store(result: &mut String) {
+    result.push_str("  pop %rdi\n");
+    result.push_str("  mov %rax, (%rdi)\n");
+}
+
 fn gen_expr(node: &Node, result: &mut String, filename: &str, src: &str) -> Result<(), String> {
     match node.kind {
         NodeKind::Num => {
@@ -1074,7 +1136,7 @@ fn gen_expr(node: &Node, result: &mut String, filename: &str, src: &str) -> Resu
         }
         NodeKind::Var => {
             gen_addr(node, result, filename, src)?;
-            result.push_str("  mov (%rax), %rax\n");
+            load(node.ty.as_ref().unwrap(), result);
             return Ok(());
         }
         NodeKind::Addr => {
@@ -1083,15 +1145,14 @@ fn gen_expr(node: &Node, result: &mut String, filename: &str, src: &str) -> Resu
         }
         NodeKind::Deref => {
             gen_expr(node.lhs.as_ref().unwrap(), result, filename, src)?;
-            result.push_str("  mov (%rax), %rax\n");
+            load(node.ty.as_ref().unwrap(), result);
             return Ok(());
         }
         NodeKind::Assign => {
             gen_addr(node.lhs.as_ref().unwrap(), result, filename, src)?;
             result.push_str("  push %rax\n");
             gen_expr(node.rhs.as_ref().unwrap(), result, filename, src)?;
-            result.push_str("  pop %rdi\n");
-            result.push_str("  mov %rax, (%rdi)\n");
+            store(result);
             return Ok(());
         }
         NodeKind::FuncCall => {
@@ -1316,7 +1377,12 @@ fn add_type(node: &mut Node) {
             node.ty = node.lhs.as_ref().unwrap().ty.clone();
         }
         NodeKind::Assign => {
-            node.ty = node.lhs.as_ref().unwrap().ty.clone();
+            let lhs_ty = node.lhs.as_ref().unwrap().ty.as_ref().unwrap();
+            if lhs_ty.kind == TypeKind::Array {
+                node.ty = Some(Type::new_int());
+            } else {
+                node.ty = Some(lhs_ty.clone());
+            }
         }
         NodeKind::Eq
         | NodeKind::Ne
@@ -1330,19 +1396,19 @@ fn add_type(node: &mut Node) {
             node.ty = Some(node.var.as_ref().unwrap().ty.clone());
         }
         NodeKind::Addr => {
-            if let Some(lhs_ty) = &node.lhs.as_ref().unwrap().ty {
-                node.ty = Some(Type::new_ptr(lhs_ty.clone()));
+            let lhs_ty = node.lhs.as_ref().unwrap().ty.as_ref().unwrap();
+            if lhs_ty.kind == TypeKind::Array {
+                node.ty = Some(Type::new_ptr(
+                    lhs_ty.base.as_ref().unwrap().as_ref().clone(),
+                ));
             } else {
-                node.ty = Some(Type::new_int());
+                node.ty = Some(Type::new_ptr(lhs_ty.clone()));
             }
         }
         NodeKind::Deref => {
-            if let Some(lhs_ty) = &node.lhs.as_ref().unwrap().ty {
-                if lhs_ty.kind == TypeKind::Ptr {
-                    node.ty = Some(lhs_ty.base.as_ref().unwrap().as_ref().clone());
-                } else {
-                    node.ty = Some(Type::new_int());
-                }
+            let lhs_ty = node.lhs.as_ref().unwrap().ty.as_ref().unwrap();
+            if lhs_ty.kind == TypeKind::Ptr || lhs_ty.kind == TypeKind::Array {
+                node.ty = Some(lhs_ty.base.as_ref().unwrap().as_ref().clone());
             } else {
                 node.ty = Some(Type::new_int());
             }
@@ -1379,11 +1445,20 @@ fn new_add(
         return Err(error_at(filename, src, tok_loc, "invalid operands"));
     }
 
-    if lhs_ty.kind != TypeKind::Ptr && rhs_ty.kind == TypeKind::Ptr {
+    if lhs_ty.kind == TypeKind::Array && rhs_ty.kind == TypeKind::Array {
+        return Err(error_at(filename, src, tok_loc, "invalid operands"));
+    }
+
+    if !is_integer(lhs_ty) && !is_integer(rhs_ty) {
+        return Err(error_at(filename, src, tok_loc, "invalid operands"));
+    }
+
+    if is_integer(lhs_ty) && (rhs_ty.kind == TypeKind::Ptr || rhs_ty.kind == TypeKind::Array) {
         std::mem::swap(&mut lhs, &mut rhs);
     }
 
-    let rhs = new_binary(NodeKind::Mul, rhs, new_num(8, tok_loc), tok_loc);
+    let base_size = lhs.ty.as_ref().unwrap().base.as_ref().unwrap().size;
+    let rhs = new_binary(NodeKind::Mul, rhs, new_num(base_size, tok_loc), tok_loc);
     Ok(new_binary(NodeKind::Add, lhs, rhs, tok_loc))
 }
 
@@ -1406,18 +1481,30 @@ fn new_sub(
         return Ok(new_binary(NodeKind::Sub, lhs, rhs, tok_loc));
     }
 
-    if lhs_ty.kind == TypeKind::Ptr && is_integer(rhs_ty) {
-        let lhs_ty = lhs.ty.clone();
-        let rhs = new_binary(NodeKind::Mul, rhs, new_num(8, tok_loc), tok_loc);
+    if (lhs_ty.kind == TypeKind::Ptr || lhs_ty.kind == TypeKind::Array) && is_integer(rhs_ty) {
+        let lhs_ty_clone = lhs.ty.clone();
+        let base_size = lhs.ty.as_ref().unwrap().base.as_ref().unwrap().size;
+        let rhs = new_binary(NodeKind::Mul, rhs, new_num(base_size, tok_loc), tok_loc);
         let mut node = new_binary(NodeKind::Sub, lhs, rhs, tok_loc);
-        node.ty = lhs_ty;
+        node.ty = Some(Type::new_ptr(
+            lhs_ty_clone
+                .unwrap()
+                .base
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .clone(),
+        ));
         return Ok(node);
     }
 
-    if lhs_ty.kind == TypeKind::Ptr && rhs_ty.kind == TypeKind::Ptr {
+    if (lhs_ty.kind == TypeKind::Ptr || lhs_ty.kind == TypeKind::Array)
+        && (rhs_ty.kind == TypeKind::Ptr || rhs_ty.kind == TypeKind::Array)
+    {
+        let base_size = lhs.ty.as_ref().unwrap().base.as_ref().unwrap().size;
         let mut node = new_binary(NodeKind::Sub, lhs, rhs, tok_loc);
         node.ty = Some(Type::new_int());
-        let mut result = new_binary(NodeKind::Div, node, new_num(8, tok_loc), tok_loc);
+        let mut result = new_binary(NodeKind::Div, node, new_num(base_size, tok_loc), tok_loc);
         result.ty = Some(Type::new_int());
         return Ok(result);
     }
@@ -1459,7 +1546,11 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
 
     let mut func = &prog;
     loop {
-        let stack_size = align_to((func.locals.len() * 8) as i64, 16);
+        let mut stack_size = 0;
+        for var in func.locals.iter() {
+            stack_size += var.ty.size;
+        }
+        let stack_size = align_to(stack_size, 16);
 
         result.push_str(&format!("  .globl {}\n", func.name));
         result.push_str(&format!("{}:\n", func.name));
