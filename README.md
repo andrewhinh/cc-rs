@@ -247,7 +247,7 @@ cargo run
 
 - [x] Add \a, \b, \t, \n \v, \f, \r and \e
 - [x] Add \<octal-sequence>
-- [ ] Add \x
+- [x] Add \x<hexadecimal-sequence>
 - [ ] Add line and block comments
 - [ ] Add character literal
 - [ ] Concatenate adjacent string literals
