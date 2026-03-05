@@ -128,6 +128,32 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
             continue;
         }
 
+        if pos + 1 < chars.len() && chars[pos] == '/' && chars[pos + 1] == '/' {
+            pos += 2;
+            while pos < chars.len() && chars[pos] != '\n' {
+                pos += 1;
+            }
+            continue;
+        }
+
+        if pos + 1 < chars.len() && chars[pos] == '/' && chars[pos + 1] == '*' {
+            let start = pos;
+            pos += 2;
+            let mut found = false;
+            while pos + 1 < chars.len() {
+                if chars[pos] == '*' && chars[pos + 1] == '/' {
+                    pos += 2;
+                    found = true;
+                    break;
+                }
+                pos += 1;
+            }
+            if !found {
+                return Err(error_at(filename, src, start, "unclosed block comment"));
+            }
+            continue;
+        }
+
         if chars[pos] == '"' {
             let start = pos;
             pos += 1;
