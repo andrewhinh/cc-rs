@@ -598,7 +598,26 @@ pub fn expr(
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
 ) -> Result<(Node, Token), String> {
-    assign(filename, src, tok, locals, globals, scope_stack)
+    let (node, tok) = assign(filename, src, tok, locals, globals, scope_stack)?;
+
+    if equal(src, &tok, ",") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (rhs, tok) = expr(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+        )?;
+        return Ok((
+            new_binary(NodeKind::Comma, node, rhs, tok_loc, line_no),
+            tok,
+        ));
+    }
+
+    Ok((node, tok))
 }
 
 pub fn assign(
@@ -1184,6 +1203,9 @@ pub fn add_type(node: &mut Node) {
         }
         NodeKind::Var => {
             node.ty = Some(node.var.as_ref().unwrap().ty.clone());
+        }
+        NodeKind::Comma => {
+            node.ty = node.rhs.as_ref().unwrap().ty.clone();
         }
         NodeKind::Addr => {
             let lhs_ty = node.lhs.as_ref().unwrap().ty.as_ref().unwrap();
