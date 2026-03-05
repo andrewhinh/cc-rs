@@ -120,7 +120,7 @@ cargo run
 ### Type System, Declarations, and Semantics
 
 - [x] Add keyword "int" and make variable definition mandatory
-- [ ] Add char type
+- [x] Add char type
 - [ ] Add comma operator
 - [ ] Change size of int from 8 to 4
 - [ ] Add long type
