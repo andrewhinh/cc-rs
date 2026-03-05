@@ -189,7 +189,7 @@ cargo run
 
 - [x] Add unary & and *
 - [x] Make pointer arithmetic work
-- [ ] Add one dimensional arrays
+- [x] Add one dimensional arrays
 - [ ] Add arrays of arrays
 - [ ] Add [] operator
 - [ ] Add sizeof
