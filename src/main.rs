@@ -385,7 +385,6 @@ fn copy_type(ty: &Type) -> Type {
 
 #[derive(Debug, Clone)]
 struct Obj {
-    next: Option<Box<Obj>>,
     name: String,
     ty: Type,
     is_local: bool,
@@ -465,8 +464,13 @@ fn new_var_node(var: Obj, tok_loc: usize) -> Node {
     node
 }
 
-fn find_var(locals: &[Obj], name: &str) -> Option<Obj> {
+fn find_var(locals: &[Obj], globals: &[Obj], name: &str) -> Option<Obj> {
     for var in locals.iter().rev() {
+        if var.name == name {
+            return Some(var.clone());
+        }
+    }
+    for var in globals.iter() {
         if var.name == name {
             return Some(var.clone());
         }
@@ -476,7 +480,6 @@ fn find_var(locals: &[Obj], name: &str) -> Option<Obj> {
 
 fn new_var(name: String, ty: Type) -> Obj {
     Obj {
-        next: None,
         name,
         ty,
         is_local: false,
@@ -526,6 +529,42 @@ fn get_number(tok: &Token) -> Result<i64, String> {
         return Err("expected a number".to_string());
     }
     Ok(tok.val)
+}
+
+fn is_function(src: &str, tok: &Token) -> Result<bool, String> {
+    if equal(src, tok, ";") {
+        return Ok(false);
+    }
+
+    let dummy = Type::new_int();
+    let (ty, _) = declarator("", src, tok, dummy)?;
+    Ok(ty.kind == TypeKind::Func)
+}
+
+fn global_variable(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    basety: Type,
+    globals: &mut Vec<Obj>,
+) -> Result<Token, String> {
+    let mut tok = tok.clone();
+    let mut first = true;
+
+    while !equal(src, &tok, ";") {
+        if !first {
+            tok = skip(filename, src, &tok, ",")?;
+        }
+        first = false;
+
+        let (ty, new_tok) = declarator(filename, src, &tok, basety.clone())?;
+        tok = new_tok;
+        let name = get_ident(src, ty.name.as_ref().unwrap())?;
+        let var = new_gvar(name, ty);
+        globals.push(var);
+    }
+
+    Ok(*tok.next.as_ref().unwrap().clone())
 }
 
 fn func_params(filename: &str, src: &str, tok: &Token, ty: Type) -> Result<(Type, Token), String> {
@@ -617,6 +656,7 @@ fn declaration(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
+    globals: &[Obj],
 ) -> Result<(Node, Token), String> {
     let (basety, mut tok) = declspec(filename, src, tok)?;
 
@@ -658,7 +698,7 @@ fn declaration(
 
         let tok_loc = tok.loc;
         let tok_next = tok.next.as_ref().unwrap().clone();
-        let (rhs, new_tok) = assign(filename, src, &tok_next, locals)?;
+        let (rhs, new_tok) = assign(filename, src, &tok_next, locals, globals)?;
         tok = new_tok;
         let lhs = new_var_node(var, ty.name.as_ref().unwrap().loc);
         let node = new_binary(NodeKind::Assign, lhs, rhs, tok_loc);
@@ -684,7 +724,13 @@ fn create_param_lvars(src: &str, param: &Type, locals: &mut Vec<Obj>) {
     }
 }
 
-fn function(filename: &str, src: &str, tok: &Token, basety: Type) -> Result<(Obj, Token), String> {
+fn function(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    basety: Type,
+    globals: &[Obj],
+) -> Result<(Obj, Token), String> {
     let (ty, tok) = declarator(filename, src, tok, basety)?;
     let name = get_ident(src, ty.name.as_ref().unwrap())?;
 
@@ -700,7 +746,7 @@ fn function(filename: &str, src: &str, tok: &Token, basety: Type) -> Result<(Obj
     fn_obj.params = locals.clone();
 
     let tok = skip(filename, src, &tok, "{")?;
-    let (mut body, tok) = compound_stmt(filename, src, &tok, &mut locals)?;
+    let (mut body, tok) = compound_stmt(filename, src, &tok, &mut locals, globals)?;
 
     add_type(&mut body);
 
@@ -715,6 +761,7 @@ fn compound_stmt(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
+    globals: &[Obj],
 ) -> Result<(Node, Token), String> {
     let tok_loc = tok.loc;
     let mut head = Node {
@@ -740,12 +787,12 @@ fn compound_stmt(
     let mut tok = tok.clone();
     while !equal(src, &tok, "}") {
         if equal(src, &tok, "int") {
-            let (node, new_tok) = declaration(filename, src, &tok, locals)?;
+            let (node, new_tok) = declaration(filename, src, &tok, locals, globals)?;
             tok = new_tok;
             cur.next = Some(Box::new(node));
             cur = cur.next.as_mut().unwrap();
         } else {
-            let (node, new_tok) = stmt(filename, src, &tok, locals)?;
+            let (node, new_tok) = stmt(filename, src, &tok, locals, globals)?;
             tok = new_tok;
             cur.next = Some(Box::new(node));
             cur = cur.next.as_mut().unwrap();
@@ -762,10 +809,11 @@ fn stmt(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
+    globals: &[Obj],
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, "return") {
         let tok_loc = tok.loc;
-        let (expr_node, tok) = expr(filename, src, tok.next.as_ref().unwrap(), locals)?;
+        let (expr_node, tok) = expr(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
         let tok = skip(filename, src, &tok, ";")?;
         let node = new_unary(NodeKind::Return, expr_node, tok_loc);
         return Ok((node, tok));
@@ -774,14 +822,14 @@ fn stmt(
         let tok_loc = tok.loc;
         let mut node = new_node(NodeKind::If, tok_loc);
         let tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
-        let (cond, tok) = expr(filename, src, &tok, locals)?;
+        let (cond, tok) = expr(filename, src, &tok, locals, globals)?;
         node.cond = Some(Box::new(cond));
         let tok = skip(filename, src, &tok, ")")?;
-        let (then, tok) = stmt(filename, src, &tok, locals)?;
+        let (then, tok) = stmt(filename, src, &tok, locals, globals)?;
         node.then = Some(Box::new(then));
         let mut tok = tok;
         if equal(src, &tok, "else") {
-            let (els, new_tok) = stmt(filename, src, tok.next.as_ref().unwrap(), locals)?;
+            let (els, new_tok) = stmt(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
             node.els = Some(Box::new(els));
             tok = new_tok;
         }
@@ -792,25 +840,25 @@ fn stmt(
         let mut node = new_node(NodeKind::For, tok_loc);
         let mut tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
 
-        let (init, new_tok) = expr_stmt(filename, src, &tok, locals)?;
+        let (init, new_tok) = expr_stmt(filename, src, &tok, locals, globals)?;
         node.init = Some(Box::new(init));
         tok = new_tok;
 
         if !equal(src, &tok, ";") {
-            let (cond, new_tok) = expr(filename, src, &tok, locals)?;
+            let (cond, new_tok) = expr(filename, src, &tok, locals, globals)?;
             node.cond = Some(Box::new(cond));
             tok = new_tok;
         }
         tok = skip(filename, src, &tok, ";")?;
 
         if !equal(src, &tok, ")") {
-            let (inc, new_tok) = expr(filename, src, &tok, locals)?;
+            let (inc, new_tok) = expr(filename, src, &tok, locals, globals)?;
             node.inc = Some(Box::new(inc));
             tok = new_tok;
         }
         tok = skip(filename, src, &tok, ")")?;
 
-        let (then, tok) = stmt(filename, src, &tok, locals)?;
+        let (then, tok) = stmt(filename, src, &tok, locals, globals)?;
         node.then = Some(Box::new(then));
         return Ok((node, tok));
     }
@@ -818,17 +866,17 @@ fn stmt(
         let tok_loc = tok.loc;
         let mut node = new_node(NodeKind::While, tok_loc);
         let tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
-        let (cond, tok) = expr(filename, src, &tok, locals)?;
+        let (cond, tok) = expr(filename, src, &tok, locals, globals)?;
         node.cond = Some(Box::new(cond));
         let tok = skip(filename, src, &tok, ")")?;
-        let (then, tok) = stmt(filename, src, &tok, locals)?;
+        let (then, tok) = stmt(filename, src, &tok, locals, globals)?;
         node.then = Some(Box::new(then));
         return Ok((node, tok));
     }
     if equal(src, tok, "{") {
-        return compound_stmt(filename, src, tok.next.as_ref().unwrap(), locals);
+        return compound_stmt(filename, src, tok.next.as_ref().unwrap(), locals, globals);
     }
-    expr_stmt(filename, src, tok, locals)
+    expr_stmt(filename, src, tok, locals, globals)
 }
 
 fn expr_stmt(
@@ -836,6 +884,7 @@ fn expr_stmt(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
+    globals: &[Obj],
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, ";") {
         let tok_loc = tok.loc;
@@ -843,7 +892,7 @@ fn expr_stmt(
         return Ok((new_node(NodeKind::Block, tok_loc), tok));
     }
     let tok_loc = tok.loc;
-    let (expr_node, tok) = expr(filename, src, tok, locals)?;
+    let (expr_node, tok) = expr(filename, src, tok, locals, globals)?;
     let tok = skip(filename, src, &tok, ";")?;
     let node = new_unary(NodeKind::ExprStmt, expr_node, tok_loc);
     Ok((node, tok))
@@ -854,8 +903,9 @@ fn expr(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
+    globals: &[Obj],
 ) -> Result<(Node, Token), String> {
-    assign(filename, src, tok, locals)
+    assign(filename, src, tok, locals, globals)
 }
 
 fn assign(
@@ -863,11 +913,12 @@ fn assign(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
+    globals: &[Obj],
 ) -> Result<(Node, Token), String> {
-    let (mut node, tok) = equality(filename, src, tok, locals)?;
+    let (mut node, tok) = equality(filename, src, tok, locals, globals)?;
     if equal(src, &tok, "=") {
         let tok_loc = tok.loc;
-        let (rhs, tok) = assign(filename, src, tok.next.as_ref().unwrap(), locals)?;
+        let (rhs, tok) = assign(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
         node = new_binary(NodeKind::Assign, node, rhs, tok_loc);
         return Ok((node, tok));
     }
@@ -879,13 +930,15 @@ fn equality(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
+    globals: &[Obj],
 ) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = relational(filename, src, tok, locals)?;
+    let (mut node, mut tok) = relational(filename, src, tok, locals, globals)?;
 
     loop {
         if equal(src, &tok, "==") {
             let tok_loc = tok.loc;
-            let (rhs, new_tok) = relational(filename, src, tok.next.as_ref().unwrap(), locals)?;
+            let (rhs, new_tok) =
+                relational(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
             node = new_binary(NodeKind::Eq, node, rhs, tok_loc);
             tok = new_tok;
             continue;
@@ -893,7 +946,8 @@ fn equality(
 
         if equal(src, &tok, "!=") {
             let tok_loc = tok.loc;
-            let (rhs, new_tok) = relational(filename, src, tok.next.as_ref().unwrap(), locals)?;
+            let (rhs, new_tok) =
+                relational(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
             node = new_binary(NodeKind::Ne, node, rhs, tok_loc);
             tok = new_tok;
             continue;
@@ -908,13 +962,14 @@ fn relational(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
+    globals: &[Obj],
 ) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = add(filename, src, tok, locals)?;
+    let (mut node, mut tok) = add(filename, src, tok, locals, globals)?;
 
     loop {
         if equal(src, &tok, "<") {
             let tok_loc = tok.loc;
-            let (rhs, new_tok) = add(filename, src, tok.next.as_ref().unwrap(), locals)?;
+            let (rhs, new_tok) = add(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
             node = new_binary(NodeKind::Lt, node, rhs, tok_loc);
             tok = new_tok;
             continue;
@@ -922,7 +977,7 @@ fn relational(
 
         if equal(src, &tok, "<=") {
             let tok_loc = tok.loc;
-            let (rhs, new_tok) = add(filename, src, tok.next.as_ref().unwrap(), locals)?;
+            let (rhs, new_tok) = add(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
             node = new_binary(NodeKind::Le, node, rhs, tok_loc);
             tok = new_tok;
             continue;
@@ -930,7 +985,7 @@ fn relational(
 
         if equal(src, &tok, ">") {
             let tok_loc = tok.loc;
-            let (lhs, new_tok) = add(filename, src, tok.next.as_ref().unwrap(), locals)?;
+            let (lhs, new_tok) = add(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
             node = new_binary(NodeKind::Lt, lhs, node, tok_loc);
             tok = new_tok;
             continue;
@@ -938,7 +993,7 @@ fn relational(
 
         if equal(src, &tok, ">=") {
             let tok_loc = tok.loc;
-            let (lhs, new_tok) = add(filename, src, tok.next.as_ref().unwrap(), locals)?;
+            let (lhs, new_tok) = add(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
             node = new_binary(NodeKind::Le, lhs, node, tok_loc);
             tok = new_tok;
             continue;
@@ -953,13 +1008,14 @@ fn add(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
+    globals: &[Obj],
 ) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = mul(filename, src, tok, locals)?;
+    let (mut node, mut tok) = mul(filename, src, tok, locals, globals)?;
 
     loop {
         if equal(src, &tok, "+") {
             let tok_loc = tok.loc;
-            let (rhs, new_tok) = mul(filename, src, tok.next.as_ref().unwrap(), locals)?;
+            let (rhs, new_tok) = mul(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
             node = new_add(node, rhs, tok_loc, filename, src)?;
             tok = new_tok;
             continue;
@@ -967,7 +1023,7 @@ fn add(
 
         if equal(src, &tok, "-") {
             let tok_loc = tok.loc;
-            let (rhs, new_tok) = mul(filename, src, tok.next.as_ref().unwrap(), locals)?;
+            let (rhs, new_tok) = mul(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
             node = new_sub(node, rhs, tok_loc, filename, src)?;
             tok = new_tok;
             continue;
@@ -982,13 +1038,14 @@ fn mul(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
+    globals: &[Obj],
 ) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = unary(filename, src, tok, locals)?;
+    let (mut node, mut tok) = unary(filename, src, tok, locals, globals)?;
 
     loop {
         if equal(src, &tok, "*") {
             let tok_loc = tok.loc;
-            let (rhs, new_tok) = unary(filename, src, tok.next.as_ref().unwrap(), locals)?;
+            let (rhs, new_tok) = unary(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
             node = new_binary(NodeKind::Mul, node, rhs, tok_loc);
             tok = new_tok;
             continue;
@@ -996,7 +1053,7 @@ fn mul(
 
         if equal(src, &tok, "/") {
             let tok_loc = tok.loc;
-            let (rhs, new_tok) = unary(filename, src, tok.next.as_ref().unwrap(), locals)?;
+            let (rhs, new_tok) = unary(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
             node = new_binary(NodeKind::Div, node, rhs, tok_loc);
             tok = new_tok;
             continue;
@@ -1011,30 +1068,31 @@ fn unary(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
+    globals: &[Obj],
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, "+") {
-        return unary(filename, src, tok.next.as_ref().unwrap(), locals);
+        return unary(filename, src, tok.next.as_ref().unwrap(), locals, globals);
     }
 
     if equal(src, tok, "-") {
         let tok_loc = tok.loc;
-        let (node, tok) = unary(filename, src, tok.next.as_ref().unwrap(), locals)?;
+        let (node, tok) = unary(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
         return Ok((new_unary(NodeKind::Neg, node, tok_loc), tok));
     }
 
     if equal(src, tok, "&") {
         let tok_loc = tok.loc;
-        let (node, tok) = unary(filename, src, tok.next.as_ref().unwrap(), locals)?;
+        let (node, tok) = unary(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
         return Ok((new_unary(NodeKind::Addr, node, tok_loc), tok));
     }
 
     if equal(src, tok, "*") {
         let tok_loc = tok.loc;
-        let (node, tok) = unary(filename, src, tok.next.as_ref().unwrap(), locals)?;
+        let (node, tok) = unary(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
         return Ok((new_unary(NodeKind::Deref, node, tok_loc), tok));
     }
 
-    postfix(filename, src, tok, locals)
+    postfix(filename, src, tok, locals, globals)
 }
 
 fn postfix(
@@ -1042,12 +1100,13 @@ fn postfix(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
+    globals: &[Obj],
 ) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = primary(filename, src, tok, locals)?;
+    let (mut node, mut tok) = primary(filename, src, tok, locals, globals)?;
 
     while equal(src, &tok, "[") {
         let tok_loc = tok.loc;
-        let (idx, new_tok) = expr(filename, src, tok.next.as_ref().unwrap(), locals)?;
+        let (idx, new_tok) = expr(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
         tok = skip(filename, src, &new_tok, "]")?;
         node = new_unary(
             NodeKind::Deref,
@@ -1064,6 +1123,7 @@ fn funcall(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
+    globals: &[Obj],
 ) -> Result<(Node, Token), String> {
     let tok_loc = tok.loc;
     let funcname: String = src.chars().skip(tok.loc).take(tok.len).collect();
@@ -1093,7 +1153,7 @@ fn funcall(
         if cur.tok_loc != tok_loc || cur.kind != NodeKind::Num {
             tok = skip(filename, src, &tok, ",")?;
         }
-        let (arg, new_tok) = assign(filename, src, &tok, locals)?;
+        let (arg, new_tok) = assign(filename, src, &tok, locals, globals)?;
         tok = new_tok;
         cur.next = Some(Box::new(arg));
         cur = cur.next.as_mut().unwrap();
@@ -1112,16 +1172,17 @@ fn primary(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
+    globals: &[Obj],
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, "(") {
-        let (node, tok) = expr(filename, src, tok.next.as_ref().unwrap(), locals)?;
+        let (node, tok) = expr(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
         let tok = skip(filename, src, &tok, ")")?;
         return Ok((node, tok));
     }
 
     if equal(src, tok, "sizeof") {
         let tok_loc = tok.loc;
-        let (mut node, tok) = unary(filename, src, tok.next.as_ref().unwrap(), locals)?;
+        let (mut node, tok) = unary(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
         add_type(&mut node);
         let size = node.ty.as_ref().unwrap().size;
         return Ok((new_num(size, tok_loc), tok));
@@ -1129,13 +1190,13 @@ fn primary(
 
     if tok.kind == TokenKind::Ident {
         if equal(src, tok.next.as_ref().unwrap(), "(") {
-            return funcall(filename, src, tok, locals);
+            return funcall(filename, src, tok, locals, globals);
         }
 
         let tok_loc = tok.loc;
         let funcname: String = src.chars().skip(tok.loc).take(tok.len).collect();
 
-        let var = find_var(locals, &funcname)
+        let var = find_var(locals, globals, &funcname)
             .ok_or_else(|| error_tok(filename, src, tok, "undefined variable"))?;
         let node = new_var_node(var, tok_loc);
         return Ok((node, *tok.next.as_ref().unwrap().clone()));
@@ -1153,8 +1214,12 @@ fn primary(
 fn gen_addr(node: &Node, result: &mut String, filename: &str, src: &str) -> Result<(), String> {
     match node.kind {
         NodeKind::Var => {
-            let offset = node.var.as_ref().unwrap().offset;
-            result.push_str(&format!("  lea -{}(%rbp), %rax\n", offset));
+            let var = node.var.as_ref().unwrap();
+            if var.is_local {
+                result.push_str(&format!("  lea -{}(%rbp), %rax\n", var.offset));
+            } else {
+                result.push_str(&format!("  lea {}(%rip), %rax\n", var.name));
+            }
         }
         NodeKind::Deref => {
             gen_expr(node.lhs.as_ref().unwrap(), result, filename, src)?;
@@ -1574,43 +1639,43 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
 
     let tok = tokenize(filename, src)?;
 
-    let mut head = Obj {
-        next: None,
-        name: String::new(),
-        ty: Type::new_int(),
-        is_local: false,
-        offset: 0,
-        is_function: false,
-        params: Vec::new(),
-        body: None,
-        locals: Vec::new(),
-        stack_size: 0,
-    };
-    let mut cur = &mut head;
+    let mut globals: Vec<Obj> = Vec::new();
 
     let mut tok = tok;
     while tok.kind != TokenKind::Eof {
         let (basety, new_tok) = declspec(filename, src, &tok)?;
         tok = new_tok;
-        let (func, new_tok) = function(filename, src, &tok, basety)?;
-        tok = new_tok;
-        cur.next = Some(Box::new(func));
-        cur = cur.next.as_mut().unwrap();
-    }
 
-    let prog = head.next.unwrap();
+        if is_function(src, &tok)? {
+            let (func, new_tok) = function(filename, src, &tok, basety, &globals)?;
+            tok = new_tok;
+            globals.push(func);
+        } else {
+            tok = global_variable(filename, src, &tok, basety, &mut globals)?;
+        }
+    }
 
     let mut result = String::new();
 
-    let mut func = &prog;
-    loop {
+    // Emit .data section for global variables
+    let mut has_data = false;
+    for var in globals.iter() {
+        if var.is_function {
+            continue;
+        }
+        if !has_data {
+            result.push_str("  .data\n");
+            has_data = true;
+        }
+        result.push_str(&format!("  .globl {}\n", var.name));
+        result.push_str(&format!("{}:\n", var.name));
+        result.push_str(&format!("  .zero {}\n", var.ty.size));
+    }
+
+    // Emit .text section for functions
+    for func in globals.iter() {
         if !func.is_function {
-            if let Some(next) = &func.next {
-                func = next;
-                continue;
-            } else {
-                break;
-            }
+            continue;
         }
 
         let mut stack_size = 0;
@@ -1644,12 +1709,6 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         result.push_str("  mov %rbp, %rsp\n");
         result.push_str("  pop %rbp\n");
         result.push_str("  ret\n");
-
-        if let Some(next) = &func.next {
-            func = next;
-        } else {
-            break;
-        }
     }
 
     Ok(result)
