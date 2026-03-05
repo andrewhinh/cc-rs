@@ -393,6 +393,7 @@ enum NodeKind {
     Block,
     FuncCall,
     ExprStmt,
+    StmtExpr,
     Var,
     Num,
 }
@@ -1318,6 +1319,21 @@ fn primary(
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
 ) -> Result<(Node, Token), String> {
+    if equal(src, tok, "(") && equal(src, tok.next.as_ref().unwrap(), "{") {
+        let tok_loc = tok.loc;
+        let (body, tok) = compound_stmt(
+            filename,
+            src,
+            tok.next.as_ref().unwrap().next.as_ref().unwrap(),
+            locals,
+            globals,
+        )?;
+        let tok = skip(filename, src, &tok, ")")?;
+        let mut node = new_node(NodeKind::StmtExpr, tok_loc);
+        node.body = body.body;
+        return Ok((node, tok));
+    }
+
     if equal(src, tok, "(") {
         let (node, tok) = expr(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
         let tok = skip(filename, src, &tok, ")")?;
@@ -1365,7 +1381,13 @@ fn primary(
     Err(error_tok(filename, src, tok, "expected an expression"))
 }
 
-fn gen_addr(node: &Node, result: &mut String, filename: &str, src: &str) -> Result<(), String> {
+fn gen_addr(
+    node: &Node,
+    result: &mut String,
+    filename: &str,
+    src: &str,
+    current_fn: &str,
+) -> Result<(), String> {
     match node.kind {
         NodeKind::Var => {
             let var = node.var.as_ref().unwrap();
@@ -1376,7 +1398,13 @@ fn gen_addr(node: &Node, result: &mut String, filename: &str, src: &str) -> Resu
             }
         }
         NodeKind::Deref => {
-            gen_expr(node.lhs.as_ref().unwrap(), result, filename, src)?;
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
         }
         _ => return Err(error_at(filename, src, node.tok_loc, "not an lvalue")),
     }
@@ -1403,35 +1431,71 @@ fn store(ty: &Type, result: &mut String) {
     }
 }
 
-fn gen_expr(node: &Node, result: &mut String, filename: &str, src: &str) -> Result<(), String> {
+fn gen_expr(
+    node: &Node,
+    result: &mut String,
+    filename: &str,
+    src: &str,
+    current_fn: &str,
+) -> Result<(), String> {
     match node.kind {
         NodeKind::Num => {
             result.push_str(&format!("  mov ${}, %rax\n", node.val));
             return Ok(());
         }
         NodeKind::Neg => {
-            gen_expr(node.lhs.as_ref().unwrap(), result, filename, src)?;
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
             result.push_str("  neg %rax\n");
             return Ok(());
         }
         NodeKind::Var => {
-            gen_addr(node, result, filename, src)?;
+            gen_addr(node, result, filename, src, current_fn)?;
             load(node.ty.as_ref().unwrap(), result);
             return Ok(());
         }
         NodeKind::Addr => {
-            gen_addr(node.lhs.as_ref().unwrap(), result, filename, src)?;
+            gen_addr(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
             return Ok(());
         }
         NodeKind::Deref => {
-            gen_expr(node.lhs.as_ref().unwrap(), result, filename, src)?;
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
             load(node.ty.as_ref().unwrap(), result);
             return Ok(());
         }
         NodeKind::Assign => {
-            gen_addr(node.lhs.as_ref().unwrap(), result, filename, src)?;
+            gen_addr(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
             result.push_str("  push %rax\n");
-            gen_expr(node.rhs.as_ref().unwrap(), result, filename, src)?;
+            gen_expr(
+                node.rhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
             store(node.ty.as_ref().unwrap(), result);
             return Ok(());
         }
@@ -1440,7 +1504,7 @@ fn gen_expr(node: &Node, result: &mut String, filename: &str, src: &str) -> Resu
             let mut nargs = 0;
             let mut arg = node.args.as_ref();
             while let Some(arg_node) = arg {
-                gen_expr(arg_node, result, filename, src)?;
+                gen_expr(arg_node, result, filename, src, current_fn)?;
                 result.push_str("  push %rax\n");
                 nargs += 1;
                 arg = arg_node.next.as_ref();
@@ -1454,12 +1518,32 @@ fn gen_expr(node: &Node, result: &mut String, filename: &str, src: &str) -> Resu
             result.push_str(&format!("  call {}\n", node.funcname.as_ref().unwrap()));
             return Ok(());
         }
+        NodeKind::StmtExpr => {
+            let mut n = node.body.as_ref();
+            while let Some(stmt_node) = n {
+                gen_stmt(stmt_node, result, filename, src, current_fn)?;
+                n = stmt_node.next.as_ref();
+            }
+            return Ok(());
+        }
         _ => {}
     }
 
-    gen_expr(node.rhs.as_ref().unwrap(), result, filename, src)?;
+    gen_expr(
+        node.rhs.as_ref().unwrap(),
+        result,
+        filename,
+        src,
+        current_fn,
+    )?;
     result.push_str("  push %rax\n");
-    gen_expr(node.lhs.as_ref().unwrap(), result, filename, src)?;
+    gen_expr(
+        node.lhs.as_ref().unwrap(),
+        result,
+        filename,
+        src,
+        current_fn,
+    )?;
     result.push_str("  pop %rdi\n");
 
     match node.kind {
@@ -1485,6 +1569,7 @@ fn gen_expr(node: &Node, result: &mut String, filename: &str, src: &str) -> Resu
         | NodeKind::Num
         | NodeKind::FuncCall
         | NodeKind::ExprStmt
+        | NodeKind::StmtExpr
         | NodeKind::Var
         | NodeKind::Assign
         | NodeKind::Addr
@@ -1517,7 +1602,13 @@ fn gen_stmt(
     match node.kind {
         NodeKind::If => {
             let c = count();
-            gen_expr(node.cond.as_ref().unwrap(), result, filename, src)?;
+            gen_expr(
+                node.cond.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
             result.push_str("  cmp $0, %rax\n");
             result.push_str(&format!("  je .L.else.{}\n", c));
             gen_stmt(
@@ -1545,7 +1636,7 @@ fn gen_stmt(
             )?;
             result.push_str(&format!(".L.begin.{}:\n", c));
             if let Some(cond) = node.cond.as_ref() {
-                gen_expr(cond, result, filename, src)?;
+                gen_expr(cond, result, filename, src, current_fn)?;
                 result.push_str("  cmp $0, %rax\n");
                 result.push_str(&format!("  je .L.end.{}\n", c));
             }
@@ -1557,7 +1648,7 @@ fn gen_stmt(
                 current_fn,
             )?;
             if let Some(inc) = node.inc.as_ref() {
-                gen_expr(inc, result, filename, src)?;
+                gen_expr(inc, result, filename, src, current_fn)?;
             }
             result.push_str(&format!("  jmp .L.begin.{}\n", c));
             result.push_str(&format!(".L.end.{}:\n", c));
@@ -1565,7 +1656,13 @@ fn gen_stmt(
         NodeKind::While => {
             let c = count();
             result.push_str(&format!(".L.begin.{}:\n", c));
-            gen_expr(node.cond.as_ref().unwrap(), result, filename, src)?;
+            gen_expr(
+                node.cond.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
             result.push_str("  cmp $0, %rax\n");
             result.push_str(&format!("  je .L.end.{}\n", c));
             gen_stmt(
@@ -1586,11 +1683,23 @@ fn gen_stmt(
             }
         }
         NodeKind::Return => {
-            gen_expr(node.lhs.as_ref().unwrap(), result, filename, src)?;
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
             result.push_str(&format!("  jmp .L.return.{}\n", current_fn));
         }
         NodeKind::ExprStmt => {
-            gen_expr(node.lhs.as_ref().unwrap(), result, filename, src)?;
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
         }
         _ => return Err(error_at(filename, src, node.tok_loc, "invalid statement")),
     }
@@ -1691,6 +1800,17 @@ fn add_type(node: &mut Node) {
                 node.ty = Some(lhs_ty.base.as_ref().unwrap().as_ref().clone());
             } else {
                 node.ty = Some(Type::new_int());
+            }
+        }
+        NodeKind::StmtExpr => {
+            if let Some(body) = &node.body {
+                let mut stmt = body.as_ref();
+                while let Some(next) = &stmt.next {
+                    stmt = next.as_ref();
+                }
+                if stmt.kind == NodeKind::ExprStmt {
+                    node.ty = stmt.lhs.as_ref().unwrap().ty.clone();
+                }
             }
         }
         NodeKind::Return
