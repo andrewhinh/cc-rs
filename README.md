@@ -188,7 +188,7 @@ cargo run
 - [x] Add unary & and \*
 - [x] Make pointer arithmetic work
 - [x] Add one dimensional arrays
-- [ ] Add arrays of arrays
+- [x] Add arrays of arrays
 - [ ] Add [] operator
 - [ ] Add sizeof
 - [ ] Merge Function with Var
