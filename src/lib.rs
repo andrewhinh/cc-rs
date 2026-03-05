@@ -41,6 +41,7 @@ pub enum NodeKind {
     Lt,
     Le,
     Assign,
+    Comma,
     Addr,
     Deref,
     Return,
