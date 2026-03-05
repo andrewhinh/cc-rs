@@ -2,6 +2,7 @@ use std::{
     env, fs,
     io::{self, Read, Write},
     process,
+    sync::atomic::{AtomicI32, Ordering},
 };
 
 struct Args {
@@ -125,6 +126,7 @@ enum TokenKind {
     Ident,
     Punct,
     Keyword,
+    Str,
     Num,
     Eof,
 }
@@ -136,6 +138,8 @@ struct Token {
     val: i64,
     loc: usize,
     len: usize,
+    ty: Option<Type>,
+    str: Option<String>,
 }
 
 fn new_token(kind: TokenKind, start: usize, end: usize) -> Token {
@@ -145,6 +149,8 @@ fn new_token(kind: TokenKind, start: usize, end: usize) -> Token {
         val: 0,
         loc: start,
         len: end - start,
+        ty: None,
+        str: None,
     }
 }
 
@@ -193,6 +199,8 @@ fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
         val: 0,
         loc: 0,
         len: 0,
+        ty: None,
+        str: None,
     };
     let mut cur = &mut head;
     let chars: Vec<char> = src.chars().collect();
@@ -201,6 +209,30 @@ fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
     while pos < chars.len() {
         if chars[pos].is_whitespace() {
             pos += 1;
+            continue;
+        }
+
+        if chars[pos] == '"' {
+            let start = pos;
+            pos += 1;
+            let mut str_content = String::new();
+            while pos < chars.len() && chars[pos] != '"' {
+                if chars[pos] == '\n' {
+                    return Err(error_at(filename, src, start, "unclosed string literal"));
+                }
+                str_content.push(chars[pos]);
+                pos += 1;
+            }
+            if pos >= chars.len() {
+                return Err(error_at(filename, src, start, "unclosed string literal"));
+            }
+            pos += 1;
+            let mut tok = new_token(TokenKind::Str, start, pos);
+            let len = str_content.len() + 1;
+            tok.ty = Some(Type::new_array(Type::new_char(), len as i64));
+            tok.str = Some(str_content);
+            cur.next = Some(Box::new(tok));
+            cur = cur.next.as_mut().unwrap();
             continue;
         }
 
@@ -404,6 +436,7 @@ struct Obj {
     is_local: bool,
     offset: i64,
     is_function: bool,
+    init_data: Option<Vec<u8>>,
     params: Vec<Obj>,
     body: Option<Box<Node>>,
     locals: Vec<Obj>,
@@ -499,11 +532,31 @@ fn new_var(name: String, ty: Type) -> Obj {
         is_local: false,
         offset: 0,
         is_function: false,
+        init_data: None,
         params: Vec::new(),
         body: None,
         locals: Vec::new(),
         stack_size: 0,
     }
+}
+
+static UNIQUE_ID: AtomicI32 = AtomicI32::new(0);
+
+fn new_unique_name() -> String {
+    let id = UNIQUE_ID.fetch_add(1, Ordering::SeqCst);
+    format!(".L..{}", id)
+}
+
+fn new_anon_gvar(ty: Type) -> Obj {
+    new_var(new_unique_name(), ty)
+}
+
+fn new_string_literal(str_content: &str, ty: Type) -> Obj {
+    let mut var = new_anon_gvar(ty);
+    let mut init_data: Vec<u8> = str_content.bytes().collect();
+    init_data.push(0);
+    var.init_data = Some(init_data);
+    var
 }
 
 fn new_lvar(name: String, ty: Type, locals: &mut Vec<Obj>) -> Obj {
@@ -677,7 +730,7 @@ fn declaration(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
-    globals: &[Obj],
+    globals: &mut Vec<Obj>,
 ) -> Result<(Node, Token), String> {
     let (basety, mut tok) = declspec(filename, src, tok)?;
 
@@ -750,7 +803,7 @@ fn function(
     src: &str,
     tok: &Token,
     basety: Type,
-    globals: &[Obj],
+    globals: &mut Vec<Obj>,
 ) -> Result<(Obj, Token), String> {
     let (ty, tok) = declarator(filename, src, tok, basety)?;
     let name = get_ident(src, ty.name.as_ref().unwrap())?;
@@ -782,7 +835,7 @@ fn compound_stmt(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
-    globals: &[Obj],
+    globals: &mut Vec<Obj>,
 ) -> Result<(Node, Token), String> {
     let tok_loc = tok.loc;
     let mut head = Node {
@@ -830,7 +883,7 @@ fn stmt(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
-    globals: &[Obj],
+    globals: &mut Vec<Obj>,
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, "return") {
         let tok_loc = tok.loc;
@@ -905,7 +958,7 @@ fn expr_stmt(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
-    globals: &[Obj],
+    globals: &mut Vec<Obj>,
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, ";") {
         let tok_loc = tok.loc;
@@ -924,7 +977,7 @@ fn expr(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
-    globals: &[Obj],
+    globals: &mut Vec<Obj>,
 ) -> Result<(Node, Token), String> {
     assign(filename, src, tok, locals, globals)
 }
@@ -934,7 +987,7 @@ fn assign(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
-    globals: &[Obj],
+    globals: &mut Vec<Obj>,
 ) -> Result<(Node, Token), String> {
     let (mut node, tok) = equality(filename, src, tok, locals, globals)?;
     if equal(src, &tok, "=") {
@@ -951,7 +1004,7 @@ fn equality(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
-    globals: &[Obj],
+    globals: &mut Vec<Obj>,
 ) -> Result<(Node, Token), String> {
     let (mut node, mut tok) = relational(filename, src, tok, locals, globals)?;
 
@@ -983,7 +1036,7 @@ fn relational(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
-    globals: &[Obj],
+    globals: &mut Vec<Obj>,
 ) -> Result<(Node, Token), String> {
     let (mut node, mut tok) = add(filename, src, tok, locals, globals)?;
 
@@ -1029,7 +1082,7 @@ fn add(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
-    globals: &[Obj],
+    globals: &mut Vec<Obj>,
 ) -> Result<(Node, Token), String> {
     let (mut node, mut tok) = mul(filename, src, tok, locals, globals)?;
 
@@ -1059,7 +1112,7 @@ fn mul(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
-    globals: &[Obj],
+    globals: &mut Vec<Obj>,
 ) -> Result<(Node, Token), String> {
     let (mut node, mut tok) = unary(filename, src, tok, locals, globals)?;
 
@@ -1089,7 +1142,7 @@ fn unary(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
-    globals: &[Obj],
+    globals: &mut Vec<Obj>,
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, "+") {
         return unary(filename, src, tok.next.as_ref().unwrap(), locals, globals);
@@ -1121,7 +1174,7 @@ fn postfix(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
-    globals: &[Obj],
+    globals: &mut Vec<Obj>,
 ) -> Result<(Node, Token), String> {
     let (mut node, mut tok) = primary(filename, src, tok, locals, globals)?;
 
@@ -1144,7 +1197,7 @@ fn funcall(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
-    globals: &[Obj],
+    globals: &mut Vec<Obj>,
 ) -> Result<(Node, Token), String> {
     let tok_loc = tok.loc;
     let funcname: String = src.chars().skip(tok.loc).take(tok.len).collect();
@@ -1193,7 +1246,7 @@ fn primary(
     src: &str,
     tok: &Token,
     locals: &mut Vec<Obj>,
-    globals: &[Obj],
+    globals: &mut Vec<Obj>,
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, "(") {
         let (node, tok) = expr(filename, src, tok.next.as_ref().unwrap(), locals, globals)?;
@@ -1220,6 +1273,16 @@ fn primary(
         let var = find_var(locals, globals, &funcname)
             .ok_or_else(|| error_tok(filename, src, tok, "undefined variable"))?;
         let node = new_var_node(var, tok_loc);
+        return Ok((node, *tok.next.as_ref().unwrap().clone()));
+    }
+
+    if tok.kind == TokenKind::Str {
+        let tok_loc = tok.loc;
+        let str_content = tok.str.as_ref().unwrap();
+        let ty = tok.ty.as_ref().unwrap().clone();
+        let var = new_string_literal(str_content, ty);
+        let node = new_var_node(var.clone(), tok_loc);
+        globals.push(var);
         return Ok((node, *tok.next.as_ref().unwrap().clone()));
     }
 
@@ -1676,7 +1739,7 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         tok = new_tok;
 
         if is_function(src, &tok)? {
-            let (func, new_tok) = function(filename, src, &tok, basety, &globals)?;
+            let (func, new_tok) = function(filename, src, &tok, basety, &mut globals)?;
             tok = new_tok;
             globals.push(func);
         } else {
@@ -1698,7 +1761,14 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         }
         result.push_str(&format!("  .globl {}\n", var.name));
         result.push_str(&format!("{}:\n", var.name));
-        result.push_str(&format!("  .zero {}\n", var.ty.size));
+
+        if let Some(init_data) = &var.init_data {
+            for byte in init_data {
+                result.push_str(&format!("  .byte {}\n", byte));
+            }
+        } else {
+            result.push_str(&format!("  .zero {}\n", var.ty.size));
+        }
     }
 
     // Emit .text section for functions
