@@ -151,6 +151,7 @@ pub struct Obj {
 pub struct Node {
     pub kind: NodeKind,
     pub tok_loc: usize,
+    pub line_no: usize,
     pub ty: Option<Type>,
     pub next: Option<Box<Node>>,
     pub lhs: Option<Box<Node>>,
