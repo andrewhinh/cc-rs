@@ -245,7 +245,7 @@ cargo run
 
 ### Lexer, Literals, Unicode, and Tokens
 
-- [ ] Add \a, \b, \t, \n \v, \f, \r and \e
+- [x] Add \a, \b, \t, \n \v, \f, \r and \e
 - [ ] Add \
 - [ ] Add \x
 - [ ] Add line and block comments
