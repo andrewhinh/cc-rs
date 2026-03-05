@@ -246,7 +246,7 @@ cargo run
 ### Lexer, Literals, Unicode, and Tokens
 
 - [x] Add \a, \b, \t, \n \v, \f, \r and \e
-- [ ] Add \
+- [x] Add \<octal-sequence>
 - [ ] Add \x
 - [ ] Add line and block comments
 - [ ] Add character literal
