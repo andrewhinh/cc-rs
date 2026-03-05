@@ -306,6 +306,8 @@ struct Type {
     name: Option<Box<Token>>,
     #[allow(unused)]
     return_ty: Option<Box<Type>>,
+    params: Option<Box<Type>>,
+    next: Option<Box<Type>>,
 }
 
 impl Type {
@@ -315,6 +317,8 @@ impl Type {
             base: None,
             name: None,
             return_ty: None,
+            params: None,
+            next: None,
         }
     }
 
@@ -324,6 +328,8 @@ impl Type {
             base: Some(Box::new(base)),
             name: None,
             return_ty: None,
+            params: None,
+            next: None,
         }
     }
 }
@@ -338,11 +344,17 @@ fn func_type(return_ty: Type) -> Type {
         base: None,
         name: None,
         return_ty: Some(Box::new(return_ty)),
+        params: None,
+        next: None,
     }
 }
 
 fn is_integer(ty: &Type) -> bool {
     ty.kind == TypeKind::Int
+}
+
+fn copy_type(ty: &Type) -> Type {
+    ty.clone()
 }
 
 #[derive(Debug, Clone)]
@@ -356,6 +368,7 @@ struct Obj {
 struct Function {
     next: Option<Box<Function>>,
     name: String,
+    params: Vec<Obj>,
     body: Node,
     locals: Vec<Obj>,
     #[allow(unused)]
@@ -460,9 +473,38 @@ fn declspec(filename: &str, src: &str, tok: &Token) -> Result<(Type, Token), Str
 
 fn type_suffix(filename: &str, src: &str, tok: &Token, ty: Type) -> Result<(Type, Token), String> {
     if equal(src, tok, "(") {
-        let rest = tok.next.as_ref().unwrap();
-        let rest = skip(filename, src, rest, ")")?;
-        return Ok((func_type(ty), rest));
+        let mut tok = tok.next.as_ref().unwrap().as_ref().clone();
+
+        let mut head = Type {
+            kind: TypeKind::Int,
+            base: None,
+            name: None,
+            return_ty: None,
+            params: None,
+            next: None,
+        };
+        let mut cur = &mut head;
+        let mut first = true;
+
+        while !equal(src, &tok, ")") {
+            if !first {
+                tok = skip(filename, src, &tok, ",")?;
+            }
+            first = false;
+
+            let (basety, new_tok) = declspec(filename, src, &tok)?;
+            tok = new_tok;
+            let (param_ty, new_tok) = declarator(filename, src, &tok, basety)?;
+            tok = new_tok;
+            let param_copy = copy_type(&param_ty);
+            cur.next = Some(Box::new(param_copy));
+            cur = cur.next.as_mut().unwrap();
+        }
+
+        let mut func_ty = func_type(ty);
+        func_ty.params = head.next;
+        let rest = tok.next.as_ref().unwrap().as_ref().clone();
+        return Ok((func_ty, rest));
     }
     Ok((ty, tok.clone()))
 }
@@ -554,13 +596,32 @@ fn declaration(
     Ok((node, *tok.next.as_ref().unwrap().clone()))
 }
 
+fn create_param_lvars(src: &str, param: &Type, locals: &mut Vec<Obj>) {
+    let mut current = Some(param);
+
+    while let Some(p) = current {
+        if let Some(name_tok) = &p.name {
+            let name = get_ident(src, name_tok).unwrap();
+            new_lvar(name, p.clone(), locals);
+        }
+        current = p.next.as_ref().map(|b| b.as_ref());
+    }
+}
+
 fn function(filename: &str, src: &str, tok: &Token) -> Result<(Function, Token), String> {
     let (ty, tok) = declspec(filename, src, tok)?;
     let (ty, tok) = declarator(filename, src, &tok, ty)?;
     let name = get_ident(src, ty.name.as_ref().unwrap())?;
 
-    let tok = skip(filename, src, &tok, "{")?;
     let mut locals: Vec<Obj> = Vec::new();
+
+    if let Some(params) = &ty.params {
+        create_param_lvars(src, params, &mut locals);
+    }
+
+    let params = locals.clone();
+
+    let tok = skip(filename, src, &tok, "{")?;
     let (mut body, tok) = compound_stmt(filename, src, &tok, &mut locals)?;
 
     add_type(&mut body);
@@ -568,6 +629,7 @@ fn function(filename: &str, src: &str, tok: &Token) -> Result<(Function, Token),
     let func = Function {
         next: None,
         name,
+        params,
         body,
         locals,
         stack_size: 0,
@@ -1237,6 +1299,18 @@ fn add_type(node: &mut Node) {
         }
     }
 
+    if let Some(args) = &mut node.args {
+        let mut n = args;
+        loop {
+            add_type(n);
+            if let Some(next) = &mut n.next {
+                n = next;
+            } else {
+                break;
+            }
+        }
+    }
+
     match node.kind {
         NodeKind::Add | NodeKind::Sub | NodeKind::Mul | NodeKind::Div | NodeKind::Neg => {
             node.ty = node.lhs.as_ref().unwrap().ty.clone();
@@ -1363,6 +1437,7 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
     let mut head = Function {
         next: None,
         name: String::new(),
+        params: Vec::new(),
         body: new_node(NodeKind::Block, 0),
         locals: Vec::new(),
         stack_size: 0,
@@ -1392,6 +1467,11 @@ fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         result.push_str("  push %rbp\n");
         result.push_str("  mov %rsp, %rbp\n");
         result.push_str(&format!("  sub ${}, %rsp\n", stack_size));
+
+        let argreg = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
+        for (i, var) in func.params.iter().enumerate() {
+            result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg[i], var.offset));
+        }
 
         gen_stmt(&func.body, &mut result, filename, src, &func.name)?;
 
