@@ -189,7 +189,7 @@ cargo run
 - [x] Make pointer arithmetic work
 - [x] Add one dimensional arrays
 - [x] Add arrays of arrays
-- [ ] Add [] operator
+- [x] Add [] operator
 - [ ] Add sizeof
 - [ ] Merge Function with Var
 - [ ] Add global variables
