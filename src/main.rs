@@ -139,7 +139,7 @@ struct Token {
     loc: usize,
     len: usize,
     ty: Option<Type>,
-    str: Option<String>,
+    str: Option<Vec<u8>>,
 }
 
 fn new_token(kind: TokenKind, start: usize, end: usize) -> Token {
@@ -154,7 +154,7 @@ fn new_token(kind: TokenKind, start: usize, end: usize) -> Token {
     }
 }
 
-fn read_escaped_char(chars: &[char], pos: usize) -> (char, usize) {
+fn read_escaped_char(chars: &[char], pos: usize) -> Result<(char, usize), String> {
     if pos < chars.len() && chars[pos] >= '0' && chars[pos] <= '7' {
         let mut c = (chars[pos] as i64) - ('0' as i64);
         let mut consumed = 1;
@@ -169,11 +169,33 @@ fn read_escaped_char(chars: &[char], pos: usize) -> (char, usize) {
             }
         }
 
-        return (char::from_u32(c as u32).unwrap_or('\0'), consumed);
+        return Ok((char::from_u32(c as u32).unwrap_or('\0'), consumed));
     }
 
     if pos >= chars.len() {
-        return ('\0', 0);
+        return Ok(('\0', 0));
+    }
+
+    if chars[pos] == 'x' {
+        let mut c: u32 = 0;
+        let mut consumed = 0;
+        let mut i = pos + 1;
+
+        while i < chars.len() {
+            if let Some(digit) = chars[i].to_digit(16) {
+                c = (c << 4) + digit;
+                consumed += 1;
+                i += 1;
+            } else {
+                break;
+            }
+        }
+
+        if consumed == 0 {
+            return Err("invalid hex escape sequence".to_string());
+        }
+
+        return Ok((char::from_u32(c).unwrap_or('\0'), consumed + 1));
     }
 
     let c = match chars[pos] {
@@ -187,7 +209,7 @@ fn read_escaped_char(chars: &[char], pos: usize) -> (char, usize) {
         'e' => '\x1B',
         other => other,
     };
-    (c, 1)
+    Ok((c, 1))
 }
 
 fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
@@ -251,7 +273,7 @@ fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
         if chars[pos] == '"' {
             let start = pos;
             pos += 1;
-            let mut str_content = String::new();
+            let mut str_content: Vec<u8> = Vec::new();
             while pos < chars.len() && chars[pos] != '"' {
                 if chars[pos] == '\n' || chars[pos] == '\0' {
                     return Err(error_at(filename, src, start, "unclosed string literal"));
@@ -261,12 +283,13 @@ fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
                     if pos >= chars.len() {
                         return Err(error_at(filename, src, start, "unclosed string literal"));
                     }
-                    let (escaped, consumed) = read_escaped_char(&chars, pos);
-                    str_content.push(escaped);
+                    let (escaped, consumed) = read_escaped_char(&chars, pos)
+                        .map_err(|e| error_at(filename, src, pos, &e))?;
+                    str_content.push(escaped as u8);
                     pos += consumed;
                     continue;
                 } else {
-                    str_content.push(chars[pos]);
+                    str_content.push(chars[pos] as u8);
                 }
                 pos += 1;
             }
@@ -598,9 +621,9 @@ fn new_anon_gvar(ty: Type) -> Obj {
     new_var(new_unique_name(), ty)
 }
 
-fn new_string_literal(str_content: &str, ty: Type) -> Obj {
+fn new_string_literal(str_content: &[u8], ty: Type) -> Obj {
     let mut var = new_anon_gvar(ty);
-    let mut init_data: Vec<u8> = str_content.bytes().collect();
+    let mut init_data: Vec<u8> = str_content.to_vec();
     init_data.push(0);
     var.init_data = Some(init_data);
     var
