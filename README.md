@@ -192,7 +192,7 @@ cargo run
 - [x] Add [] operator
 - [x] Add sizeof
 - [x] Merge Function with Var
-- [ ] Add global variables
+- [x] Add global variables
 - [ ] Add string literal
 - [ ] Add struct
 - [ ] Align struct members
