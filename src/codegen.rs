@@ -27,6 +27,22 @@ fn gen_addr(
                 current_fn,
             )?;
         }
+        NodeKind::Comma => {
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            gen_addr(
+                node.rhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+        }
         _ => return Err(error_at(filename, src, node.tok_loc, "not an lvalue")),
     }
     Ok(())
@@ -149,6 +165,23 @@ fn gen_expr(
             }
             return Ok(());
         }
+        NodeKind::Comma => {
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            gen_expr(
+                node.rhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -201,7 +234,8 @@ fn gen_expr(
         | NodeKind::Block
         | NodeKind::If
         | NodeKind::For
-        | NodeKind::While => unreachable!(),
+        | NodeKind::While
+        | NodeKind::Comma => unreachable!(),
     }
     Ok(())
 }
