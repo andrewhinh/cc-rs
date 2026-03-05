@@ -59,6 +59,8 @@ fn gen_expr(
     src: &str,
     current_fn: &str,
 ) -> Result<(), String> {
+    result.push_str(&format!("  .loc 1 {}\n", node.line_no));
+
     match node.kind {
         NodeKind::Num => {
             result.push_str(&format!("  mov ${}, %rax\n", node.val));
@@ -220,6 +222,8 @@ fn gen_stmt(
     src: &str,
     current_fn: &str,
 ) -> Result<(), String> {
+    result.push_str(&format!("  .loc 1 {}\n", node.line_no));
+
     match node.kind {
         NodeKind::If => {
             let c = count();
@@ -357,6 +361,7 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
     }
 
     let mut result = String::new();
+    result.push_str(&format!(".file 1 \"{}\"\n", filename));
 
     let mut has_data = false;
     for var in globals.iter() {
