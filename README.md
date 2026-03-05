@@ -192,7 +192,7 @@ cargo run
 - [x] Add one dimensional arrays
 - [x] Add arrays of arrays
 - [x] Add [] operator
-- [ ] Add sizeof
+- [x] Add sizeof
 - [ ] Merge Function with Var
 - [ ] Add global variables
 - [ ] Add string literal
