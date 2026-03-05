@@ -547,12 +547,13 @@ fn type_suffix(filename: &str, src: &str, tok: &Token, ty: Type) -> Result<(Type
 
     if equal(src, tok, "[") {
         let sz = get_number(tok.next.as_ref().unwrap())?;
-        let rest = skip(
+        let tok = skip(
             filename,
             src,
             tok.next.as_ref().unwrap().next.as_ref().unwrap(),
             "]",
         )?;
+        let (ty, rest) = type_suffix(filename, src, &tok, ty)?;
         return Ok((Type::new_array(ty, sz), rest));
     }
 
