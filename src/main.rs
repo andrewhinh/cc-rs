@@ -1012,7 +1012,29 @@ fn unary(
         return Ok((new_unary(NodeKind::Deref, node, tok_loc), tok));
     }
 
-    primary(filename, src, tok, locals)
+    postfix(filename, src, tok, locals)
+}
+
+fn postfix(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    locals: &mut Vec<Obj>,
+) -> Result<(Node, Token), String> {
+    let (mut node, mut tok) = primary(filename, src, tok, locals)?;
+
+    while equal(src, &tok, "[") {
+        let tok_loc = tok.loc;
+        let (idx, new_tok) = expr(filename, src, tok.next.as_ref().unwrap(), locals)?;
+        tok = skip(filename, src, &new_tok, "]")?;
+        node = new_unary(
+            NodeKind::Deref,
+            new_add(node, idx, tok_loc, filename, src)?,
+            tok_loc,
+        );
+    }
+
+    Ok((node, tok))
 }
 
 fn funcall(
