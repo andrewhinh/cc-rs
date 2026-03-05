@@ -26,6 +26,7 @@ pub struct Token {
     pub len: usize,
     pub ty: Option<Type>,
     pub str: Option<Vec<u8>>,
+    pub line_no: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,8 +191,31 @@ pub fn error_at(filename: &str, src: &str, loc: usize, msg: &str) -> String {
     )
 }
 
+fn verror_at(filename: &str, src: &str, loc: usize, line_no: usize, msg: &str) -> String {
+    let mut line_start = loc;
+    while line_start > 0 && src.as_bytes()[line_start - 1] != b'\n' {
+        line_start -= 1;
+    }
+
+    let mut line_end = loc;
+    while line_end < src.len() && src.as_bytes()[line_end] != b'\n' {
+        line_end += 1;
+    }
+
+    let line = &src[line_start..line_end];
+
+    let indent = format!("{filename}:{line_no}: ").len();
+    let pos = loc - line_start + indent;
+
+    format!(
+        "{filename}:{line_no}: {line}\n{:width$}^ {msg}\n",
+        "",
+        width = pos
+    )
+}
+
 pub fn error_tok(filename: &str, src: &str, tok: &Token, msg: &str) -> String {
-    error_at(filename, src, tok.loc, msg)
+    verror_at(filename, src, tok.loc, tok.line_no, msg)
 }
 
 static UNIQUE_ID: AtomicI32 = AtomicI32::new(0);

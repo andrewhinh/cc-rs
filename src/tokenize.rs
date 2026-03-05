@@ -9,6 +9,7 @@ pub fn new_token(kind: TokenKind, start: usize, end: usize) -> Token {
         len: end - start,
         ty: None,
         str: None,
+        line_no: 0,
     }
 }
 
@@ -108,6 +109,26 @@ fn convert_keywords(src: &str, tok: &mut Token) {
     }
 }
 
+fn add_line_numbers(src: &str, tok: &mut Token) {
+    let mut p = 0;
+    let mut n = 1;
+    let mut cur = tok;
+
+    loop {
+        if p == cur.loc {
+            cur.line_no = n;
+            if cur.next.is_none() {
+                break;
+            }
+            cur = cur.next.as_mut().unwrap();
+        }
+        if src.as_bytes().get(p) == Some(&b'\n') {
+            n += 1;
+        }
+        p += 1;
+    }
+}
+
 pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
     let mut head = Token {
         kind: TokenKind::Eof,
@@ -117,6 +138,7 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
         len: 0,
         ty: None,
         str: None,
+        line_no: 0,
     };
     let mut cur = &mut head;
     let chars: Vec<char> = src.chars().collect();
@@ -231,6 +253,7 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
 
     cur.next = Some(Box::new(new_token(TokenKind::Eof, pos, pos)));
     let mut tok = head.next.unwrap();
+    add_line_numbers(src, &mut tok);
     convert_keywords(src, &mut tok);
     Ok(*tok)
 }
