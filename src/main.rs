@@ -154,8 +154,29 @@ fn new_token(kind: TokenKind, start: usize, end: usize) -> Token {
     }
 }
 
-fn read_escaped_char(c: char) -> char {
-    match c {
+fn read_escaped_char(chars: &[char], pos: usize) -> (char, usize) {
+    if pos < chars.len() && chars[pos] >= '0' && chars[pos] <= '7' {
+        let mut c = (chars[pos] as i64) - ('0' as i64);
+        let mut consumed = 1;
+
+        if pos + 1 < chars.len() && chars[pos + 1] >= '0' && chars[pos + 1] <= '7' {
+            c = c * 8 + (chars[pos + 1] as i64) - ('0' as i64);
+            consumed = 2;
+
+            if pos + 2 < chars.len() && chars[pos + 2] >= '0' && chars[pos + 2] <= '7' {
+                c = c * 8 + (chars[pos + 2] as i64) - ('0' as i64);
+                consumed = 3;
+            }
+        }
+
+        return (char::from_u32(c as u32).unwrap_or('\0'), consumed);
+    }
+
+    if pos >= chars.len() {
+        return ('\0', 0);
+    }
+
+    let c = match chars[pos] {
         'a' => '\x07',
         'b' => '\x08',
         't' => '\x09',
@@ -164,8 +185,9 @@ fn read_escaped_char(c: char) -> char {
         'f' => '\x0C',
         'r' => '\x0D',
         'e' => '\x1B',
-        _ => c,
-    }
+        other => other,
+    };
+    (c, 1)
 }
 
 fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
@@ -239,7 +261,10 @@ fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
                     if pos >= chars.len() {
                         return Err(error_at(filename, src, start, "unclosed string literal"));
                     }
-                    str_content.push(read_escaped_char(chars[pos]));
+                    let (escaped, consumed) = read_escaped_char(&chars, pos);
+                    str_content.push(escaped);
+                    pos += consumed;
+                    continue;
                 } else {
                     str_content.push(chars[pos]);
                 }
