@@ -4,10 +4,11 @@ use crate::{
 };
 use crate::{consume, equal, skip};
 
-pub fn new_node(kind: NodeKind, tok_loc: usize) -> Node {
+pub fn new_node(kind: NodeKind, tok_loc: usize, line_no: usize) -> Node {
     Node {
         kind,
         tok_loc,
+        line_no,
         ty: None,
         next: None,
         lhs: None,
@@ -25,27 +26,27 @@ pub fn new_node(kind: NodeKind, tok_loc: usize) -> Node {
     }
 }
 
-pub fn new_binary(kind: NodeKind, lhs: Node, rhs: Node, tok_loc: usize) -> Node {
-    let mut node = new_node(kind, tok_loc);
+pub fn new_binary(kind: NodeKind, lhs: Node, rhs: Node, tok_loc: usize, line_no: usize) -> Node {
+    let mut node = new_node(kind, tok_loc, line_no);
     node.lhs = Some(Box::new(lhs));
     node.rhs = Some(Box::new(rhs));
     node
 }
 
-pub fn new_unary(kind: NodeKind, expr: Node, tok_loc: usize) -> Node {
-    let mut node = new_node(kind, tok_loc);
+pub fn new_unary(kind: NodeKind, expr: Node, tok_loc: usize, line_no: usize) -> Node {
+    let mut node = new_node(kind, tok_loc, line_no);
     node.lhs = Some(Box::new(expr));
     node
 }
 
-pub fn new_num(val: i64, tok_loc: usize) -> Node {
-    let mut node = new_node(NodeKind::Num, tok_loc);
+pub fn new_num(val: i64, tok_loc: usize, line_no: usize) -> Node {
+    let mut node = new_node(NodeKind::Num, tok_loc, line_no);
     node.val = val;
     node
 }
 
-pub fn new_var_node(var: Obj, tok_loc: usize) -> Node {
-    let mut node = new_node(NodeKind::Var, tok_loc);
+pub fn new_var_node(var: Obj, tok_loc: usize, line_no: usize) -> Node {
+    let mut node = new_node(NodeKind::Var, tok_loc, line_no);
     node.var = Some(Box::new(var.clone()));
     node.ty = Some(var.ty);
     node
@@ -294,6 +295,7 @@ pub fn declaration(
     let mut head = Node {
         kind: NodeKind::Num,
         tok_loc: tok.loc,
+        line_no: tok.line_no,
         ty: None,
         next: None,
         lhs: None,
@@ -328,17 +330,28 @@ pub fn declaration(
         }
 
         let tok_loc = tok.loc;
+        let line_no = tok.line_no;
         let tok_next = tok.next.as_ref().unwrap().clone();
         let (rhs, new_tok) = assign(filename, src, &tok_next, locals, globals, scope_stack)?;
         tok = new_tok;
-        let lhs = new_var_node(var, ty.name.as_ref().unwrap().loc);
-        let node = new_binary(NodeKind::Assign, lhs, rhs, tok_loc);
-        cur.next = Some(Box::new(new_unary(NodeKind::ExprStmt, node, tok_loc)));
+        let lhs = new_var_node(
+            var,
+            ty.name.as_ref().unwrap().loc,
+            ty.name.as_ref().unwrap().line_no,
+        );
+        let node = new_binary(NodeKind::Assign, lhs, rhs, tok_loc, line_no);
+        cur.next = Some(Box::new(new_unary(
+            NodeKind::ExprStmt,
+            node,
+            tok_loc,
+            line_no,
+        )));
         cur = cur.next.as_mut().unwrap();
     }
 
     let tok_loc = tok.loc;
-    let mut node = new_node(NodeKind::Block, tok_loc);
+    let line_no = tok.line_no;
+    let mut node = new_node(NodeKind::Block, tok_loc, line_no);
     node.body = head.next;
     Ok((node, *tok.next.as_ref().unwrap().clone()))
 }
@@ -405,12 +418,14 @@ pub fn compound_stmt(
     scope_stack: &mut Vec<Vec<VarScope>>,
 ) -> Result<(Node, Token), String> {
     let tok_loc = tok.loc;
+    let line_no = tok.line_no;
 
     scope_stack.push(Vec::new());
 
     let mut head = Node {
         kind: NodeKind::Num,
         tok_loc,
+        line_no,
         ty: None,
         next: None,
         lhs: None,
@@ -445,7 +460,7 @@ pub fn compound_stmt(
 
     scope_stack.pop();
 
-    let mut node = new_node(NodeKind::Block, tok_loc);
+    let mut node = new_node(NodeKind::Block, tok_loc, line_no);
     node.body = head.next;
     Ok((node, *tok.next.as_ref().unwrap().clone()))
 }
@@ -461,6 +476,7 @@ pub fn stmt(
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, "return") {
         let tok_loc = tok.loc;
+        let line_no = tok.line_no;
         let (expr_node, tok) = expr(
             filename,
             src,
@@ -470,12 +486,13 @@ pub fn stmt(
             scope_stack,
         )?;
         let tok = skip(filename, src, &tok, ";")?;
-        let node = new_unary(NodeKind::Return, expr_node, tok_loc);
+        let node = new_unary(NodeKind::Return, expr_node, tok_loc, line_no);
         return Ok((node, tok));
     }
     if equal(src, tok, "if") {
         let tok_loc = tok.loc;
-        let mut node = new_node(NodeKind::If, tok_loc);
+        let line_no = tok.line_no;
+        let mut node = new_node(NodeKind::If, tok_loc, line_no);
         let tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
         let (cond, tok) = expr(filename, src, &tok, locals, globals, scope_stack)?;
         node.cond = Some(Box::new(cond));
@@ -499,7 +516,8 @@ pub fn stmt(
     }
     if equal(src, tok, "for") {
         let tok_loc = tok.loc;
-        let mut node = new_node(NodeKind::For, tok_loc);
+        let line_no = tok.line_no;
+        let mut node = new_node(NodeKind::For, tok_loc, line_no);
         let mut tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
 
         let (init, new_tok) = expr_stmt(filename, src, &tok, locals, globals, scope_stack)?;
@@ -526,7 +544,8 @@ pub fn stmt(
     }
     if equal(src, tok, "while") {
         let tok_loc = tok.loc;
-        let mut node = new_node(NodeKind::While, tok_loc);
+        let line_no = tok.line_no;
+        let mut node = new_node(NodeKind::While, tok_loc, line_no);
         let tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
         let (cond, tok) = expr(filename, src, &tok, locals, globals, scope_stack)?;
         node.cond = Some(Box::new(cond));
@@ -559,13 +578,15 @@ pub fn expr_stmt(
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, ";") {
         let tok_loc = tok.loc;
+        let line_no = tok.line_no;
         let tok = *tok.next.as_ref().unwrap().clone();
-        return Ok((new_node(NodeKind::Block, tok_loc), tok));
+        return Ok((new_node(NodeKind::Block, tok_loc, line_no), tok));
     }
     let tok_loc = tok.loc;
+    let line_no = tok.line_no;
     let (expr_node, tok) = expr(filename, src, tok, locals, globals, scope_stack)?;
     let tok = skip(filename, src, &tok, ";")?;
-    let node = new_unary(NodeKind::ExprStmt, expr_node, tok_loc);
+    let node = new_unary(NodeKind::ExprStmt, expr_node, tok_loc, line_no);
     Ok((node, tok))
 }
 
@@ -591,6 +612,7 @@ pub fn assign(
     let (mut node, tok) = equality(filename, src, tok, locals, globals, scope_stack)?;
     if equal(src, &tok, "=") {
         let tok_loc = tok.loc;
+        let line_no = tok.line_no;
         let (rhs, tok) = assign(
             filename,
             src,
@@ -599,7 +621,7 @@ pub fn assign(
             globals,
             scope_stack,
         )?;
-        node = new_binary(NodeKind::Assign, node, rhs, tok_loc);
+        node = new_binary(NodeKind::Assign, node, rhs, tok_loc, line_no);
         return Ok((node, tok));
     }
     Ok((node, tok))
@@ -618,6 +640,7 @@ pub fn equality(
     loop {
         if equal(src, &tok, "==") {
             let tok_loc = tok.loc;
+            let line_no = tok.line_no;
             let (rhs, new_tok) = relational(
                 filename,
                 src,
@@ -626,13 +649,14 @@ pub fn equality(
                 globals,
                 scope_stack,
             )?;
-            node = new_binary(NodeKind::Eq, node, rhs, tok_loc);
+            node = new_binary(NodeKind::Eq, node, rhs, tok_loc, line_no);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, "!=") {
             let tok_loc = tok.loc;
+            let line_no = tok.line_no;
             let (rhs, new_tok) = relational(
                 filename,
                 src,
@@ -641,7 +665,7 @@ pub fn equality(
                 globals,
                 scope_stack,
             )?;
-            node = new_binary(NodeKind::Ne, node, rhs, tok_loc);
+            node = new_binary(NodeKind::Ne, node, rhs, tok_loc, line_no);
             tok = new_tok;
             continue;
         }
@@ -663,6 +687,7 @@ pub fn relational(
     loop {
         if equal(src, &tok, "<") {
             let tok_loc = tok.loc;
+            let line_no = tok.line_no;
             let (rhs, new_tok) = add(
                 filename,
                 src,
@@ -671,13 +696,14 @@ pub fn relational(
                 globals,
                 scope_stack,
             )?;
-            node = new_binary(NodeKind::Lt, node, rhs, tok_loc);
+            node = new_binary(NodeKind::Lt, node, rhs, tok_loc, line_no);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, "<=") {
             let tok_loc = tok.loc;
+            let line_no = tok.line_no;
             let (rhs, new_tok) = add(
                 filename,
                 src,
@@ -686,13 +712,14 @@ pub fn relational(
                 globals,
                 scope_stack,
             )?;
-            node = new_binary(NodeKind::Le, node, rhs, tok_loc);
+            node = new_binary(NodeKind::Le, node, rhs, tok_loc, line_no);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, ">") {
             let tok_loc = tok.loc;
+            let line_no = tok.line_no;
             let (lhs, new_tok) = add(
                 filename,
                 src,
@@ -701,13 +728,14 @@ pub fn relational(
                 globals,
                 scope_stack,
             )?;
-            node = new_binary(NodeKind::Lt, lhs, node, tok_loc);
+            node = new_binary(NodeKind::Lt, lhs, node, tok_loc, line_no);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, ">=") {
             let tok_loc = tok.loc;
+            let line_no = tok.line_no;
             let (lhs, new_tok) = add(
                 filename,
                 src,
@@ -716,7 +744,7 @@ pub fn relational(
                 globals,
                 scope_stack,
             )?;
-            node = new_binary(NodeKind::Le, lhs, node, tok_loc);
+            node = new_binary(NodeKind::Le, lhs, node, tok_loc, line_no);
             tok = new_tok;
             continue;
         }
@@ -738,6 +766,7 @@ pub fn add(
     loop {
         if equal(src, &tok, "+") {
             let tok_loc = tok.loc;
+            let line_no = tok.line_no;
             let (rhs, new_tok) = mul(
                 filename,
                 src,
@@ -746,13 +775,14 @@ pub fn add(
                 globals,
                 scope_stack,
             )?;
-            node = new_add(node, rhs, tok_loc, filename, src)?;
+            node = new_add(node, rhs, tok_loc, line_no, filename, src)?;
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, "-") {
             let tok_loc = tok.loc;
+            let line_no = tok.line_no;
             let (rhs, new_tok) = mul(
                 filename,
                 src,
@@ -761,7 +791,7 @@ pub fn add(
                 globals,
                 scope_stack,
             )?;
-            node = new_sub(node, rhs, tok_loc, filename, src)?;
+            node = new_sub(node, rhs, tok_loc, line_no, filename, src)?;
             tok = new_tok;
             continue;
         }
@@ -783,6 +813,7 @@ pub fn mul(
     loop {
         if equal(src, &tok, "*") {
             let tok_loc = tok.loc;
+            let line_no = tok.line_no;
             let (rhs, new_tok) = unary(
                 filename,
                 src,
@@ -791,13 +822,14 @@ pub fn mul(
                 globals,
                 scope_stack,
             )?;
-            node = new_binary(NodeKind::Mul, node, rhs, tok_loc);
+            node = new_binary(NodeKind::Mul, node, rhs, tok_loc, line_no);
             tok = new_tok;
             continue;
         }
 
         if equal(src, &tok, "/") {
             let tok_loc = tok.loc;
+            let line_no = tok.line_no;
             let (rhs, new_tok) = unary(
                 filename,
                 src,
@@ -806,7 +838,7 @@ pub fn mul(
                 globals,
                 scope_stack,
             )?;
-            node = new_binary(NodeKind::Div, node, rhs, tok_loc);
+            node = new_binary(NodeKind::Div, node, rhs, tok_loc, line_no);
             tok = new_tok;
             continue;
         }
@@ -836,6 +868,7 @@ pub fn unary(
 
     if equal(src, tok, "-") {
         let tok_loc = tok.loc;
+        let line_no = tok.line_no;
         let (node, tok) = unary(
             filename,
             src,
@@ -844,11 +877,12 @@ pub fn unary(
             globals,
             scope_stack,
         )?;
-        return Ok((new_unary(NodeKind::Neg, node, tok_loc), tok));
+        return Ok((new_unary(NodeKind::Neg, node, tok_loc, line_no), tok));
     }
 
     if equal(src, tok, "&") {
         let tok_loc = tok.loc;
+        let line_no = tok.line_no;
         let (node, tok) = unary(
             filename,
             src,
@@ -857,11 +891,12 @@ pub fn unary(
             globals,
             scope_stack,
         )?;
-        return Ok((new_unary(NodeKind::Addr, node, tok_loc), tok));
+        return Ok((new_unary(NodeKind::Addr, node, tok_loc, line_no), tok));
     }
 
     if equal(src, tok, "*") {
         let tok_loc = tok.loc;
+        let line_no = tok.line_no;
         let (node, tok) = unary(
             filename,
             src,
@@ -870,7 +905,7 @@ pub fn unary(
             globals,
             scope_stack,
         )?;
-        return Ok((new_unary(NodeKind::Deref, node, tok_loc), tok));
+        return Ok((new_unary(NodeKind::Deref, node, tok_loc, line_no), tok));
     }
 
     postfix(filename, src, tok, locals, globals, scope_stack)
@@ -888,6 +923,7 @@ pub fn postfix(
 
     while equal(src, &tok, "[") {
         let tok_loc = tok.loc;
+        let line_no = tok.line_no;
         let (idx, new_tok) = expr(
             filename,
             src,
@@ -899,8 +935,9 @@ pub fn postfix(
         tok = skip(filename, src, &new_tok, "]")?;
         node = new_unary(
             NodeKind::Deref,
-            new_add(node, idx, tok_loc, filename, src)?,
+            new_add(node, idx, tok_loc, line_no, filename, src)?,
             tok_loc,
+            line_no,
         );
     }
 
@@ -916,12 +953,14 @@ pub fn funcall(
     scope_stack: &mut Vec<Vec<VarScope>>,
 ) -> Result<(Node, Token), String> {
     let tok_loc = tok.loc;
+    let line_no = tok.line_no;
     let funcname: String = src.chars().skip(tok.loc).take(tok.len).collect();
     let mut tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
 
     let mut head = Node {
         kind: NodeKind::Num,
         tok_loc,
+        line_no,
         ty: None,
         next: None,
         lhs: None,
@@ -951,7 +990,7 @@ pub fn funcall(
 
     let tok = skip(filename, src, &tok, ")")?;
 
-    let mut node = new_node(NodeKind::FuncCall, tok_loc);
+    let mut node = new_node(NodeKind::FuncCall, tok_loc, line_no);
     node.funcname = Some(funcname);
     node.args = head.next;
     Ok((node, tok))
@@ -967,6 +1006,7 @@ pub fn primary(
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, "(") && equal(src, tok.next.as_ref().unwrap(), "{") {
         let tok_loc = tok.loc;
+        let line_no = tok.line_no;
         let (body, tok) = compound_stmt(
             filename,
             src,
@@ -976,7 +1016,7 @@ pub fn primary(
             scope_stack,
         )?;
         let tok = skip(filename, src, &tok, ")")?;
-        let mut node = new_node(NodeKind::StmtExpr, tok_loc);
+        let mut node = new_node(NodeKind::StmtExpr, tok_loc, line_no);
         node.body = body.body;
         return Ok((node, tok));
     }
@@ -996,6 +1036,7 @@ pub fn primary(
 
     if equal(src, tok, "sizeof") {
         let tok_loc = tok.loc;
+        let line_no = tok.line_no;
         let (mut node, tok) = unary(
             filename,
             src,
@@ -1006,7 +1047,7 @@ pub fn primary(
         )?;
         add_type(&mut node);
         let size = node.ty.as_ref().unwrap().size;
-        return Ok((new_num(size, tok_loc), tok));
+        return Ok((new_num(size, tok_loc, line_no), tok));
     }
 
     if tok.kind == TokenKind::Ident {
@@ -1015,27 +1056,30 @@ pub fn primary(
         }
 
         let tok_loc = tok.loc;
+        let line_no = tok.line_no;
         let funcname: String = src.chars().skip(tok.loc).take(tok.len).collect();
 
         let var = find_var(scope_stack, globals, &funcname)
             .ok_or_else(|| error_tok(filename, src, tok, "undefined variable"))?;
-        let node = new_var_node(var, tok_loc);
+        let node = new_var_node(var, tok_loc, line_no);
         return Ok((node, *tok.next.as_ref().unwrap().clone()));
     }
 
     if tok.kind == TokenKind::Str {
         let tok_loc = tok.loc;
+        let line_no = tok.line_no;
         let str_content = tok.str.as_ref().unwrap();
         let ty = tok.ty.as_ref().unwrap().clone();
         let var = new_string_literal(str_content, ty);
-        let node = new_var_node(var.clone(), tok_loc);
+        let node = new_var_node(var.clone(), tok_loc, line_no);
         globals.push(var);
         return Ok((node, *tok.next.as_ref().unwrap().clone()));
     }
 
     if tok.kind == TokenKind::Num {
         let tok_loc = tok.loc;
-        let node = new_num(tok.val, tok_loc);
+        let line_no = tok.line_no;
+        let node = new_num(tok.val, tok_loc, line_no);
         return Ok((node, *tok.next.as_ref().unwrap().clone()));
     }
 
@@ -1183,6 +1227,7 @@ pub fn new_add(
     lhs: Node,
     rhs: Node,
     tok_loc: usize,
+    line_no: usize,
     filename: &str,
     src: &str,
 ) -> Result<Node, String> {
@@ -1195,7 +1240,7 @@ pub fn new_add(
     let rhs_ty = rhs.ty.as_ref().unwrap();
 
     if is_integer(lhs_ty) && is_integer(rhs_ty) {
-        return Ok(new_binary(NodeKind::Add, lhs, rhs, tok_loc));
+        return Ok(new_binary(NodeKind::Add, lhs, rhs, tok_loc, line_no));
     }
 
     if lhs_ty.kind == TypeKind::Ptr && rhs_ty.kind == TypeKind::Ptr {
@@ -1215,14 +1260,21 @@ pub fn new_add(
     }
 
     let base_size = lhs.ty.as_ref().unwrap().base.as_ref().unwrap().size;
-    let rhs = new_binary(NodeKind::Mul, rhs, new_num(base_size, tok_loc), tok_loc);
-    Ok(new_binary(NodeKind::Add, lhs, rhs, tok_loc))
+    let rhs = new_binary(
+        NodeKind::Mul,
+        rhs,
+        new_num(base_size, tok_loc, line_no),
+        tok_loc,
+        line_no,
+    );
+    Ok(new_binary(NodeKind::Add, lhs, rhs, tok_loc, line_no))
 }
 
 pub fn new_sub(
     lhs: Node,
     rhs: Node,
     tok_loc: usize,
+    line_no: usize,
     filename: &str,
     src: &str,
 ) -> Result<Node, String> {
@@ -1235,14 +1287,20 @@ pub fn new_sub(
     let rhs_ty = rhs.ty.as_ref().unwrap();
 
     if is_integer(lhs_ty) && is_integer(rhs_ty) {
-        return Ok(new_binary(NodeKind::Sub, lhs, rhs, tok_loc));
+        return Ok(new_binary(NodeKind::Sub, lhs, rhs, tok_loc, line_no));
     }
 
     if (lhs_ty.kind == TypeKind::Ptr || lhs_ty.kind == TypeKind::Array) && is_integer(rhs_ty) {
         let lhs_ty_clone = lhs.ty.clone();
         let base_size = lhs.ty.as_ref().unwrap().base.as_ref().unwrap().size;
-        let rhs = new_binary(NodeKind::Mul, rhs, new_num(base_size, tok_loc), tok_loc);
-        let mut node = new_binary(NodeKind::Sub, lhs, rhs, tok_loc);
+        let rhs = new_binary(
+            NodeKind::Mul,
+            rhs,
+            new_num(base_size, tok_loc, line_no),
+            tok_loc,
+            line_no,
+        );
+        let mut node = new_binary(NodeKind::Sub, lhs, rhs, tok_loc, line_no);
         node.ty = Some(Type::new_ptr(
             lhs_ty_clone
                 .unwrap()
@@ -1259,9 +1317,15 @@ pub fn new_sub(
         && (rhs_ty.kind == TypeKind::Ptr || rhs_ty.kind == TypeKind::Array)
     {
         let base_size = lhs.ty.as_ref().unwrap().base.as_ref().unwrap().size;
-        let mut node = new_binary(NodeKind::Sub, lhs, rhs, tok_loc);
+        let mut node = new_binary(NodeKind::Sub, lhs, rhs, tok_loc, line_no);
         node.ty = Some(Type::new_int());
-        let mut result = new_binary(NodeKind::Div, node, new_num(base_size, tok_loc), tok_loc);
+        let mut result = new_binary(
+            NodeKind::Div,
+            node,
+            new_num(base_size, tok_loc, line_no),
+            tok_loc,
+            line_no,
+        );
         result.ty = Some(Type::new_int());
         return Ok(result);
     }
