@@ -27,6 +27,17 @@ fn gen_addr(
                 current_fn,
             )?;
         }
+        NodeKind::Member => {
+            gen_addr(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            let offset = node.member.as_ref().unwrap().offset;
+            result.push_str(&format!("  add ${}, %rax\n", offset));
+        }
         NodeKind::Comma => {
             gen_expr(
                 node.lhs.as_ref().unwrap(),
@@ -94,6 +105,11 @@ fn gen_expr(
             return Ok(());
         }
         NodeKind::Var => {
+            gen_addr(node, result, filename, src, current_fn)?;
+            load(node.ty.as_ref().unwrap(), result);
+            return Ok(());
+        }
+        NodeKind::Member => {
             gen_addr(node, result, filename, src, current_fn)?;
             load(node.ty.as_ref().unwrap(), result);
             return Ok(());
@@ -227,6 +243,7 @@ fn gen_expr(
         | NodeKind::ExprStmt
         | NodeKind::StmtExpr
         | NodeKind::Var
+        | NodeKind::Member
         | NodeKind::Assign
         | NodeKind::Addr
         | NodeKind::Deref

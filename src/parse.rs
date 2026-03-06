@@ -23,6 +23,7 @@ pub fn new_node(kind: NodeKind, tok_loc: usize, line_no: usize) -> Node {
         args: None,
         var: None,
         val: 0,
+        member: None,
     }
 }
 
@@ -132,16 +133,136 @@ pub fn get_ident(src: &str, tok: &Token) -> Result<String, String> {
     Ok(name)
 }
 
+pub fn struct_members(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    ty: &mut Type,
+) -> Result<Token, String> {
+    let mut tok = tok.clone();
+    let mut members: Vec<crate::Member> = Vec::new();
+
+    while !equal(src, &tok, "}") {
+        let (basety, new_tok) = declspec(filename, src, &tok)?;
+        tok = new_tok;
+        let mut i = 0;
+
+        while !equal(src, &tok, ";") {
+            if i > 0 {
+                tok = skip(filename, src, &tok, ",")?;
+            }
+            i += 1;
+
+            let (mem_ty, new_tok) = declarator(filename, src, &tok, basety.clone())?;
+            tok = new_tok;
+            let mem = crate::Member {
+                next: None,
+                ty: mem_ty.clone(),
+                name: mem_ty.name.clone(),
+                offset: 0,
+            };
+            members.push(mem);
+        }
+        tok = skip(filename, src, &tok, ";")?;
+    }
+
+    let rest = tok.next.as_ref().unwrap().as_ref().clone();
+
+    if members.is_empty() {
+        ty.members = None;
+    } else {
+        let mut current: Option<Box<crate::Member>> = None;
+        for mem in members.into_iter().rev() {
+            let mut m = mem;
+            m.next = current;
+            current = Some(Box::new(m));
+        }
+        ty.members = current;
+    }
+
+    Ok(rest)
+}
+
+pub fn struct_decl(filename: &str, src: &str, tok: &Token) -> Result<(Type, Token), String> {
+    let tok = skip(filename, src, tok, "{")?;
+
+    let mut ty = Type {
+        kind: TypeKind::Struct,
+        size: 0,
+        base: None,
+        name: None,
+        return_ty: None,
+        params: None,
+        next: None,
+        array_len: 0,
+        members: None,
+    };
+
+    let rest = struct_members(filename, src, &tok, &mut ty)?;
+
+    let mut offset = 0;
+    let mut current = ty.members.as_mut();
+    while let Some(mem) = current {
+        mem.offset = offset;
+        offset += mem.ty.size;
+        current = mem.next.as_mut();
+    }
+    ty.size = offset;
+
+    Ok((ty, rest))
+}
+
+pub fn get_struct_member(
+    filename: &str,
+    ty: &Type,
+    src: &str,
+    tok: &Token,
+) -> Result<crate::Member, String> {
+    let mut current = ty.members.as_ref();
+    while let Some(mem) = current {
+        if let Some(name) = &mem.name
+            && name.len == tok.len
+        {
+            let mem_name: String = src.chars().skip(name.loc).take(name.len).collect();
+            let tok_name: String = src.chars().skip(tok.loc).take(tok.len).collect();
+            if mem_name == tok_name {
+                return Ok(mem.as_ref().clone());
+            }
+        }
+        current = mem.next.as_ref();
+    }
+    Err(error_tok(filename, src, tok, "no such member"))
+}
+
+pub fn struct_ref(filename: &str, src: &str, lhs: Node, tok: &Token) -> Result<Node, String> {
+    let mut lhs = lhs;
+    add_type(&mut lhs);
+
+    if lhs.ty.as_ref().unwrap().kind != TypeKind::Struct {
+        return Err(error_tok(filename, src, tok, "not a struct"));
+    }
+
+    let member = get_struct_member(filename, lhs.ty.as_ref().unwrap(), src, tok)?;
+    let mut node = new_unary(NodeKind::Member, lhs, tok.loc, tok.line_no);
+    node.member = Some(Box::new(member));
+    Ok(node)
+}
+
 pub fn declspec(filename: &str, src: &str, tok: &Token) -> Result<(Type, Token), String> {
     if equal(src, tok, "char") {
         return Ok((Type::new_char(), *tok.next.as_ref().unwrap().clone()));
     }
-    let tok = skip(filename, src, tok, "int")?;
-    Ok((Type::new_int(), tok))
+    if equal(src, tok, "int") {
+        return Ok((Type::new_int(), *tok.next.as_ref().unwrap().clone()));
+    }
+    if equal(src, tok, "struct") {
+        return struct_decl(filename, src, tok.next.as_ref().unwrap());
+    }
+    Err(error_tok(filename, src, tok, "typename expected"))
 }
 
 pub fn is_typename(src: &str, tok: &Token) -> bool {
-    equal(src, tok, "char") || equal(src, tok, "int")
+    equal(src, tok, "char") || equal(src, tok, "int") || equal(src, tok, "struct")
 }
 
 pub fn get_number(tok: &Token) -> Result<i64, String> {
@@ -204,6 +325,7 @@ pub fn func_params(
         params: None,
         next: None,
         array_len: 0,
+        members: None,
     };
     let mut cur = &mut head;
     let mut first = true;
@@ -310,6 +432,7 @@ pub fn declaration(
         args: None,
         var: None,
         val: 0,
+        member: None,
     };
     let mut cur = &mut head;
     let mut i = 0;
@@ -440,6 +563,7 @@ pub fn compound_stmt(
         args: None,
         var: None,
         val: 0,
+        member: None,
     };
     let mut cur = &mut head;
 
@@ -940,27 +1064,37 @@ pub fn postfix(
 ) -> Result<(Node, Token), String> {
     let (mut node, mut tok) = primary(filename, src, tok, locals, globals, scope_stack)?;
 
-    while equal(src, &tok, "[") {
-        let tok_loc = tok.loc;
-        let line_no = tok.line_no;
-        let (idx, new_tok) = expr(
-            filename,
-            src,
-            tok.next.as_ref().unwrap(),
-            locals,
-            globals,
-            scope_stack,
-        )?;
-        tok = skip(filename, src, &new_tok, "]")?;
-        node = new_unary(
-            NodeKind::Deref,
-            new_add(node, idx, tok_loc, line_no, filename, src)?,
-            tok_loc,
-            line_no,
-        );
-    }
+    loop {
+        if equal(src, &tok, "[") {
+            let tok_loc = tok.loc;
+            let line_no = tok.line_no;
+            let (idx, new_tok) = expr(
+                filename,
+                src,
+                tok.next.as_ref().unwrap(),
+                locals,
+                globals,
+                scope_stack,
+            )?;
+            tok = skip(filename, src, &new_tok, "]")?;
+            node = new_unary(
+                NodeKind::Deref,
+                new_add(node, idx, tok_loc, line_no, filename, src)?,
+                tok_loc,
+                line_no,
+            );
+            continue;
+        }
 
-    Ok((node, tok))
+        if equal(src, &tok, ".") {
+            let tok_next = tok.next.as_ref().unwrap();
+            node = struct_ref(filename, src, node, tok_next)?;
+            tok = *tok_next.next.as_ref().unwrap().clone();
+            continue;
+        }
+
+        return Ok((node, tok));
+    }
 }
 
 pub fn funcall(
@@ -994,6 +1128,7 @@ pub fn funcall(
         args: None,
         var: None,
         val: 0,
+        member: None,
     };
     let mut cur = &mut head;
 
@@ -1119,6 +1254,7 @@ pub fn func_type(return_ty: Type) -> Type {
         params: None,
         next: None,
         array_len: 0,
+        members: None,
     }
 }
 
@@ -1206,6 +1342,9 @@ pub fn add_type(node: &mut Node) {
         }
         NodeKind::Comma => {
             node.ty = node.rhs.as_ref().unwrap().ty.clone();
+        }
+        NodeKind::Member => {
+            node.ty = Some(node.member.as_ref().unwrap().ty.clone());
         }
         NodeKind::Addr => {
             let lhs_ty = node.lhs.as_ref().unwrap().ty.as_ref().unwrap();
