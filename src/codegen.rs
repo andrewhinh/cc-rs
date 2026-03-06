@@ -386,6 +386,57 @@ fn align_to(n: i64, align: i64) -> i64 {
     (n + align - 1) / align * align
 }
 
+fn fix_var_offsets(node: &mut Node, locals: &[Obj]) {
+    if let Some(var) = &mut node.var
+        && let Some(lv) = locals.iter().find(|l| l.name == var.name)
+    {
+        var.offset = lv.offset;
+    }
+    if let Some(lhs) = &mut node.lhs {
+        fix_var_offsets(lhs, locals);
+    }
+    if let Some(rhs) = &mut node.rhs {
+        fix_var_offsets(rhs, locals);
+    }
+    if let Some(cond) = &mut node.cond {
+        fix_var_offsets(cond, locals);
+    }
+    if let Some(then) = &mut node.then {
+        fix_var_offsets(then, locals);
+    }
+    if let Some(els) = &mut node.els {
+        fix_var_offsets(els, locals);
+    }
+    if let Some(init) = &mut node.init {
+        fix_var_offsets(init, locals);
+    }
+    if let Some(inc) = &mut node.inc {
+        fix_var_offsets(inc, locals);
+    }
+    if let Some(body) = &mut node.body {
+        let mut n = body;
+        loop {
+            fix_var_offsets(n, locals);
+            if let Some(next) = &mut n.next {
+                n = next;
+            } else {
+                break;
+            }
+        }
+    }
+    if let Some(args) = &mut node.args {
+        let mut n = args;
+        loop {
+            fix_var_offsets(n, locals);
+            if let Some(next) = &mut n.next {
+                n = next;
+            } else {
+                break;
+            }
+        }
+    }
+}
+
 pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
     if !cfg!(target_arch = "x86_64") {
         return Err(String::from(
@@ -435,16 +486,23 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         }
     }
 
-    for func in globals.iter() {
+    for func in globals.iter_mut() {
         if !func.is_function {
             continue;
         }
 
-        let mut stack_size = 0;
-        for var in func.locals.iter() {
-            stack_size += var.ty.size;
+        let mut offset = 0;
+        for var in func.locals.iter_mut().rev() {
+            offset += var.ty.size;
+            offset = align_to(offset, var.ty.align);
+            var.offset = offset;
         }
-        let stack_size = align_to(stack_size, 16);
+        let stack_size = align_to(offset, 16);
+
+        let locals = func.locals.clone();
+        if let Some(body) = &mut func.body {
+            fix_var_offsets(body, &locals);
+        }
 
         result.push_str("  .text\n");
         result.push_str(&format!("  .globl {}\n", func.name));
@@ -456,7 +514,11 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
 
         let argreg8 = ["%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"];
         let argreg64 = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
-        for (i, var) in func.params.iter().enumerate() {
+        for (i, var) in func.params.iter_mut().enumerate() {
+            let local_var = func.locals.iter().find(|l| l.name == var.name);
+            if let Some(lv) = local_var {
+                var.offset = lv.offset;
+            }
             if var.ty.size == 1 {
                 result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg8[i], var.offset));
             } else {
