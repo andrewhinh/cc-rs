@@ -196,7 +196,7 @@ cargo run
 - [x] Add string literal
 - [x] Add struct
 - [x] Align struct members
-- [ ] Align local variables
+- [x] Align local variables
 - [ ] Support struct tags
 - [ ] Add -> operator
 - [ ] Add union
