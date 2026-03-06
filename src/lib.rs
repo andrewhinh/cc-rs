@@ -79,6 +79,7 @@ pub struct Member {
 pub struct Type {
     pub kind: TypeKind,
     pub size: i64,
+    pub align: i64,
     pub base: Option<Box<Type>>,
     pub name: Option<Box<Token>>,
     #[allow(unused)]
@@ -95,6 +96,7 @@ impl Type {
         Type {
             kind: TypeKind::Char,
             size: 1,
+            align: 1,
             base: None,
             name: None,
             return_ty: None,
@@ -109,6 +111,7 @@ impl Type {
         Type {
             kind: TypeKind::Int,
             size: 8,
+            align: 8,
             base: None,
             name: None,
             return_ty: None,
@@ -123,6 +126,7 @@ impl Type {
         Type {
             kind: TypeKind::Ptr,
             size: 8,
+            align: 8,
             base: Some(Box::new(base)),
             name: None,
             return_ty: None,
@@ -137,6 +141,7 @@ impl Type {
         Type {
             kind: TypeKind::Array,
             size: base.size * len,
+            align: base.align,
             base: Some(Box::new(base)),
             name: None,
             return_ty: None,
@@ -234,6 +239,10 @@ fn verror_at(filename: &str, src: &str, loc: usize, line_no: usize, msg: &str) -
 
 pub fn error_tok(filename: &str, src: &str, tok: &Token, msg: &str) -> String {
     verror_at(filename, src, tok.loc, tok.line_no, msg)
+}
+
+pub fn align_to(n: i64, align: i64) -> i64 {
+    (n + align - 1) / align * align
 }
 
 static UNIQUE_ID: AtomicI32 = AtomicI32::new(0);
