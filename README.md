@@ -194,7 +194,7 @@ cargo run
 - [x] Merge Function with Var
 - [x] Add global variables
 - [x] Add string literal
-- [ ] Add struct
+- [x] Add struct
 - [ ] Align struct members
 - [ ] Align local variables
 - [ ] Support struct tags
