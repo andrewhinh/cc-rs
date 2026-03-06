@@ -1,5 +1,5 @@
 use crate::{
-    Node, NodeKind, Obj, Token, TokenKind, Type, TypeKind, VarScope, error_at, error_tok,
+    Node, NodeKind, Obj, Token, TokenKind, Type, TypeKind, VarScope, align_to, error_at, error_tok,
     new_unique_name,
 };
 use crate::{consume, equal, skip};
@@ -189,6 +189,7 @@ pub fn struct_decl(filename: &str, src: &str, tok: &Token) -> Result<(Type, Toke
     let mut ty = Type {
         kind: TypeKind::Struct,
         size: 0,
+        align: 1,
         base: None,
         name: None,
         return_ty: None,
@@ -203,11 +204,17 @@ pub fn struct_decl(filename: &str, src: &str, tok: &Token) -> Result<(Type, Toke
     let mut offset = 0;
     let mut current = ty.members.as_mut();
     while let Some(mem) = current {
+        offset = align_to(offset, mem.ty.align);
         mem.offset = offset;
         offset += mem.ty.size;
+
+        if ty.align < mem.ty.align {
+            ty.align = mem.ty.align;
+        }
+
         current = mem.next.as_mut();
     }
-    ty.size = offset;
+    ty.size = align_to(offset, ty.align);
 
     Ok((ty, rest))
 }
@@ -319,6 +326,7 @@ pub fn func_params(
     let mut head = Type {
         kind: TypeKind::Int,
         size: 0,
+        align: 0,
         base: None,
         name: None,
         return_ty: None,
@@ -1248,6 +1256,7 @@ pub fn func_type(return_ty: Type) -> Type {
     Type {
         kind: TypeKind::Func,
         size: 0,
+        align: 0,
         base: None,
         name: None,
         return_ty: Some(Box::new(return_ty)),
