@@ -42,6 +42,7 @@ pub enum NodeKind {
     Le,
     Assign,
     Comma,
+    Member,
     Addr,
     Deref,
     Return,
@@ -63,6 +64,15 @@ pub enum TypeKind {
     Ptr,
     Func,
     Array,
+    Struct,
+}
+
+#[derive(Debug, Clone)]
+pub struct Member {
+    pub next: Option<Box<Member>>,
+    pub ty: Type,
+    pub name: Option<Box<Token>>,
+    pub offset: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +87,7 @@ pub struct Type {
     pub next: Option<Box<Type>>,
     #[allow(dead_code)]
     pub array_len: i64,
+    pub members: Option<Box<Member>>,
 }
 
 impl Type {
@@ -90,6 +101,7 @@ impl Type {
             params: None,
             next: None,
             array_len: 0,
+            members: None,
         }
     }
 
@@ -103,6 +115,7 @@ impl Type {
             params: None,
             next: None,
             array_len: 0,
+            members: None,
         }
     }
 
@@ -116,6 +129,7 @@ impl Type {
             params: None,
             next: None,
             array_len: 0,
+            members: None,
         }
     }
 
@@ -129,6 +143,7 @@ impl Type {
             params: None,
             next: None,
             array_len: len,
+            members: None,
         }
     }
 }
@@ -167,6 +182,7 @@ pub struct Node {
     pub args: Option<Box<Node>>,
     pub var: Option<Box<Obj>>,
     pub val: i64,
+    pub member: Option<Box<Member>>,
 }
 
 pub fn error_at(filename: &str, src: &str, loc: usize, msg: &str) -> String {
