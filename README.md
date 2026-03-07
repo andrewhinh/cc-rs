@@ -197,7 +197,7 @@ cargo run
 - [x] Add struct
 - [x] Align struct members
 - [x] Align local variables
-- [ ] Support struct tags
+- [x] Support struct tags
 - [ ] Add -> operator
 - [ ] Add union
 - [ ] Add struct assignment
