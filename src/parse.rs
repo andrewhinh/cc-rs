@@ -1,6 +1,6 @@
 use crate::{
-    Node, NodeKind, Obj, Token, TokenKind, Type, TypeKind, VarScope, align_to, error_at, error_tok,
-    new_unique_name,
+    Node, NodeKind, Obj, TagScope, Token, TokenKind, Type, TypeKind, VarScope, align_to, error_at,
+    error_tok, new_unique_name,
 };
 use crate::{consume, equal, skip};
 
@@ -69,6 +69,24 @@ pub fn find_var(scope_stack: &[Vec<VarScope>], globals: &[Obj], name: &str) -> O
     None
 }
 
+pub fn find_tag(tag_scope_stack: &[Vec<TagScope>], name: &str) -> Option<Type> {
+    for scope in tag_scope_stack.iter().rev() {
+        for ts in scope.iter().rev() {
+            if ts.name == name {
+                return Some(ts.ty.clone());
+            }
+        }
+    }
+    None
+}
+
+pub fn push_tag_scope(tag_scope_stack: &mut [Vec<TagScope>], name: String, ty: Type) {
+    tag_scope_stack
+        .last_mut()
+        .unwrap()
+        .push(TagScope { name, ty });
+}
+
 pub fn new_var(name: String, ty: Type) -> Obj {
     Obj {
         name,
@@ -132,12 +150,13 @@ pub fn struct_members(
     src: &str,
     tok: &Token,
     ty: &mut Type,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<Token, String> {
     let mut tok = tok.clone();
     let mut members: Vec<crate::Member> = Vec::new();
 
     while !equal(src, &tok, "}") {
-        let (basety, new_tok) = declspec(filename, src, &tok)?;
+        let (basety, new_tok) = declspec(filename, src, &tok, tag_scope_stack)?;
         tok = new_tok;
         let mut i = 0;
 
@@ -147,7 +166,8 @@ pub fn struct_members(
             }
             i += 1;
 
-            let (mem_ty, new_tok) = declarator(filename, src, &tok, basety.clone())?;
+            let (mem_ty, new_tok) =
+                declarator(filename, src, &tok, basety.clone(), tag_scope_stack)?;
             tok = new_tok;
             let mem = crate::Member {
                 next: None,
@@ -177,8 +197,33 @@ pub fn struct_members(
     Ok(rest)
 }
 
-pub fn struct_decl(filename: &str, src: &str, tok: &Token) -> Result<(Type, Token), String> {
-    let tok = skip(filename, src, tok, "{")?;
+pub fn struct_decl(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<(Type, Token), String> {
+    let mut tok = tok.clone();
+
+    let tag = if tok.kind == TokenKind::Ident {
+        let tag_tok = tok.clone();
+        tok = tok.next.as_ref().unwrap().as_ref().clone();
+        Some(tag_tok)
+    } else {
+        None
+    };
+
+    if let Some(tag_tok) = &tag
+        && !equal(src, &tok, "{")
+    {
+        let tag_name: String = src.chars().skip(tag_tok.loc).take(tag_tok.len).collect();
+        if let Some(ty) = find_tag(tag_scope_stack, &tag_name) {
+            return Ok((ty, tok));
+        }
+        return Err(error_tok(filename, src, tag_tok, "unknown struct type"));
+    }
+
+    tok = skip(filename, src, &tok, "{")?;
 
     let mut ty = Type {
         kind: TypeKind::Struct,
@@ -193,7 +238,7 @@ pub fn struct_decl(filename: &str, src: &str, tok: &Token) -> Result<(Type, Toke
         members: None,
     };
 
-    let rest = struct_members(filename, src, &tok, &mut ty)?;
+    let rest = struct_members(filename, src, &tok, &mut ty, tag_scope_stack)?;
 
     let mut offset = 0;
     let mut current = ty.members.as_mut();
@@ -209,6 +254,11 @@ pub fn struct_decl(filename: &str, src: &str, tok: &Token) -> Result<(Type, Toke
         current = mem.next.as_mut();
     }
     ty.size = align_to(offset, ty.align);
+
+    if let Some(tag_tok) = tag {
+        let tag_name: String = src.chars().skip(tag_tok.loc).take(tag_tok.len).collect();
+        push_tag_scope(tag_scope_stack, tag_name, ty.clone());
+    }
 
     Ok((ty, rest))
 }
@@ -249,7 +299,12 @@ pub fn struct_ref(filename: &str, src: &str, lhs: Node, tok: &Token) -> Result<N
     Ok(node)
 }
 
-pub fn declspec(filename: &str, src: &str, tok: &Token) -> Result<(Type, Token), String> {
+pub fn declspec(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<(Type, Token), String> {
     if equal(src, tok, "char") {
         return Ok((Type::new_char(), *tok.next.as_ref().unwrap().clone()));
     }
@@ -257,7 +312,7 @@ pub fn declspec(filename: &str, src: &str, tok: &Token) -> Result<(Type, Token),
         return Ok((Type::new_int(), *tok.next.as_ref().unwrap().clone()));
     }
     if equal(src, tok, "struct") {
-        return struct_decl(filename, src, tok.next.as_ref().unwrap());
+        return struct_decl(filename, src, tok.next.as_ref().unwrap(), tag_scope_stack);
     }
     Err(error_tok(filename, src, tok, "typename expected"))
 }
@@ -279,7 +334,8 @@ pub fn is_function(src: &str, tok: &Token) -> Result<bool, String> {
     }
 
     let dummy = Type::new_int();
-    let (ty, _) = declarator("", src, tok, dummy)?;
+    let mut tag_scope_stack: Vec<Vec<TagScope>> = vec![Vec::new()];
+    let (ty, _) = declarator("", src, tok, dummy, &mut tag_scope_stack)?;
     Ok(ty.kind == TypeKind::Func)
 }
 
@@ -289,6 +345,7 @@ pub fn global_variable(
     tok: &Token,
     basety: Type,
     globals: &mut Vec<Obj>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<Token, String> {
     let mut tok = tok.clone();
     let mut first = true;
@@ -299,7 +356,7 @@ pub fn global_variable(
         }
         first = false;
 
-        let (ty, new_tok) = declarator(filename, src, &tok, basety.clone())?;
+        let (ty, new_tok) = declarator(filename, src, &tok, basety.clone(), tag_scope_stack)?;
         tok = new_tok;
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
         let var = new_gvar(name, ty);
@@ -314,6 +371,7 @@ pub fn func_params(
     src: &str,
     tok: &Token,
     ty: Type,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Type, Token), String> {
     let mut tok = tok.clone();
 
@@ -338,9 +396,9 @@ pub fn func_params(
         }
         first = false;
 
-        let (basety, new_tok) = declspec(filename, src, &tok)?;
+        let (basety, new_tok) = declspec(filename, src, &tok, tag_scope_stack)?;
         tok = new_tok;
-        let (param_ty, new_tok) = declarator(filename, src, &tok, basety)?;
+        let (param_ty, new_tok) = declarator(filename, src, &tok, basety, tag_scope_stack)?;
         tok = new_tok;
         let param_copy = copy_type(&param_ty);
         cur.next = Some(Box::new(param_copy));
@@ -358,9 +416,16 @@ pub fn type_suffix(
     src: &str,
     tok: &Token,
     ty: Type,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Type, Token), String> {
     if equal(src, tok, "(") {
-        return func_params(filename, src, tok.next.as_ref().unwrap(), ty);
+        return func_params(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            ty,
+            tag_scope_stack,
+        );
     }
 
     if equal(src, tok, "[") {
@@ -371,7 +436,7 @@ pub fn type_suffix(
             tok.next.as_ref().unwrap().next.as_ref().unwrap(),
             "]",
         )?;
-        let (ty, rest) = type_suffix(filename, src, &tok, ty)?;
+        let (ty, rest) = type_suffix(filename, src, &tok, ty, tag_scope_stack)?;
         return Ok((Type::new_array(ty, sz), rest));
     }
 
@@ -383,6 +448,7 @@ pub fn declarator(
     src: &str,
     tok: &Token,
     mut ty: Type,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Type, Token), String> {
     let mut tok = tok.clone();
     loop {
@@ -399,7 +465,13 @@ pub fn declarator(
     }
 
     let name_tok = tok.clone();
-    let (ty, tok) = type_suffix(filename, src, tok.next.as_ref().unwrap(), ty)?;
+    let (ty, tok) = type_suffix(
+        filename,
+        src,
+        tok.next.as_ref().unwrap(),
+        ty,
+        tag_scope_stack,
+    )?;
     let mut ty = ty;
     ty.name = Some(Box::new(name_tok));
     Ok((ty, tok))
@@ -413,8 +485,9 @@ pub fn declaration(
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
-    let (basety, mut tok) = declspec(filename, src, tok)?;
+    let (basety, mut tok) = declspec(filename, src, tok, tag_scope_stack)?;
 
     let mut head = Node {
         kind: NodeKind::Num,
@@ -445,7 +518,7 @@ pub fn declaration(
         }
         i += 1;
 
-        let (ty, new_tok) = declarator(filename, src, &tok, basety.clone())?;
+        let (ty, new_tok) = declarator(filename, src, &tok, basety.clone(), tag_scope_stack)?;
         tok = new_tok;
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
         let var = new_lvar(name, ty.clone(), locals, scope_stack);
@@ -457,7 +530,15 @@ pub fn declaration(
         let tok_loc = tok.loc;
         let line_no = tok.line_no;
         let tok_next = tok.next.as_ref().unwrap().clone();
-        let (rhs, new_tok) = assign(filename, src, &tok_next, locals, globals, scope_stack)?;
+        let (rhs, new_tok) = assign(
+            filename,
+            src,
+            &tok_next,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
         tok = new_tok;
         let lhs = new_var_node(
             var,
@@ -504,8 +585,9 @@ pub fn function(
     tok: &Token,
     basety: Type,
     globals: &mut Vec<Obj>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Obj, Token), String> {
-    let (ty, tok) = declarator(filename, src, tok, basety)?;
+    let (ty, tok) = declarator(filename, src, tok, basety, tag_scope_stack)?;
     let name = get_ident(src, ty.name.as_ref().unwrap())?;
 
     let mut fn_obj = new_gvar(name, ty.clone());
@@ -514,6 +596,7 @@ pub fn function(
     let mut locals: Vec<Obj> = Vec::new();
     let mut scope_stack: Vec<Vec<VarScope>> = Vec::new();
     scope_stack.push(Vec::new());
+    tag_scope_stack.push(Vec::new());
 
     if let Some(params) = &ty.params {
         create_param_lvars(src, params, &mut locals, &mut scope_stack);
@@ -522,13 +605,22 @@ pub fn function(
     fn_obj.params = locals.clone();
 
     let tok = skip(filename, src, &tok, "{")?;
-    let (mut body, tok) =
-        compound_stmt(filename, src, &tok, &mut locals, globals, &mut scope_stack)?;
+    let (mut body, tok) = compound_stmt(
+        filename,
+        src,
+        &tok,
+        &mut locals,
+        globals,
+        &mut scope_stack,
+        tag_scope_stack,
+    )?;
 
     add_type(&mut body);
 
     fn_obj.body = Some(Box::new(body));
     fn_obj.locals = locals;
+
+    tag_scope_stack.pop();
 
     Ok((fn_obj, tok))
 }
@@ -541,11 +633,13 @@ pub fn compound_stmt(
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
     let tok_loc = tok.loc;
     let line_no = tok.line_no;
 
     scope_stack.push(Vec::new());
+    tag_scope_stack.push(Vec::new());
 
     let mut head = Node {
         kind: NodeKind::Num,
@@ -572,12 +666,28 @@ pub fn compound_stmt(
     let mut tok = tok.clone();
     while !equal(src, &tok, "}") {
         if is_typename(src, &tok) {
-            let (node, new_tok) = declaration(filename, src, &tok, locals, globals, scope_stack)?;
+            let (node, new_tok) = declaration(
+                filename,
+                src,
+                &tok,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
             tok = new_tok;
             cur.next = Some(Box::new(node));
             cur = cur.next.as_mut().unwrap();
         } else {
-            let (node, new_tok) = stmt(filename, src, &tok, locals, globals, scope_stack)?;
+            let (node, new_tok) = stmt(
+                filename,
+                src,
+                &tok,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
             tok = new_tok;
             cur.next = Some(Box::new(node));
             cur = cur.next.as_mut().unwrap();
@@ -585,6 +695,7 @@ pub fn compound_stmt(
     }
 
     scope_stack.pop();
+    tag_scope_stack.pop();
 
     let mut node = new_node(NodeKind::Block, tok_loc, line_no);
     node.body = head.next;
@@ -599,6 +710,7 @@ pub fn stmt(
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, "return") {
         let tok_loc = tok.loc;
@@ -610,6 +722,7 @@ pub fn stmt(
             locals,
             globals,
             scope_stack,
+            tag_scope_stack,
         )?;
         let tok = skip(filename, src, &tok, ";")?;
         let node = new_unary(NodeKind::Return, expr_node, tok_loc, line_no);
@@ -620,10 +733,26 @@ pub fn stmt(
         let line_no = tok.line_no;
         let mut node = new_node(NodeKind::If, tok_loc, line_no);
         let tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
-        let (cond, tok) = expr(filename, src, &tok, locals, globals, scope_stack)?;
+        let (cond, tok) = expr(
+            filename,
+            src,
+            &tok,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
         node.cond = Some(Box::new(cond));
         let tok = skip(filename, src, &tok, ")")?;
-        let (then, tok) = stmt(filename, src, &tok, locals, globals, scope_stack)?;
+        let (then, tok) = stmt(
+            filename,
+            src,
+            &tok,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
         node.then = Some(Box::new(then));
         let mut tok = tok;
         if equal(src, &tok, "else") {
@@ -634,6 +763,7 @@ pub fn stmt(
                 locals,
                 globals,
                 scope_stack,
+                tag_scope_stack,
             )?;
             node.els = Some(Box::new(els));
             tok = new_tok;
@@ -646,25 +776,57 @@ pub fn stmt(
         let mut node = new_node(NodeKind::For, tok_loc, line_no);
         let mut tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
 
-        let (init, new_tok) = expr_stmt(filename, src, &tok, locals, globals, scope_stack)?;
+        let (init, new_tok) = expr_stmt(
+            filename,
+            src,
+            &tok,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
         node.init = Some(Box::new(init));
         tok = new_tok;
 
         if !equal(src, &tok, ";") {
-            let (cond, new_tok) = expr(filename, src, &tok, locals, globals, scope_stack)?;
+            let (cond, new_tok) = expr(
+                filename,
+                src,
+                &tok,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
             node.cond = Some(Box::new(cond));
             tok = new_tok;
         }
         tok = skip(filename, src, &tok, ";")?;
 
         if !equal(src, &tok, ")") {
-            let (inc, new_tok) = expr(filename, src, &tok, locals, globals, scope_stack)?;
+            let (inc, new_tok) = expr(
+                filename,
+                src,
+                &tok,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
             node.inc = Some(Box::new(inc));
             tok = new_tok;
         }
         tok = skip(filename, src, &tok, ")")?;
 
-        let (then, tok) = stmt(filename, src, &tok, locals, globals, scope_stack)?;
+        let (then, tok) = stmt(
+            filename,
+            src,
+            &tok,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
         node.then = Some(Box::new(then));
         return Ok((node, tok));
     }
@@ -673,10 +835,26 @@ pub fn stmt(
         let line_no = tok.line_no;
         let mut node = new_node(NodeKind::While, tok_loc, line_no);
         let tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
-        let (cond, tok) = expr(filename, src, &tok, locals, globals, scope_stack)?;
+        let (cond, tok) = expr(
+            filename,
+            src,
+            &tok,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
         node.cond = Some(Box::new(cond));
         let tok = skip(filename, src, &tok, ")")?;
-        let (then, tok) = stmt(filename, src, &tok, locals, globals, scope_stack)?;
+        let (then, tok) = stmt(
+            filename,
+            src,
+            &tok,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
         node.then = Some(Box::new(then));
         return Ok((node, tok));
     }
@@ -688,9 +866,18 @@ pub fn stmt(
             locals,
             globals,
             scope_stack,
+            tag_scope_stack,
         );
     }
-    expr_stmt(filename, src, tok, locals, globals, scope_stack)
+    expr_stmt(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -701,6 +888,7 @@ pub fn expr_stmt(
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, ";") {
         let tok_loc = tok.loc;
@@ -710,7 +898,15 @@ pub fn expr_stmt(
     }
     let tok_loc = tok.loc;
     let line_no = tok.line_no;
-    let (expr_node, tok) = expr(filename, src, tok, locals, globals, scope_stack)?;
+    let (expr_node, tok) = expr(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
     let tok = skip(filename, src, &tok, ";")?;
     let node = new_unary(NodeKind::ExprStmt, expr_node, tok_loc, line_no);
     Ok((node, tok))
@@ -723,8 +919,17 @@ pub fn expr(
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
-    let (node, tok) = assign(filename, src, tok, locals, globals, scope_stack)?;
+    let (node, tok) = assign(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
 
     if equal(src, &tok, ",") {
         let tok_loc = tok.loc;
@@ -736,6 +941,7 @@ pub fn expr(
             locals,
             globals,
             scope_stack,
+            tag_scope_stack,
         )?;
         return Ok((
             new_binary(NodeKind::Comma, node, rhs, tok_loc, line_no),
@@ -753,8 +959,17 @@ pub fn assign(
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
-    let (mut node, tok) = equality(filename, src, tok, locals, globals, scope_stack)?;
+    let (mut node, tok) = equality(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
     if equal(src, &tok, "=") {
         let tok_loc = tok.loc;
         let line_no = tok.line_no;
@@ -765,6 +980,7 @@ pub fn assign(
             locals,
             globals,
             scope_stack,
+            tag_scope_stack,
         )?;
         node = new_binary(NodeKind::Assign, node, rhs, tok_loc, line_no);
         return Ok((node, tok));
@@ -779,8 +995,17 @@ pub fn equality(
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = relational(filename, src, tok, locals, globals, scope_stack)?;
+    let (mut node, mut tok) = relational(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
 
     loop {
         if equal(src, &tok, "==") {
@@ -793,6 +1018,7 @@ pub fn equality(
                 locals,
                 globals,
                 scope_stack,
+                tag_scope_stack,
             )?;
             node = new_binary(NodeKind::Eq, node, rhs, tok_loc, line_no);
             tok = new_tok;
@@ -809,6 +1035,7 @@ pub fn equality(
                 locals,
                 globals,
                 scope_stack,
+                tag_scope_stack,
             )?;
             node = new_binary(NodeKind::Ne, node, rhs, tok_loc, line_no);
             tok = new_tok;
@@ -826,8 +1053,17 @@ pub fn relational(
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = add(filename, src, tok, locals, globals, scope_stack)?;
+    let (mut node, mut tok) = add(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
 
     loop {
         if equal(src, &tok, "<") {
@@ -840,6 +1076,7 @@ pub fn relational(
                 locals,
                 globals,
                 scope_stack,
+                tag_scope_stack,
             )?;
             node = new_binary(NodeKind::Lt, node, rhs, tok_loc, line_no);
             tok = new_tok;
@@ -856,6 +1093,7 @@ pub fn relational(
                 locals,
                 globals,
                 scope_stack,
+                tag_scope_stack,
             )?;
             node = new_binary(NodeKind::Le, node, rhs, tok_loc, line_no);
             tok = new_tok;
@@ -872,6 +1110,7 @@ pub fn relational(
                 locals,
                 globals,
                 scope_stack,
+                tag_scope_stack,
             )?;
             node = new_binary(NodeKind::Lt, lhs, node, tok_loc, line_no);
             tok = new_tok;
@@ -888,6 +1127,7 @@ pub fn relational(
                 locals,
                 globals,
                 scope_stack,
+                tag_scope_stack,
             )?;
             node = new_binary(NodeKind::Le, lhs, node, tok_loc, line_no);
             tok = new_tok;
@@ -905,8 +1145,17 @@ pub fn add(
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = mul(filename, src, tok, locals, globals, scope_stack)?;
+    let (mut node, mut tok) = mul(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
 
     loop {
         if equal(src, &tok, "+") {
@@ -919,6 +1168,7 @@ pub fn add(
                 locals,
                 globals,
                 scope_stack,
+                tag_scope_stack,
             )?;
             node = new_add(node, rhs, tok_loc, line_no, filename, src)?;
             tok = new_tok;
@@ -935,6 +1185,7 @@ pub fn add(
                 locals,
                 globals,
                 scope_stack,
+                tag_scope_stack,
             )?;
             node = new_sub(node, rhs, tok_loc, line_no, filename, src)?;
             tok = new_tok;
@@ -952,8 +1203,17 @@ pub fn mul(
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = unary(filename, src, tok, locals, globals, scope_stack)?;
+    let (mut node, mut tok) = unary(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
 
     loop {
         if equal(src, &tok, "*") {
@@ -966,6 +1226,7 @@ pub fn mul(
                 locals,
                 globals,
                 scope_stack,
+                tag_scope_stack,
             )?;
             node = new_binary(NodeKind::Mul, node, rhs, tok_loc, line_no);
             tok = new_tok;
@@ -982,6 +1243,7 @@ pub fn mul(
                 locals,
                 globals,
                 scope_stack,
+                tag_scope_stack,
             )?;
             node = new_binary(NodeKind::Div, node, rhs, tok_loc, line_no);
             tok = new_tok;
@@ -999,6 +1261,7 @@ pub fn unary(
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, "+") {
         return unary(
@@ -1008,6 +1271,7 @@ pub fn unary(
             locals,
             globals,
             scope_stack,
+            tag_scope_stack,
         );
     }
 
@@ -1021,6 +1285,7 @@ pub fn unary(
             locals,
             globals,
             scope_stack,
+            tag_scope_stack,
         )?;
         return Ok((new_unary(NodeKind::Neg, node, tok_loc, line_no), tok));
     }
@@ -1035,6 +1300,7 @@ pub fn unary(
             locals,
             globals,
             scope_stack,
+            tag_scope_stack,
         )?;
         return Ok((new_unary(NodeKind::Addr, node, tok_loc, line_no), tok));
     }
@@ -1049,11 +1315,20 @@ pub fn unary(
             locals,
             globals,
             scope_stack,
+            tag_scope_stack,
         )?;
         return Ok((new_unary(NodeKind::Deref, node, tok_loc, line_no), tok));
     }
 
-    postfix(filename, src, tok, locals, globals, scope_stack)
+    postfix(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )
 }
 
 pub fn postfix(
@@ -1063,8 +1338,17 @@ pub fn postfix(
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = primary(filename, src, tok, locals, globals, scope_stack)?;
+    let (mut node, mut tok) = primary(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
 
     loop {
         if equal(src, &tok, "[") {
@@ -1077,6 +1361,7 @@ pub fn postfix(
                 locals,
                 globals,
                 scope_stack,
+                tag_scope_stack,
             )?;
             tok = skip(filename, src, &new_tok, "]")?;
             node = new_unary(
@@ -1106,6 +1391,7 @@ pub fn funcall(
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
     let tok_loc = tok.loc;
     let line_no = tok.line_no;
@@ -1138,7 +1424,15 @@ pub fn funcall(
         if cur.tok_loc != tok_loc || cur.kind != NodeKind::Num {
             tok = skip(filename, src, &tok, ",")?;
         }
-        let (arg, new_tok) = assign(filename, src, &tok, locals, globals, scope_stack)?;
+        let (arg, new_tok) = assign(
+            filename,
+            src,
+            &tok,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
         tok = new_tok;
         cur.next = Some(Box::new(arg));
         cur = cur.next.as_mut().unwrap();
@@ -1159,6 +1453,7 @@ pub fn primary(
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, "(") && equal(src, tok.next.as_ref().unwrap(), "{") {
         let tok_loc = tok.loc;
@@ -1170,6 +1465,7 @@ pub fn primary(
             locals,
             globals,
             scope_stack,
+            tag_scope_stack,
         )?;
         let tok = skip(filename, src, &tok, ")")?;
         let mut node = new_node(NodeKind::StmtExpr, tok_loc, line_no);
@@ -1185,6 +1481,7 @@ pub fn primary(
             locals,
             globals,
             scope_stack,
+            tag_scope_stack,
         )?;
         let tok = skip(filename, src, &tok, ")")?;
         return Ok((node, tok));
@@ -1200,6 +1497,7 @@ pub fn primary(
             locals,
             globals,
             scope_stack,
+            tag_scope_stack,
         )?;
         add_type(&mut node);
         let size = node.ty.as_ref().unwrap().size;
@@ -1208,7 +1506,15 @@ pub fn primary(
 
     if tok.kind == TokenKind::Ident {
         if equal(src, tok.next.as_ref().unwrap(), "(") {
-            return funcall(filename, src, tok, locals, globals, scope_stack);
+            return funcall(
+                filename,
+                src,
+                tok,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            );
         }
 
         let tok_loc = tok.loc;

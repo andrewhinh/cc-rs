@@ -1,4 +1,4 @@
-use crate::{Node, NodeKind, Obj, TokenKind, Type, TypeKind, error_at};
+use crate::{Node, NodeKind, Obj, TagScope, TokenKind, Type, TypeKind, error_at};
 use crate::{declspec, is_function, tokenize};
 use crate::{function, global_variable};
 
@@ -447,18 +447,33 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
     let tok = tokenize(filename, src)?;
 
     let mut globals: Vec<Obj> = Vec::new();
+    let mut tag_scope_stack: Vec<Vec<TagScope>> = vec![Vec::new()];
 
     let mut tok = tok;
     while tok.kind != TokenKind::Eof {
-        let (basety, new_tok) = declspec(filename, src, &tok)?;
+        let (basety, new_tok) = declspec(filename, src, &tok, &mut tag_scope_stack)?;
         tok = new_tok;
 
         if is_function(src, &tok)? {
-            let (func, new_tok) = function(filename, src, &tok, basety, &mut globals)?;
+            let (func, new_tok) = function(
+                filename,
+                src,
+                &tok,
+                basety,
+                &mut globals,
+                &mut tag_scope_stack,
+            )?;
             tok = new_tok;
             globals.push(func);
         } else {
-            tok = global_variable(filename, src, &tok, basety, &mut globals)?;
+            tok = global_variable(
+                filename,
+                src,
+                &tok,
+                basety,
+                &mut globals,
+                &mut tag_scope_stack,
+            )?;
         }
     }
 
