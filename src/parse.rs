@@ -1386,6 +1386,14 @@ pub fn postfix(
             continue;
         }
 
+        if equal(src, &tok, "->") {
+            node = new_unary(NodeKind::Deref, node, tok.loc, tok.line_no);
+            let tok_next = tok.next.as_ref().unwrap();
+            node = struct_ref(filename, src, node, tok_next)?;
+            tok = *tok_next.next.as_ref().unwrap().clone();
+            continue;
+        }
+
         return Ok((node, tok));
     }
 }
