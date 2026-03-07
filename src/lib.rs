@@ -2,7 +2,10 @@ pub mod codegen;
 pub mod parse;
 pub mod tokenize;
 
-pub use parse::{add_type, declspec, function, global_variable, is_function, is_typename};
+pub use parse::{
+    add_type, declspec, find_tag, function, global_variable, is_function, is_typename,
+    push_tag_scope,
+};
 pub use tokenize::{consume, equal, skip, tokenize};
 
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -256,4 +259,10 @@ pub fn new_unique_name() -> String {
 pub struct VarScope {
     pub name: String,
     pub var: Obj,
+}
+
+#[derive(Debug, Clone)]
+pub struct TagScope {
+    pub name: String,
+    pub ty: Type,
 }
