@@ -203,7 +203,7 @@ pub fn struct_members(
     Ok(rest)
 }
 
-pub fn struct_decl(
+pub fn struct_union_decl(
     filename: &str,
     src: &str,
     tok: &Token,
@@ -246,6 +246,23 @@ pub fn struct_decl(
 
     let rest = struct_members(filename, src, &tok, &mut ty, tag_scope_stack)?;
 
+    if let Some(tag_tok) = tag {
+        let tag_name: String = src.chars().skip(tag_tok.loc).take(tag_tok.len).collect();
+        push_tag_scope(tag_scope_stack, tag_name, ty.clone());
+    }
+
+    Ok((ty, rest))
+}
+
+pub fn struct_decl(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<(Type, Token), String> {
+    let (mut ty, rest) = struct_union_decl(filename, src, tok, tag_scope_stack)?;
+    ty.kind = TypeKind::Struct;
+
     let mut offset = 0;
     let mut current = ty.members.as_mut();
     while let Some(mem) = current {
@@ -261,10 +278,27 @@ pub fn struct_decl(
     }
     ty.size = align_to(offset, ty.align);
 
-    if let Some(tag_tok) = tag {
-        let tag_name: String = src.chars().skip(tag_tok.loc).take(tag_tok.len).collect();
-        push_tag_scope(tag_scope_stack, tag_name, ty.clone());
+    Ok((ty, rest))
+}
+
+pub fn union_decl(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<(Type, Token), String> {
+    let (mut ty, rest) = struct_union_decl(filename, src, tok, tag_scope_stack)?;
+    ty.kind = TypeKind::Union;
+
+    for mem in ty.members.iter() {
+        if ty.align < mem.ty.align {
+            ty.align = mem.ty.align;
+        }
+        if ty.size < mem.ty.size {
+            ty.size = mem.ty.size;
+        }
     }
+    ty.size = align_to(ty.size, ty.align);
 
     Ok((ty, rest))
 }
@@ -295,8 +329,10 @@ pub fn struct_ref(filename: &str, src: &str, lhs: Node, tok: &Token) -> Result<N
     let mut lhs = lhs;
     add_type(&mut lhs);
 
-    if lhs.ty.as_ref().unwrap().kind != TypeKind::Struct {
-        return Err(error_tok(filename, src, tok, "not a struct"));
+    if lhs.ty.as_ref().unwrap().kind != TypeKind::Struct
+        && lhs.ty.as_ref().unwrap().kind != TypeKind::Union
+    {
+        return Err(error_tok(filename, src, tok, "not a struct nor a union"));
     }
 
     let member = get_struct_member(filename, lhs.ty.as_ref().unwrap(), src, tok)?;
@@ -320,11 +356,17 @@ pub fn declspec(
     if equal(src, tok, "struct") {
         return struct_decl(filename, src, tok.next.as_ref().unwrap(), tag_scope_stack);
     }
+    if equal(src, tok, "union") {
+        return union_decl(filename, src, tok.next.as_ref().unwrap(), tag_scope_stack);
+    }
     Err(error_tok(filename, src, tok, "typename expected"))
 }
 
 pub fn is_typename(src: &str, tok: &Token) -> bool {
-    equal(src, tok, "char") || equal(src, tok, "int") || equal(src, tok, "struct")
+    equal(src, tok, "char")
+        || equal(src, tok, "int")
+        || equal(src, tok, "struct")
+        || equal(src, tok, "union")
 }
 
 pub fn get_number(tok: &Token) -> Result<i64, String> {
