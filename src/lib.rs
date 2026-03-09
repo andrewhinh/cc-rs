@@ -68,6 +68,7 @@ pub enum TypeKind {
     Func,
     Array,
     Struct,
+    Union,
 }
 
 #[derive(Debug, Clone)]

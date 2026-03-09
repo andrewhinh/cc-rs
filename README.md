@@ -199,7 +199,7 @@ cargo run
 - [x] Align local variables
 - [x] Support struct tags
 - [x] Add -> operator
-- [ ] Add union
+- [x] Add union
 - [ ] Add struct assignment
 - [ ] Add a notion of an incomplete array type
 - [ ] Decay an array to a pointer in the func param context

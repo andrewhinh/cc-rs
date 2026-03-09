@@ -90,7 +90,7 @@ fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
 fn is_keyword(name: &str) -> bool {
     matches!(
         name,
-        "return" | "if" | "else" | "for" | "while" | "int" | "sizeof" | "char" | "struct"
+        "return" | "if" | "else" | "for" | "while" | "int" | "sizeof" | "char" | "struct" | "union"
     )
 }
 
