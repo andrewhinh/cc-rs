@@ -114,8 +114,8 @@ impl Type {
     pub fn new_int() -> Type {
         Type {
             kind: TypeKind::Int,
-            size: 8,
-            align: 8,
+            size: 4,
+            align: 4,
             base: None,
             name: None,
             return_ty: None,
