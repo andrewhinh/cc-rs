@@ -60,7 +60,7 @@ fn gen_addr(
 }
 
 fn load(ty: &Type, result: &mut String) {
-    if ty.kind == TypeKind::Array {
+    if ty.kind == TypeKind::Array || ty.kind == TypeKind::Struct || ty.kind == TypeKind::Union {
         return;
     }
     if ty.size == 1 {
@@ -72,6 +72,15 @@ fn load(ty: &Type, result: &mut String) {
 
 fn store(ty: &Type, result: &mut String) {
     result.push_str("  pop %rdi\n");
+
+    if ty.kind == TypeKind::Struct || ty.kind == TypeKind::Union {
+        for i in 0..ty.size {
+            result.push_str(&format!("  mov {}(%rax), %r8b\n", i));
+            result.push_str(&format!("  mov %r8b, {}(%rdi)\n", i));
+        }
+        return;
+    }
+
     if ty.size == 1 {
         result.push_str("  mov %al, (%rdi)\n");
     } else {
