@@ -64,6 +64,7 @@ pub enum NodeKind {
 pub enum TypeKind {
     Char,
     Int,
+    Long,
     Ptr,
     Func,
     Array,
@@ -116,6 +117,21 @@ impl Type {
             kind: TypeKind::Int,
             size: 4,
             align: 4,
+            base: None,
+            name: None,
+            return_ty: None,
+            params: None,
+            next: None,
+            array_len: 0,
+            members: None,
+        }
+    }
+
+    pub fn new_long() -> Type {
+        Type {
+            kind: TypeKind::Long,
+            size: 8,
+            align: 8,
             base: None,
             name: None,
             return_ty: None,
