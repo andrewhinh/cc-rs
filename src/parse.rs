@@ -350,6 +350,9 @@ pub fn declspec(
     if equal(src, tok, "char") {
         return Ok((Type::new_char(), *tok.next.as_ref().unwrap().clone()));
     }
+    if equal(src, tok, "short") {
+        return Ok((Type::new_short(), *tok.next.as_ref().unwrap().clone()));
+    }
     if equal(src, tok, "int") {
         return Ok((Type::new_int(), *tok.next.as_ref().unwrap().clone()));
     }
@@ -367,6 +370,7 @@ pub fn declspec(
 
 pub fn is_typename(src: &str, tok: &Token) -> bool {
     equal(src, tok, "char")
+        || equal(src, tok, "short")
         || equal(src, tok, "int")
         || equal(src, tok, "long")
         || equal(src, tok, "struct")
@@ -1628,7 +1632,10 @@ pub fn func_type(return_ty: Type) -> Type {
 }
 
 pub fn is_integer(ty: &Type) -> bool {
-    ty.kind == TypeKind::Char || ty.kind == TypeKind::Int || ty.kind == TypeKind::Long
+    ty.kind == TypeKind::Char
+        || ty.kind == TypeKind::Short
+        || ty.kind == TypeKind::Int
+        || ty.kind == TypeKind::Long
 }
 
 pub fn copy_type(ty: &Type) -> Type {
