@@ -200,7 +200,7 @@ cargo run
 - [x] Support struct tags
 - [x] Add -> operator
 - [x] Add union
-- [ ] Add struct assignment
+- [x] Add struct assignment
 - [ ] Add a notion of an incomplete array type
 - [ ] Decay an array to a pointer in the func param context
 - [ ] Add a notion of an incomplete struct type
