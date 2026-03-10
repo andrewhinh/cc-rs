@@ -65,6 +65,8 @@ fn load(ty: &Type, result: &mut String) {
     }
     if ty.size == 1 {
         result.push_str("  movsbq (%rax), %rax\n");
+    } else if ty.size == 2 {
+        result.push_str("  movswq (%rax), %rax\n");
     } else if ty.size == 4 {
         result.push_str("  movsxd (%rax), %rax\n");
     } else {
@@ -85,6 +87,8 @@ fn store(ty: &Type, result: &mut String) {
 
     if ty.size == 1 {
         result.push_str("  mov %al, (%rdi)\n");
+    } else if ty.size == 2 {
+        result.push_str("  mov %ax, (%rdi)\n");
     } else if ty.size == 4 {
         result.push_str("  mov %eax, (%rdi)\n");
     } else {
@@ -397,10 +401,12 @@ fn gen_stmt(
 
 fn store_gp(r: usize, offset: i64, sz: i64, result: &mut String) {
     let argreg8 = ["%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"];
+    let argreg16 = ["%di", "%si", "%dx", "%cx", "%r8w", "%r9w"];
     let argreg32 = ["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"];
     let argreg64 = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
     match sz {
         1 => result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg8[r], offset)),
+        2 => result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg16[r], offset)),
         4 => result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg32[r], offset)),
         8 => result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg64[r], offset)),
         _ => unreachable!(),

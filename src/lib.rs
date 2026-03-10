@@ -63,6 +63,7 @@ pub enum NodeKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeKind {
     Char,
+    Short,
     Int,
     Long,
     Ptr,
@@ -102,6 +103,21 @@ impl Type {
             kind: TypeKind::Char,
             size: 1,
             align: 1,
+            base: None,
+            name: None,
+            return_ty: None,
+            params: None,
+            next: None,
+            array_len: 0,
+            members: None,
+        }
+    }
+
+    pub fn new_short() -> Type {
+        Type {
+            kind: TypeKind::Short,
+            size: 2,
+            align: 2,
             base: None,
             name: None,
             return_ty: None,
