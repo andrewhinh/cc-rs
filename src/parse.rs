@@ -353,6 +353,9 @@ pub fn declspec(
     if equal(src, tok, "int") {
         return Ok((Type::new_int(), *tok.next.as_ref().unwrap().clone()));
     }
+    if equal(src, tok, "long") {
+        return Ok((Type::new_long(), *tok.next.as_ref().unwrap().clone()));
+    }
     if equal(src, tok, "struct") {
         return struct_decl(filename, src, tok.next.as_ref().unwrap(), tag_scope_stack);
     }
@@ -365,6 +368,7 @@ pub fn declspec(
 pub fn is_typename(src: &str, tok: &Token) -> bool {
     equal(src, tok, "char")
         || equal(src, tok, "int")
+        || equal(src, tok, "long")
         || equal(src, tok, "struct")
         || equal(src, tok, "union")
 }
@@ -1624,7 +1628,7 @@ pub fn func_type(return_ty: Type) -> Type {
 }
 
 pub fn is_integer(ty: &Type) -> bool {
-    ty.kind == TypeKind::Char || ty.kind == TypeKind::Int
+    ty.kind == TypeKind::Char || ty.kind == TypeKind::Int || ty.kind == TypeKind::Long
 }
 
 pub fn copy_type(ty: &Type) -> Type {
@@ -1700,7 +1704,7 @@ pub fn add_type(node: &mut Node) {
         | NodeKind::Le
         | NodeKind::Num
         | NodeKind::FuncCall => {
-            node.ty = Some(Type::new_int());
+            node.ty = Some(Type::new_long());
         }
         NodeKind::Var => {
             node.ty = Some(node.var.as_ref().unwrap().ty.clone());
