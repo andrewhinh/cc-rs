@@ -126,7 +126,7 @@ cargo run
 - [x] Add comma operator
 - [x] Change size of int from 8 to 4
 - [x] Add long type
-- [ ] Add short type
+- [x] Add short type
 - [ ] Add nested type declarators
 - [ ] Add void type
 - [ ] Handle complex type declarations correctly

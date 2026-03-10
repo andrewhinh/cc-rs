@@ -98,6 +98,7 @@ fn is_keyword(name: &str) -> bool {
             | "int"
             | "sizeof"
             | "char"
+            | "short"
             | "struct"
             | "union"
             | "long"
