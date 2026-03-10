@@ -65,6 +65,8 @@ fn load(ty: &Type, result: &mut String) {
     }
     if ty.size == 1 {
         result.push_str("  movsbq (%rax), %rax\n");
+    } else if ty.size == 4 {
+        result.push_str("  movsxd (%rax), %rax\n");
     } else {
         result.push_str("  mov (%rax), %rax\n");
     }
@@ -83,6 +85,8 @@ fn store(ty: &Type, result: &mut String) {
 
     if ty.size == 1 {
         result.push_str("  mov %al, (%rdi)\n");
+    } else if ty.size == 4 {
+        result.push_str("  mov %eax, (%rdi)\n");
     } else {
         result.push_str("  mov %rax, (%rdi)\n");
     }
@@ -391,6 +395,18 @@ fn gen_stmt(
     Ok(())
 }
 
+fn store_gp(r: usize, offset: i64, sz: i64, result: &mut String) {
+    let argreg8 = ["%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"];
+    let argreg32 = ["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"];
+    let argreg64 = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
+    match sz {
+        1 => result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg8[r], offset)),
+        4 => result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg32[r], offset)),
+        8 => result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg64[r], offset)),
+        _ => unreachable!(),
+    }
+}
+
 fn align_to(n: i64, align: i64) -> i64 {
     (n + align - 1) / align * align
 }
@@ -536,18 +552,12 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         result.push_str("  mov %rsp, %rbp\n");
         result.push_str(&format!("  sub ${}, %rsp\n", stack_size));
 
-        let argreg8 = ["%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"];
-        let argreg64 = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
         for (i, var) in func.params.iter_mut().enumerate() {
             let local_var = func.locals.iter().find(|l| l.name == var.name);
             if let Some(lv) = local_var {
                 var.offset = lv.offset;
             }
-            if var.ty.size == 1 {
-                result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg8[i], var.offset));
-            } else {
-                result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg64[i], var.offset));
-            }
+            store_gp(i, var.offset, var.ty.size, &mut result);
         }
 
         gen_stmt(

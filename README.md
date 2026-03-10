@@ -122,7 +122,7 @@ cargo run
 - [x] Add keyword "int" and make variable definition mandatory
 - [x] Add char type
 - [x] Add comma operator
-- [ ] Change size of int from 8 to 4
+- [x] Change size of int from 8 to 4
 - [ ] Add long type
 - [ ] Add short type
 - [ ] Add nested type declarators
