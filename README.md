@@ -88,7 +88,7 @@ cargo run
 - [x] Support function call with up to 6 arguments
 - [x] Support zero-arity function definition
 - [x] Support function definition up to 6 parameters
-- [ ] Add function declaration
+- [x] Add function declaration
 - [ ] Handle return type conversion
 - [ ] Handle function argument type conversion
 - [ ] Support file-scope functions
