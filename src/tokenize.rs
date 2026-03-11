@@ -103,6 +103,7 @@ fn is_keyword(name: &str) -> bool {
             | "union"
             | "long"
             | "void"
+            | "typedef"
     )
 }
 
