@@ -126,7 +126,7 @@ cargo run
 - [x] Add long type
 - [x] Add short type
 - [x] Add nested type declarators
-- [ ] Add void type
+- [x] Add void type
 - [ ] Handle complex type declarations correctly
 - [ ] Add `long long` as an alias for `long`
 - [ ] Add typedef

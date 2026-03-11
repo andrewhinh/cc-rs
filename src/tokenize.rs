@@ -102,6 +102,7 @@ fn is_keyword(name: &str) -> bool {
             | "struct"
             | "union"
             | "long"
+            | "void"
     )
 }
 
