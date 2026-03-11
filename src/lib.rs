@@ -58,6 +58,7 @@ pub enum NodeKind {
     StmtExpr,
     Var,
     Num,
+    Cast,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

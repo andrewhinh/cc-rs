@@ -132,7 +132,7 @@ cargo run
 - [x] Add typedef
 - [x] Make sizeof to accept not only an expression but also a typename
 - [x] Use 32 bit registers for char, short and int
-- [ ] Add type cast
+- [x] Add type cast
 - [ ] Implement usual arithmetic conversion
 - [ ] Report an error on undefined/undeclared functions
 - [ ] Add \_Bool type
