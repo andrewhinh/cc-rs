@@ -1,5 +1,7 @@
-use crate::{Node, NodeKind, Obj, TagScope, TokenKind, Type, TypeKind, error_at};
-use crate::{declspec, is_function, tokenize};
+use crate::{
+    Node, NodeKind, Obj, TagScope, TokenKind, Type, TypeKind, VarAttr, VarScope, error_at,
+};
+use crate::{declspec, is_function, parse_typedef, tokenize};
 use crate::{function, global_variable};
 
 fn gen_addr(
@@ -479,11 +481,25 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
 
     let mut globals: Vec<Obj> = Vec::new();
     let mut tag_scope_stack: Vec<Vec<TagScope>> = vec![Vec::new()];
+    let mut scope_stack: Vec<Vec<VarScope>> = vec![Vec::new()];
 
     let mut tok = tok;
     while tok.kind != TokenKind::Eof {
-        let (basety, new_tok) = declspec(filename, src, &tok, &mut tag_scope_stack)?;
+        let mut attr = VarAttr::default();
+        let (basety, new_tok) = declspec(
+            filename,
+            src,
+            &tok,
+            &mut tag_scope_stack,
+            &scope_stack,
+            Some(&mut attr),
+        )?;
         tok = new_tok;
+
+        if attr.is_typedef {
+            tok = parse_typedef(filename, src, &tok, basety, &mut scope_stack)?;
+            continue;
+        }
 
         if is_function(src, &tok)? {
             let (func, new_tok) = function(
@@ -493,6 +509,7 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
                 basety,
                 &mut globals,
                 &mut tag_scope_stack,
+                &scope_stack,
             )?;
             tok = new_tok;
             globals.push(func);
@@ -504,6 +521,7 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
                 basety,
                 &mut globals,
                 &mut tag_scope_stack,
+                &scope_stack,
             )?;
         }
     }

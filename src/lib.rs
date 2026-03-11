@@ -3,8 +3,8 @@ pub mod parse;
 pub mod tokenize;
 
 pub use parse::{
-    add_type, declspec, find_tag, function, global_variable, is_function, is_typename,
-    push_tag_scope,
+    add_type, declspec, find_tag, find_typedef, function, global_variable, is_function,
+    is_typename, parse_typedef, push_tag_scope,
 };
 pub use tokenize::{consume, equal, skip, tokenize};
 
@@ -308,11 +308,17 @@ pub fn new_unique_name() -> String {
 #[derive(Debug, Clone)]
 pub struct VarScope {
     pub name: String,
-    pub var: Obj,
+    pub var: Option<Obj>,
+    pub type_def: Option<Type>,
 }
 
 #[derive(Debug, Clone)]
 pub struct TagScope {
     pub name: String,
     pub ty: Type,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct VarAttr {
+    pub is_typedef: bool,
 }
