@@ -196,6 +196,7 @@ pub struct Obj {
     pub is_local: bool,
     pub offset: i64,
     pub is_function: bool,
+    pub is_definition: bool,
     pub init_data: Option<Vec<u8>>,
     pub params: Vec<Obj>,
     pub body: Option<Box<Node>>,
