@@ -98,6 +98,55 @@ fn store(ty: &Type, result: &mut String) {
     }
 }
 
+const I8: usize = 0;
+const I16: usize = 1;
+const I32: usize = 2;
+const I64: usize = 3;
+
+fn get_type_id(ty: &Type) -> usize {
+    match ty.kind {
+        TypeKind::Char => I8,
+        TypeKind::Short => I16,
+        TypeKind::Int => I32,
+        _ => I64,
+    }
+}
+
+fn cast_type(from: &Type, to: &Type, result: &mut String) {
+    if to.kind == TypeKind::Void {
+        return;
+    }
+
+    let t1 = get_type_id(from);
+    let t2 = get_type_id(to);
+
+    let cast_table: [[Option<&str>; 4]; 4] = [
+        [None, None, None, Some("movsbl %al, %eax")],
+        [
+            Some("movsbl %al, %eax"),
+            None,
+            None,
+            Some("movswl %ax, %eax"),
+        ],
+        [
+            Some("movsbl %al, %eax"),
+            Some("movswl %ax, %eax"),
+            None,
+            Some("movsxd %eax, %rax"),
+        ],
+        [
+            Some("movsbl %al, %eax"),
+            Some("movswl %ax, %eax"),
+            None,
+            None,
+        ],
+    ];
+
+    if let Some(inst) = cast_table[t1][t2] {
+        result.push_str(&format!("  {}\n", inst));
+    }
+}
+
 fn gen_expr(
     node: &Node,
     result: &mut String,
@@ -217,6 +266,21 @@ fn gen_expr(
             )?;
             return Ok(());
         }
+        NodeKind::Cast => {
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            cast_type(
+                node.lhs.as_ref().unwrap().ty.as_ref().unwrap(),
+                node.ty.as_ref().unwrap(),
+                result,
+            );
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -282,7 +346,8 @@ fn gen_expr(
         | NodeKind::If
         | NodeKind::For
         | NodeKind::While
-        | NodeKind::Comma => unreachable!(),
+        | NodeKind::Comma
+        | NodeKind::Cast => unreachable!(),
     }
     Ok(())
 }

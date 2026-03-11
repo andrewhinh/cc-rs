@@ -53,6 +53,15 @@ pub fn new_var_node(var: Obj, tok_loc: usize, line_no: usize) -> Node {
     node
 }
 
+pub fn new_cast(expr: Node, ty: Type) -> Node {
+    let mut expr = expr;
+    add_type(&mut expr);
+    let mut node = new_node(NodeKind::Cast, expr.tok_loc, expr.line_no);
+    node.lhs = Some(Box::new(expr));
+    node.ty = Some(ty);
+    node
+}
+
 pub fn find_var(scope_stack: &[Vec<VarScope>], globals: &[Obj], name: &str) -> Option<VarScope> {
     for scope in scope_stack.iter().rev() {
         for vs in scope.iter().rev() {
@@ -1515,7 +1524,7 @@ pub fn mul(
     scope_stack: &mut Vec<Vec<VarScope>>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = unary(
+    let (mut node, mut tok) = cast(
         filename,
         src,
         tok,
@@ -1529,7 +1538,7 @@ pub fn mul(
         if equal(src, &tok, "*") {
             let tok_loc = tok.loc;
             let line_no = tok.line_no;
-            let (rhs, new_tok) = unary(
+            let (rhs, new_tok) = cast(
                 filename,
                 src,
                 tok.next.as_ref().unwrap(),
@@ -1546,7 +1555,7 @@ pub fn mul(
         if equal(src, &tok, "/") {
             let tok_loc = tok.loc;
             let line_no = tok.line_no;
-            let (rhs, new_tok) = unary(
+            let (rhs, new_tok) = cast(
                 filename,
                 src,
                 tok.next.as_ref().unwrap(),
@@ -1564,6 +1573,51 @@ pub fn mul(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn cast(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<(Node, Token), String> {
+    if equal(src, tok, "(") && is_typename(src, tok.next.as_ref().unwrap(), scope_stack) {
+        let tok_loc = tok.loc;
+        let (ty, tok) = typename(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            tag_scope_stack,
+            scope_stack,
+        )?;
+        let tok = skip(filename, src, &tok, ")")?;
+        let (node, tok) = cast(
+            filename,
+            src,
+            &tok,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let mut node = new_cast(node, ty);
+        node.tok_loc = tok_loc;
+        return Ok((node, tok));
+    }
+
+    unary(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )
+}
+
 pub fn unary(
     filename: &str,
     src: &str,
@@ -1574,7 +1628,7 @@ pub fn unary(
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, "+") {
-        return unary(
+        return cast(
             filename,
             src,
             tok.next.as_ref().unwrap(),
@@ -1588,7 +1642,7 @@ pub fn unary(
     if equal(src, tok, "-") {
         let tok_loc = tok.loc;
         let line_no = tok.line_no;
-        let (node, tok) = unary(
+        let (node, tok) = cast(
             filename,
             src,
             tok.next.as_ref().unwrap(),
@@ -1603,7 +1657,7 @@ pub fn unary(
     if equal(src, tok, "&") {
         let tok_loc = tok.loc;
         let line_no = tok.line_no;
-        let (node, tok) = unary(
+        let (node, tok) = cast(
             filename,
             src,
             tok.next.as_ref().unwrap(),
@@ -1618,7 +1672,7 @@ pub fn unary(
     if equal(src, tok, "*") {
         let tok_loc = tok.loc;
         let line_no = tok.line_no;
-        let (mut node, tok) = unary(
+        let (mut node, tok) = cast(
             filename,
             src,
             tok.next.as_ref().unwrap(),
@@ -2003,6 +2057,13 @@ pub fn add_type(node: &mut Node) {
         | NodeKind::FuncCall => {
             node.ty = Some(Type::new_long());
         }
+        NodeKind::Return
+        | NodeKind::If
+        | NodeKind::For
+        | NodeKind::While
+        | NodeKind::Block
+        | NodeKind::ExprStmt
+        | NodeKind::Cast => {}
         NodeKind::Var => {
             node.ty = Some(node.var.as_ref().unwrap().ty.clone());
         }
@@ -2041,12 +2102,6 @@ pub fn add_type(node: &mut Node) {
                 }
             }
         }
-        NodeKind::Return
-        | NodeKind::If
-        | NodeKind::For
-        | NodeKind::While
-        | NodeKind::Block
-        | NodeKind::ExprStmt => {}
     }
 }
 
