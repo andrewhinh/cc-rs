@@ -94,6 +94,7 @@ pub fn new_var(name: String, ty: Type) -> Obj {
         is_local: false,
         offset: 0,
         is_function: false,
+        is_definition: false,
         init_data: None,
         params: Vec::new(),
         body: None,
@@ -670,6 +671,13 @@ pub fn function(
 
     let mut fn_obj = new_gvar(name, ty.clone());
     fn_obj.is_function = true;
+
+    let (is_definition, tok) = consume(src, &tok, ";");
+    fn_obj.is_definition = !is_definition;
+
+    if !fn_obj.is_definition {
+        return Ok((fn_obj, tok));
+    }
 
     let mut locals: Vec<Obj> = Vec::new();
     let mut scope_stack: Vec<Vec<VarScope>> = Vec::new();

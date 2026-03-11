@@ -533,7 +533,7 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
     }
 
     for func in globals.iter_mut() {
-        if !func.is_function {
+        if !func.is_function || !func.is_definition {
             continue;
         }
 
