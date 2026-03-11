@@ -348,28 +348,63 @@ pub fn declspec(
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Type, Token), String> {
-    if equal(src, tok, "void") {
-        return Ok((Type::new_void(), *tok.next.as_ref().unwrap().clone()));
+    const VOID: i32 = 1 << 0;
+    const CHAR: i32 = 1 << 2;
+    const SHORT: i32 = 1 << 4;
+    const INT: i32 = 1 << 6;
+    const LONG: i32 = 1 << 8;
+    const OTHER: i32 = 1 << 10;
+    const SHORT_INT: i32 = SHORT + INT;
+    const LONG_INT: i32 = LONG + INT;
+
+    let mut ty = Type::new_int();
+    let mut counter = 0;
+    let mut tok = tok.clone();
+
+    while is_typename(src, &tok) {
+        if equal(src, &tok, "struct") || equal(src, &tok, "union") {
+            if equal(src, &tok, "struct") {
+                let (new_ty, new_tok) =
+                    struct_decl(filename, src, tok.next.as_ref().unwrap(), tag_scope_stack)?;
+                ty = new_ty;
+                tok = new_tok;
+            } else {
+                let (new_ty, new_tok) =
+                    union_decl(filename, src, tok.next.as_ref().unwrap(), tag_scope_stack)?;
+                ty = new_ty;
+                tok = new_tok;
+            }
+            counter += OTHER;
+            continue;
+        }
+
+        if equal(src, &tok, "void") {
+            counter += VOID;
+        } else if equal(src, &tok, "char") {
+            counter += CHAR;
+        } else if equal(src, &tok, "short") {
+            counter += SHORT;
+        } else if equal(src, &tok, "int") {
+            counter += INT;
+        } else if equal(src, &tok, "long") {
+            counter += LONG;
+        } else {
+            unreachable!();
+        }
+
+        match counter {
+            VOID => ty = Type::new_void(),
+            CHAR => ty = Type::new_char(),
+            SHORT | SHORT_INT => ty = Type::new_short(),
+            INT => ty = Type::new_int(),
+            LONG | LONG_INT => ty = Type::new_long(),
+            _ => return Err(error_tok(filename, src, &tok, "invalid type")),
+        }
+
+        tok = *tok.next.as_ref().unwrap().clone();
     }
-    if equal(src, tok, "char") {
-        return Ok((Type::new_char(), *tok.next.as_ref().unwrap().clone()));
-    }
-    if equal(src, tok, "short") {
-        return Ok((Type::new_short(), *tok.next.as_ref().unwrap().clone()));
-    }
-    if equal(src, tok, "int") {
-        return Ok((Type::new_int(), *tok.next.as_ref().unwrap().clone()));
-    }
-    if equal(src, tok, "long") {
-        return Ok((Type::new_long(), *tok.next.as_ref().unwrap().clone()));
-    }
-    if equal(src, tok, "struct") {
-        return struct_decl(filename, src, tok.next.as_ref().unwrap(), tag_scope_stack);
-    }
-    if equal(src, tok, "union") {
-        return union_decl(filename, src, tok.next.as_ref().unwrap(), tag_scope_stack);
-    }
-    Err(error_tok(filename, src, tok, "typename expected"))
+
+    Ok((ty, tok))
 }
 
 pub fn is_typename(src: &str, tok: &Token) -> bool {
