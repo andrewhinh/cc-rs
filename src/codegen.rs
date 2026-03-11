@@ -237,16 +237,27 @@ fn gen_expr(
     )?;
     result.push_str("  pop %rdi\n");
 
+    let lhs_ty = node.lhs.as_ref().unwrap().ty.as_ref().unwrap();
+    let (ax, di) = if lhs_ty.kind == TypeKind::Long || lhs_ty.base.is_some() {
+        ("%rax", "%rdi")
+    } else {
+        ("%eax", "%edi")
+    };
+
     match node.kind {
-        NodeKind::Add => result.push_str("  add %rdi, %rax\n"),
-        NodeKind::Sub => result.push_str("  sub %rdi, %rax\n"),
-        NodeKind::Mul => result.push_str("  imul %rdi, %rax\n"),
+        NodeKind::Add => result.push_str(&format!("  add {}, {}\n", di, ax)),
+        NodeKind::Sub => result.push_str(&format!("  sub {}, {}\n", di, ax)),
+        NodeKind::Mul => result.push_str(&format!("  imul {}, {}\n", di, ax)),
         NodeKind::Div => {
-            result.push_str("  cqo\n");
-            result.push_str("  idiv %rdi\n");
+            if lhs_ty.size == 8 {
+                result.push_str("  cqo\n");
+            } else {
+                result.push_str("  cdq\n");
+            }
+            result.push_str(&format!("  idiv {}\n", di));
         }
         NodeKind::Eq | NodeKind::Ne | NodeKind::Lt | NodeKind::Le => {
-            result.push_str("  cmp %rdi, %rax\n");
+            result.push_str(&format!("  cmp {}, {}\n", di, ax));
             match node.kind {
                 NodeKind::Eq => result.push_str("  sete %al\n"),
                 NodeKind::Ne => result.push_str("  setne %al\n"),

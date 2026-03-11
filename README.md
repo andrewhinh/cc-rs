@@ -131,7 +131,7 @@ cargo run
 - [x] Add `long long` as an alias for `long`
 - [x] Add typedef
 - [x] Make sizeof to accept not only an expression but also a typename
-- [ ] Use 32 bit registers for char, short and int
+- [x] Use 32 bit registers for char, short and int
 - [ ] Add type cast
 - [ ] Implement usual arithmetic conversion
 - [ ] Report an error on undefined/undeclared functions
