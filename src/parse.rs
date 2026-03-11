@@ -348,6 +348,9 @@ pub fn declspec(
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Type, Token), String> {
+    if equal(src, tok, "void") {
+        return Ok((Type::new_void(), *tok.next.as_ref().unwrap().clone()));
+    }
     if equal(src, tok, "char") {
         return Ok((Type::new_char(), *tok.next.as_ref().unwrap().clone()));
     }
@@ -370,7 +373,8 @@ pub fn declspec(
 }
 
 pub fn is_typename(src: &str, tok: &Token) -> bool {
-    equal(src, tok, "char")
+    equal(src, tok, "void")
+        || equal(src, tok, "char")
         || equal(src, tok, "short")
         || equal(src, tok, "int")
         || equal(src, tok, "long")
@@ -599,6 +603,14 @@ pub fn declaration(
 
         let (ty, new_tok) = declarator(filename, src, &tok, basety.clone(), tag_scope_stack)?;
         tok = new_tok;
+        if ty.kind == TypeKind::Void {
+            return Err(error_tok(
+                filename,
+                src,
+                ty.name.as_ref().unwrap(),
+                "variable declared void",
+            ));
+        }
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
         let var = new_lvar(name, ty.clone(), locals, scope_stack);
 
@@ -1394,7 +1406,7 @@ pub fn unary(
     if equal(src, tok, "*") {
         let tok_loc = tok.loc;
         let line_no = tok.line_no;
-        let (node, tok) = unary(
+        let (mut node, tok) = unary(
             filename,
             src,
             tok.next.as_ref().unwrap(),
@@ -1403,6 +1415,18 @@ pub fn unary(
             scope_stack,
             tag_scope_stack,
         )?;
+        add_type(&mut node);
+        let lhs_ty = node.ty.as_ref().unwrap();
+        if (lhs_ty.kind == TypeKind::Ptr || lhs_ty.kind == TypeKind::Array)
+            && lhs_ty.base.as_ref().unwrap().kind == TypeKind::Void
+        {
+            return Err(error_at(
+                filename,
+                src,
+                tok_loc,
+                "dereferencing a void pointer",
+            ));
+        }
         return Ok((new_unary(NodeKind::Deref, node, tok_loc, line_no), tok));
     }
 
