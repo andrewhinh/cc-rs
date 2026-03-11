@@ -125,7 +125,7 @@ cargo run
 - [x] Change size of int from 8 to 4
 - [x] Add long type
 - [x] Add short type
-- [ ] Add nested type declarators
+- [x] Add nested type declarators
 - [ ] Add void type
 - [ ] Handle complex type declarations correctly
 - [ ] Add `long long` as an alias for `long`

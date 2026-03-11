@@ -516,6 +516,28 @@ pub fn declarator(
         ty = pointer_to(ty);
     }
 
+    if equal(src, &tok, "(") {
+        let start = tok.clone();
+        let dummy = Type::new_int();
+        let (_, tok) = declarator(
+            filename,
+            src,
+            start.next.as_ref().unwrap(),
+            dummy,
+            tag_scope_stack,
+        )?;
+        let tok = skip(filename, src, &tok, ")")?;
+        let (ty, rest) = type_suffix(filename, src, &tok, ty, tag_scope_stack)?;
+        let (ty, _) = declarator(
+            filename,
+            src,
+            start.next.as_ref().unwrap(),
+            ty,
+            tag_scope_stack,
+        )?;
+        return Ok((ty, rest));
+    }
+
     if tok.kind != TokenKind::Ident {
         return Err(error_tok(filename, src, &tok, "expected a variable name"));
     }
