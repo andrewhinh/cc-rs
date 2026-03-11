@@ -356,6 +356,8 @@ pub fn declspec(
     const OTHER: i32 = 1 << 10;
     const SHORT_INT: i32 = SHORT + INT;
     const LONG_INT: i32 = LONG + INT;
+    const LONG_LONG: i32 = LONG + LONG;
+    const LONG_LONG_INT: i32 = LONG_LONG + INT;
 
     let mut ty = Type::new_int();
     let mut counter = 0;
@@ -397,7 +399,7 @@ pub fn declspec(
             CHAR => ty = Type::new_char(),
             SHORT | SHORT_INT => ty = Type::new_short(),
             INT => ty = Type::new_int(),
-            LONG | LONG_INT => ty = Type::new_long(),
+            LONG | LONG_INT | LONG_LONG | LONG_LONG_INT => ty = Type::new_long(),
             _ => return Err(error_tok(filename, src, &tok, "invalid type")),
         }
 

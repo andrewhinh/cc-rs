@@ -128,7 +128,7 @@ cargo run
 - [x] Add nested type declarators
 - [x] Add void type
 - [x] Handle complex type declarations correctly
-- [ ] Add `long long` as an alias for `long`
+- [x] Add `long long` as an alias for `long`
 - [ ] Add typedef
 - [ ] Make sizeof to accept not only an expression but also a typename
 - [ ] Use 32 bit registers for char, short and int
