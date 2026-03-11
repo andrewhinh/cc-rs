@@ -660,6 +660,62 @@ pub fn declarator(
     Ok((ty, tok))
 }
 
+pub fn abstract_declarator(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    mut ty: Type,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+    scope_stack: &[Vec<VarScope>],
+) -> Result<(Type, Token), String> {
+    let mut tok = tok.clone();
+    loop {
+        let (consumed, new_tok) = consume(src, &tok, "*");
+        if !consumed {
+            break;
+        }
+        tok = new_tok;
+        ty = pointer_to(ty);
+    }
+
+    if equal(src, &tok, "(") {
+        let start = tok.clone();
+        let dummy = Type::new_int();
+        let (_, tok) = abstract_declarator(
+            filename,
+            src,
+            start.next.as_ref().unwrap(),
+            dummy,
+            tag_scope_stack,
+            scope_stack,
+        )?;
+        let tok = skip(filename, src, &tok, ")")?;
+        let (ty, rest) = type_suffix(filename, src, &tok, ty, tag_scope_stack, scope_stack)?;
+        let (ty, _) = abstract_declarator(
+            filename,
+            src,
+            start.next.as_ref().unwrap(),
+            ty,
+            tag_scope_stack,
+            scope_stack,
+        )?;
+        return Ok((ty, rest));
+    }
+
+    type_suffix(filename, src, &tok, ty, tag_scope_stack, scope_stack)
+}
+
+pub fn typename(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+    scope_stack: &[Vec<VarScope>],
+) -> Result<(Type, Token), String> {
+    let (ty, tok) = declspec(filename, src, tok, tag_scope_stack, scope_stack, None)?;
+    abstract_declarator(filename, src, &tok, ty, tag_scope_stack, scope_stack)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn declaration(
     filename: &str,
@@ -1765,6 +1821,27 @@ pub fn primary(
         )?;
         let tok = skip(filename, src, &tok, ")")?;
         return Ok((node, tok));
+    }
+
+    if equal(src, tok, "sizeof")
+        && equal(src, tok.next.as_ref().unwrap(), "(")
+        && is_typename(
+            src,
+            tok.next.as_ref().unwrap().next.as_ref().unwrap(),
+            scope_stack,
+        )
+    {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (ty, tok) = typename(
+            filename,
+            src,
+            tok.next.as_ref().unwrap().next.as_ref().unwrap(),
+            tag_scope_stack,
+            scope_stack,
+        )?;
+        let tok = skip(filename, src, &tok, ")")?;
+        return Ok((new_num(ty.size, tok_loc, line_no), tok));
     }
 
     if equal(src, tok, "sizeof") {
