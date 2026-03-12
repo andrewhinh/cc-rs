@@ -89,7 +89,7 @@ cargo run
 - [x] Support zero-arity function definition
 - [x] Support function definition up to 6 parameters
 - [x] Add function declaration
-- [ ] Handle return type conversion
+- [x] Handle return type conversion
 - [ ] Handle function argument type conversion
 - [ ] Support file-scope functions
 - [ ] Align stack frame to 16 byte boundaries
