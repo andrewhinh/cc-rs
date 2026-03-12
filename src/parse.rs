@@ -84,6 +84,8 @@ pub fn find_var(scope_stack: &[Vec<VarScope>], globals: &[Obj], name: &str) -> O
                 name: var.name.clone(),
                 var: Some(var.clone()),
                 type_def: None,
+                enum_ty: None,
+                enum_val: 0,
             });
         }
     }
@@ -171,6 +173,8 @@ pub fn new_lvar(
         name,
         var: Some(var.clone()),
         type_def: None,
+        enum_ty: None,
+        enum_val: 0,
     });
     var
 }
@@ -200,7 +204,9 @@ pub fn struct_members(
     let mut members: Vec<crate::Member> = Vec::new();
 
     while !equal(src, &tok, "}") {
-        let (basety, new_tok) = declspec(filename, src, &tok, tag_scope_stack, &[], None)?;
+        let mut empty_scope: Vec<Vec<VarScope>> = vec![];
+        let (basety, new_tok) =
+            declspec(filename, src, &tok, tag_scope_stack, &mut empty_scope, None)?;
         tok = new_tok;
         let mut i = 0;
 
@@ -210,8 +216,17 @@ pub fn struct_members(
             }
             i += 1;
 
-            let (mem_ty, new_tok) =
-                declarator(filename, src, &tok, basety.clone(), tag_scope_stack, &[])?;
+            let (mem_ty, new_tok) = {
+                let mut empty_scope: Vec<Vec<VarScope>> = vec![];
+                declarator(
+                    filename,
+                    src,
+                    &tok,
+                    basety.clone(),
+                    tag_scope_stack,
+                    &mut empty_scope,
+                )?
+            };
             tok = new_tok;
             let mem = crate::Member {
                 next: None,
@@ -341,6 +356,90 @@ pub fn union_decl(
     Ok((ty, rest))
 }
 
+pub fn enum_specifier(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    tag_scope_stack: &mut [Vec<TagScope>],
+    scope_stack: &mut [Vec<VarScope>],
+) -> Result<(Type, Token), String> {
+    let ty = Type::new_enum();
+
+    let tag = if tok.kind == TokenKind::Ident {
+        let tag_tok = tok.clone();
+        let tok = tok.next.as_ref().unwrap().as_ref().clone();
+        (Some(tag_tok), tok)
+    } else {
+        (None, tok.clone())
+    };
+
+    let (tag, mut tok) = (tag.0, tag.1);
+
+    if let Some(tag_tok) = &tag
+        && !equal(src, &tok, "{")
+    {
+        let tag_name: String = src.chars().skip(tag_tok.loc).take(tag_tok.len).collect();
+        if let Some(ty) = find_tag(tag_scope_stack, &tag_name) {
+            if ty.kind != TypeKind::Enum {
+                return Err(error_tok(filename, src, tag_tok, "not an enum tag"));
+            }
+            return Ok((ty, tok));
+        }
+        return Err(error_tok(filename, src, tag_tok, "unknown enum type"));
+    }
+
+    tok = skip(filename, src, &tok, "{")?;
+
+    let mut val: i64 = 0;
+    let mut i = 0;
+
+    while !equal(src, &tok, "}") {
+        if i > 0 {
+            tok = skip(filename, src, &tok, ",")?;
+        }
+        i += 1;
+
+        let name = get_ident(src, &tok)?;
+        tok = tok.next.as_ref().unwrap().as_ref().clone();
+
+        if equal(src, &tok, "=") {
+            val = get_number(tok.next.as_ref().unwrap())?;
+            tok = tok
+                .next
+                .as_ref()
+                .unwrap()
+                .next
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .clone();
+        }
+
+        let scope = VarScope {
+            name: name.clone(),
+            var: None,
+            type_def: None,
+            enum_ty: Some(ty.clone()),
+            enum_val: val,
+        };
+
+        if let Some(last_scope) = scope_stack.last_mut() {
+            last_scope.push(scope);
+        }
+
+        val += 1;
+    }
+
+    let rest = tok.next.as_ref().unwrap().as_ref().clone();
+
+    if let Some(tag_tok) = tag {
+        let tag_name: String = src.chars().skip(tag_tok.loc).take(tag_tok.len).collect();
+        push_tag_scope(tag_scope_stack, tag_name, ty.clone());
+    }
+
+    Ok((ty, rest))
+}
+
 pub fn get_struct_member(
     filename: &str,
     ty: &Type,
@@ -384,7 +483,7 @@ pub fn declspec(
     src: &str,
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &[Vec<VarScope>],
+    scope_stack: &mut [Vec<VarScope>],
     mut attr: Option<&mut VarAttr>,
 ) -> Result<(Type, Token), String> {
     const VOID: i32 = 1 << 0;
@@ -420,7 +519,11 @@ pub fn declspec(
         }
 
         let ty2 = find_typedef(scope_stack, &tok, src);
-        if equal(src, &tok, "struct") || equal(src, &tok, "union") || ty2.is_some() {
+        if equal(src, &tok, "struct")
+            || equal(src, &tok, "union")
+            || equal(src, &tok, "enum")
+            || ty2.is_some()
+        {
             if counter > 0 {
                 break;
             }
@@ -433,6 +536,16 @@ pub fn declspec(
             } else if equal(src, &tok, "union") {
                 let (new_ty, new_tok) =
                     union_decl(filename, src, tok.next.as_ref().unwrap(), tag_scope_stack)?;
+                ty = new_ty;
+                tok = new_tok;
+            } else if equal(src, &tok, "enum") {
+                let (new_ty, new_tok) = enum_specifier(
+                    filename,
+                    src,
+                    tok.next.as_ref().unwrap(),
+                    tag_scope_stack,
+                    scope_stack,
+                )?;
                 ty = new_ty;
                 tok = new_tok;
             } else {
@@ -485,6 +598,7 @@ pub fn is_typename(src: &str, tok: &Token, scope_stack: &[Vec<VarScope>]) -> boo
         || equal(src, tok, "struct")
         || equal(src, tok, "union")
         || equal(src, tok, "typedef")
+        || equal(src, tok, "enum")
         || find_typedef(scope_stack, tok, src).is_some()
 }
 
@@ -502,7 +616,8 @@ pub fn is_function(src: &str, tok: &Token) -> Result<bool, String> {
 
     let dummy = Type::new_int();
     let mut tag_scope_stack: Vec<Vec<TagScope>> = vec![Vec::new()];
-    let (ty, _) = declarator("", src, tok, dummy, &mut tag_scope_stack, &[])?;
+    let mut empty_scope: Vec<Vec<VarScope>> = vec![];
+    let (ty, _) = declarator("", src, tok, dummy, &mut tag_scope_stack, &mut empty_scope)?;
     Ok(ty.kind == TypeKind::Func)
 }
 
@@ -513,7 +628,7 @@ pub fn global_variable(
     basety: Type,
     globals: &mut Vec<Obj>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &[Vec<VarScope>],
+    scope_stack: &mut [Vec<VarScope>],
 ) -> Result<Token, String> {
     let mut tok = tok.clone();
     let mut first = true;
@@ -547,7 +662,7 @@ pub fn func_params(
     tok: &Token,
     ty: Type,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &[Vec<VarScope>],
+    scope_stack: &mut [Vec<VarScope>],
 ) -> Result<(Type, Token), String> {
     let mut tok = tok.clone();
 
@@ -594,7 +709,7 @@ pub fn type_suffix(
     tok: &Token,
     ty: Type,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &[Vec<VarScope>],
+    scope_stack: &mut [Vec<VarScope>],
 ) -> Result<(Type, Token), String> {
     if equal(src, tok, "(") {
         return func_params(
@@ -628,7 +743,7 @@ pub fn declarator(
     tok: &Token,
     mut ty: Type,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &[Vec<VarScope>],
+    scope_stack: &mut [Vec<VarScope>],
 ) -> Result<(Type, Token), String> {
     let mut tok = tok.clone();
     loop {
@@ -688,7 +803,7 @@ pub fn abstract_declarator(
     tok: &Token,
     mut ty: Type,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &[Vec<VarScope>],
+    scope_stack: &mut [Vec<VarScope>],
 ) -> Result<(Type, Token), String> {
     let mut tok = tok.clone();
     loop {
@@ -732,7 +847,7 @@ pub fn typename(
     src: &str,
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &[Vec<VarScope>],
+    scope_stack: &mut [Vec<VarScope>],
 ) -> Result<(Type, Token), String> {
     let (ty, tok) = declspec(filename, src, tok, tag_scope_stack, scope_stack, None)?;
     abstract_declarator(filename, src, &tok, ty, tag_scope_stack, scope_stack)
@@ -870,6 +985,8 @@ pub fn parse_typedef(
             name,
             var: None,
             type_def: Some(ty),
+            enum_ty: None,
+            enum_val: 0,
         });
     }
 
@@ -900,7 +1017,7 @@ pub fn function(
     basety: Type,
     globals: &mut Vec<Obj>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &[Vec<VarScope>],
+    scope_stack: &mut [Vec<VarScope>],
 ) -> Result<(Obj, Token), String> {
     let (ty, tok) = declarator(filename, src, tok, basety, tag_scope_stack, scope_stack)?;
     let name = get_ident(src, ty.name.as_ref().unwrap())?;
@@ -1998,10 +2115,16 @@ pub fn primary(
 
         let sc = find_var(scope_stack, globals, &funcname)
             .ok_or_else(|| error_tok(filename, src, tok, "undefined variable"))?;
-        let var = sc
-            .var
-            .ok_or_else(|| error_tok(filename, src, tok, "undefined variable"))?;
-        let node = new_var_node(var, tok_loc, line_no);
+
+        if sc.var.is_none() && sc.enum_ty.is_none() {
+            return Err(error_tok(filename, src, tok, "undefined variable"));
+        }
+
+        let node = if let Some(var) = sc.var {
+            new_var_node(var, tok_loc, line_no)
+        } else {
+            new_num(sc.enum_val, tok_loc, line_no)
+        };
         return Ok((node, *tok.next.as_ref().unwrap().clone()));
     }
 
@@ -2051,6 +2174,7 @@ pub fn is_integer(ty: &Type) -> bool {
         || ty.kind == TypeKind::Short
         || ty.kind == TypeKind::Int
         || ty.kind == TypeKind::Long
+        || ty.kind == TypeKind::Enum
 }
 
 pub fn copy_type(ty: &Type) -> Type {
