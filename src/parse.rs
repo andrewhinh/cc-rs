@@ -46,6 +46,13 @@ pub fn new_num(val: i64, tok_loc: usize, line_no: usize) -> Node {
     node
 }
 
+pub fn new_long(val: i64, tok_loc: usize, line_no: usize) -> Node {
+    let mut node = new_node(NodeKind::Num, tok_loc, line_no);
+    node.val = val;
+    node.ty = Some(Type::new_long());
+    node
+}
+
 pub fn new_var_node(var: Obj, tok_loc: usize, line_no: usize) -> Node {
     let mut node = new_node(NodeKind::Var, tok_loc, line_no);
     node.var = Some(Box::new(var.clone()));
@@ -1992,6 +1999,22 @@ pub fn copy_type(ty: &Type) -> Type {
     ty.clone()
 }
 
+pub fn get_common_type(ty1: &Type, ty2: &Type) -> Type {
+    if let Some(base) = &ty1.base {
+        return Type::new_ptr(base.as_ref().clone());
+    }
+    if ty1.size == 8 || ty2.size == 8 {
+        return Type::new_long();
+    }
+    Type::new_int()
+}
+
+pub fn usual_arith_conv(lhs: &mut Node, rhs: &mut Node) {
+    let ty = get_common_type(lhs.ty.as_ref().unwrap(), rhs.ty.as_ref().unwrap());
+    *lhs = new_cast(lhs.clone(), ty.clone());
+    *rhs = new_cast(rhs.clone(), ty);
+}
+
 pub fn add_type(node: &mut Node) {
     if node.ty.is_some() {
         return;
@@ -2044,23 +2067,47 @@ pub fn add_type(node: &mut Node) {
     }
 
     match node.kind {
-        NodeKind::Add | NodeKind::Sub | NodeKind::Mul | NodeKind::Div | NodeKind::Neg => {
+        NodeKind::Num => {
+            node.ty = if node.val == (node.val as i32) as i64 {
+                Some(Type::new_int())
+            } else {
+                Some(Type::new_long())
+            };
+        }
+        NodeKind::Add | NodeKind::Sub | NodeKind::Mul | NodeKind::Div => {
+            usual_arith_conv(node.lhs.as_mut().unwrap(), node.rhs.as_mut().unwrap());
             node.ty = node.lhs.as_ref().unwrap().ty.clone();
+        }
+        NodeKind::Neg => {
+            let ty = get_common_type(
+                &Type::new_int(),
+                node.lhs.as_ref().unwrap().ty.as_ref().unwrap(),
+            );
+            node.lhs = Some(Box::new(new_cast(
+                node.lhs.as_ref().unwrap().as_ref().clone(),
+                ty.clone(),
+            )));
+            node.ty = Some(ty);
         }
         NodeKind::Assign => {
             let lhs_ty = node.lhs.as_ref().unwrap().ty.as_ref().unwrap();
             if lhs_ty.kind == TypeKind::Array {
                 node.ty = Some(Type::new_int());
             } else {
+                if lhs_ty.kind != TypeKind::Struct && lhs_ty.kind != TypeKind::Union {
+                    node.rhs = Some(Box::new(new_cast(
+                        node.rhs.as_ref().unwrap().as_ref().clone(),
+                        lhs_ty.clone(),
+                    )));
+                }
                 node.ty = Some(lhs_ty.clone());
             }
         }
-        NodeKind::Eq
-        | NodeKind::Ne
-        | NodeKind::Lt
-        | NodeKind::Le
-        | NodeKind::Num
-        | NodeKind::FuncCall => {
+        NodeKind::Eq | NodeKind::Ne | NodeKind::Lt | NodeKind::Le => {
+            usual_arith_conv(node.lhs.as_mut().unwrap(), node.rhs.as_mut().unwrap());
+            node.ty = Some(Type::new_int());
+        }
+        NodeKind::FuncCall => {
             node.ty = Some(Type::new_long());
         }
         NodeKind::Return
@@ -2151,7 +2198,7 @@ pub fn new_add(
     let rhs = new_binary(
         NodeKind::Mul,
         rhs,
-        new_num(base_size, tok_loc, line_no),
+        new_long(base_size, tok_loc, line_no),
         tok_loc,
         line_no,
     );
@@ -2184,7 +2231,7 @@ pub fn new_sub(
         let rhs = new_binary(
             NodeKind::Mul,
             rhs,
-            new_num(base_size, tok_loc, line_no),
+            new_long(base_size, tok_loc, line_no),
             tok_loc,
             line_no,
         );
@@ -2210,7 +2257,7 @@ pub fn new_sub(
         let mut result = new_binary(
             NodeKind::Div,
             node,
-            new_num(base_size, tok_loc, line_no),
+            new_long(base_size, tok_loc, line_no),
             tok_loc,
             line_no,
         );
