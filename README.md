@@ -90,7 +90,7 @@ cargo run
 - [x] Support function definition up to 6 parameters
 - [x] Add function declaration
 - [x] Handle return type conversion
-- [ ] Handle function argument type conversion
+- [x] Handle function argument type conversion
 - [ ] Support file-scope functions
 - [ ] Align stack frame to 16 byte boundaries
 - [ ] Handle a function returning bool, char or short

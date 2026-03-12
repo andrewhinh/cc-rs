@@ -20,6 +20,7 @@ pub fn new_node(kind: NodeKind, tok_loc: usize, line_no: usize) -> Node {
         inc: None,
         body: None,
         funcname: None,
+        func_ty: None,
         args: None,
         var: None,
         val: 0,
@@ -760,6 +761,7 @@ pub fn declaration(
         inc: None,
         body: None,
         funcname: None,
+        func_ty: None,
         args: None,
         var: None,
         val: 0,
@@ -974,6 +976,7 @@ pub fn compound_stmt(
         inc: None,
         body: None,
         funcname: None,
+        func_ty: None,
         args: None,
         var: None,
         val: 0,
@@ -1819,7 +1822,9 @@ pub fn funcall(
         return Err(error_tok(filename, src, tok, "not a function"));
     }
 
-    let ty = var.ty.return_ty.as_ref().unwrap().as_ref().clone();
+    let ty = var.ty.clone();
+    let return_ty = var.ty.return_ty.as_ref().unwrap().as_ref().clone();
+    let mut param_ty = var.ty.params.clone();
 
     let mut tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
 
@@ -1838,6 +1843,7 @@ pub fn funcall(
         inc: None,
         body: None,
         funcname: None,
+        func_ty: None,
         args: None,
         var: None,
         val: 0,
@@ -1860,6 +1866,20 @@ pub fn funcall(
         )?;
         tok = new_tok;
         add_type(&mut arg);
+
+        if let Some(pt) = param_ty {
+            if pt.kind == TypeKind::Struct || pt.kind == TypeKind::Union {
+                return Err(error_tok(
+                    filename,
+                    src,
+                    &tok,
+                    "passing struct or union is not supported yet",
+                ));
+            }
+            arg = new_cast(arg, pt.as_ref().clone());
+            param_ty = pt.next.clone();
+        }
+
         cur.next = Some(Box::new(arg));
         cur = cur.next.as_mut().unwrap();
     }
@@ -1868,7 +1888,8 @@ pub fn funcall(
 
     let mut node = new_node(NodeKind::FuncCall, tok_loc, line_no);
     node.funcname = Some(funcname);
-    node.ty = Some(ty);
+    node.func_ty = Some(ty);
+    node.ty = Some(return_ty);
     node.args = head.next;
     Ok((node, tok))
 }
