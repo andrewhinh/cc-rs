@@ -104,6 +104,7 @@ fn is_keyword(name: &str) -> bool {
             | "long"
             | "void"
             | "typedef"
+            | "_Bool"
     )
 }
 

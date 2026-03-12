@@ -388,11 +388,12 @@ pub fn declspec(
     mut attr: Option<&mut VarAttr>,
 ) -> Result<(Type, Token), String> {
     const VOID: i32 = 1 << 0;
-    const CHAR: i32 = 1 << 2;
-    const SHORT: i32 = 1 << 4;
-    const INT: i32 = 1 << 6;
-    const LONG: i32 = 1 << 8;
-    const OTHER: i32 = 1 << 10;
+    const BOOL: i32 = 1 << 2;
+    const CHAR: i32 = 1 << 4;
+    const SHORT: i32 = 1 << 6;
+    const INT: i32 = 1 << 8;
+    const LONG: i32 = 1 << 10;
+    const OTHER: i32 = 1 << 12;
     const SHORT_INT: i32 = SHORT + INT;
     const LONG_INT: i32 = LONG + INT;
     const LONG_LONG: i32 = LONG + LONG;
@@ -444,6 +445,8 @@ pub fn declspec(
 
         if equal(src, &tok, "void") {
             counter += VOID;
+        } else if equal(src, &tok, "_Bool") {
+            counter += BOOL;
         } else if equal(src, &tok, "char") {
             counter += CHAR;
         } else if equal(src, &tok, "short") {
@@ -458,6 +461,7 @@ pub fn declspec(
 
         match counter {
             VOID => ty = Type::new_void(),
+            BOOL => ty = Type::new_bool(),
             CHAR => ty = Type::new_char(),
             SHORT | SHORT_INT => ty = Type::new_short(),
             INT => ty = Type::new_int(),
@@ -473,6 +477,7 @@ pub fn declspec(
 
 pub fn is_typename(src: &str, tok: &Token, scope_stack: &[Vec<VarScope>]) -> bool {
     equal(src, tok, "void")
+        || equal(src, tok, "_Bool")
         || equal(src, tok, "char")
         || equal(src, tok, "short")
         || equal(src, tok, "int")
@@ -2041,7 +2046,8 @@ pub fn func_type(return_ty: Type) -> Type {
 }
 
 pub fn is_integer(ty: &Type) -> bool {
-    ty.kind == TypeKind::Char
+    ty.kind == TypeKind::Bool
+        || ty.kind == TypeKind::Char
         || ty.kind == TypeKind::Short
         || ty.kind == TypeKind::Int
         || ty.kind == TypeKind::Long

@@ -135,7 +135,7 @@ cargo run
 - [x] Add type cast
 - [x] Implement usual arithmetic conversion
 - [x] Report an error on undefined/undeclared functions
-- [ ] Add \_Bool type
+- [x] Add \_Bool type
 - [ ] Add enum
 - [ ] Add +=, -=, \*= and /=
 - [ ] Add pre ++ and --
