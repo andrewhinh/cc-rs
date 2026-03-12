@@ -920,6 +920,7 @@ pub fn function(
     fn_obj.params = locals.clone();
 
     let tok = skip(filename, src, &tok, "{")?;
+    let return_ty = ty.return_ty.as_ref().map(|b| b.as_ref());
     let (mut body, tok) = compound_stmt(
         filename,
         src,
@@ -928,6 +929,7 @@ pub fn function(
         globals,
         &mut local_scope_stack,
         tag_scope_stack,
+        return_ty,
     )?;
 
     add_type(&mut body);
@@ -949,6 +951,7 @@ pub fn compound_stmt(
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
+    return_ty: Option<&Type>,
 ) -> Result<(Node, Token), String> {
     let tok_loc = tok.loc;
     let line_no = tok.line_no;
@@ -1019,6 +1022,7 @@ pub fn compound_stmt(
                 globals,
                 scope_stack,
                 tag_scope_stack,
+                return_ty,
             )?;
             tok = new_tok;
             cur.next = Some(Box::new(node));
@@ -1043,11 +1047,12 @@ pub fn stmt(
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
+    return_ty: Option<&Type>,
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, "return") {
         let tok_loc = tok.loc;
         let line_no = tok.line_no;
-        let (expr_node, tok) = expr(
+        let (mut expr_node, tok) = expr(
             filename,
             src,
             tok.next.as_ref().unwrap(),
@@ -1057,6 +1062,10 @@ pub fn stmt(
             tag_scope_stack,
         )?;
         let tok = skip(filename, src, &tok, ";")?;
+        if let Some(ret_ty) = return_ty {
+            add_type(&mut expr_node);
+            expr_node = new_cast(expr_node, ret_ty.clone());
+        }
         let node = new_unary(NodeKind::Return, expr_node, tok_loc, line_no);
         return Ok((node, tok));
     }
@@ -1084,6 +1093,7 @@ pub fn stmt(
             globals,
             scope_stack,
             tag_scope_stack,
+            return_ty,
         )?;
         node.then = Some(Box::new(then));
         let mut tok = tok;
@@ -1096,6 +1106,7 @@ pub fn stmt(
                 globals,
                 scope_stack,
                 tag_scope_stack,
+                return_ty,
             )?;
             node.els = Some(Box::new(els));
             tok = new_tok;
@@ -1158,6 +1169,7 @@ pub fn stmt(
             globals,
             scope_stack,
             tag_scope_stack,
+            return_ty,
         )?;
         node.then = Some(Box::new(then));
         return Ok((node, tok));
@@ -1186,6 +1198,7 @@ pub fn stmt(
             globals,
             scope_stack,
             tag_scope_stack,
+            return_ty,
         )?;
         node.then = Some(Box::new(then));
         return Ok((node, tok));
@@ -1199,6 +1212,7 @@ pub fn stmt(
             globals,
             scope_stack,
             tag_scope_stack,
+            return_ty,
         );
     }
     expr_stmt(
@@ -1879,6 +1893,7 @@ pub fn primary(
             globals,
             scope_stack,
             tag_scope_stack,
+            None,
         )?;
         let tok = skip(filename, src, &tok, ")")?;
         let mut node = new_node(NodeKind::StmtExpr, tok_loc, line_no);
