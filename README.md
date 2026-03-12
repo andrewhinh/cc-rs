@@ -249,7 +249,7 @@ cargo run
 - [x] Add \<octal-sequence>
 - [x] Add \x<hexadecimal-sequence>
 - [x] Add line and block comments
-- [ ] Add character literal
+- [x] Add character literal
 - [ ] Concatenate adjacent string literals
 - [ ] Recognize wide character literal
 - [ ] Tokenize numeric tokens as pp-numbers
