@@ -98,6 +98,22 @@ fn store(ty: &Type, result: &mut String) {
     }
 }
 
+fn cmp_zero(ty: &Type, result: &mut String) {
+    if is_integer(ty) && ty.size <= 4 {
+        result.push_str("  cmp $0, %eax\n");
+    } else {
+        result.push_str("  cmp $0, %rax\n");
+    }
+}
+
+fn is_integer(ty: &Type) -> bool {
+    ty.kind == TypeKind::Bool
+        || ty.kind == TypeKind::Char
+        || ty.kind == TypeKind::Short
+        || ty.kind == TypeKind::Int
+        || ty.kind == TypeKind::Long
+}
+
 const I8: usize = 0;
 const I16: usize = 1;
 const I32: usize = 2;
@@ -105,6 +121,7 @@ const I64: usize = 3;
 
 fn get_type_id(ty: &Type) -> usize {
     match ty.kind {
+        TypeKind::Bool => I8,
         TypeKind::Char => I8,
         TypeKind::Short => I16,
         TypeKind::Int => I32,
@@ -114,6 +131,13 @@ fn get_type_id(ty: &Type) -> usize {
 
 fn cast_type(from: &Type, to: &Type, result: &mut String) {
     if to.kind == TypeKind::Void {
+        return;
+    }
+
+    if to.kind == TypeKind::Bool {
+        cmp_zero(from, result);
+        result.push_str("  setne %al\n");
+        result.push_str("  movzb %al, %rax\n");
         return;
     }
 
