@@ -227,6 +227,37 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
             continue;
         }
 
+        if chars[pos] == '\'' {
+            let start = pos;
+            pos += 1;
+            if pos >= chars.len() {
+                return Err(error_at(filename, src, start, "unclosed char literal"));
+            }
+            let c: i64;
+            if chars[pos] == '\\' {
+                pos += 1;
+                if pos >= chars.len() {
+                    return Err(error_at(filename, src, start, "unclosed char literal"));
+                }
+                let (escaped, consumed) =
+                    read_escaped_char(&chars, pos).map_err(|e| error_at(filename, src, pos, &e))?;
+                c = (escaped as u8) as i8 as i64;
+                pos += consumed;
+            } else {
+                c = (chars[pos] as u8) as i8 as i64;
+                pos += 1;
+            }
+            if pos >= chars.len() || chars[pos] != '\'' {
+                return Err(error_at(filename, src, pos, "unclosed char literal"));
+            }
+            pos += 1;
+            let mut tok = new_token(TokenKind::Num, start, pos);
+            tok.val = c;
+            cur.next = Some(Box::new(tok));
+            cur = cur.next.as_mut().unwrap();
+            continue;
+        }
+
         if chars[pos].is_ascii_digit() {
             let start = pos;
             let mut num_str = String::new();
