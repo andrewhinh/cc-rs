@@ -69,6 +69,7 @@ pub enum TypeKind {
     Short,
     Int,
     Long,
+    Enum,
     Ptr,
     Func,
     Array,
@@ -220,6 +221,21 @@ impl Type {
             members: None,
         }
     }
+
+    pub fn new_enum() -> Type {
+        Type {
+            kind: TypeKind::Enum,
+            size: 4,
+            align: 4,
+            base: None,
+            name: None,
+            return_ty: None,
+            params: None,
+            next: None,
+            array_len: 0,
+            members: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -328,6 +344,8 @@ pub struct VarScope {
     pub name: String,
     pub var: Option<Obj>,
     pub type_def: Option<Type>,
+    pub enum_ty: Option<Type>,
+    pub enum_val: i64,
 }
 
 #[derive(Debug, Clone)]
