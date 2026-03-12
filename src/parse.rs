@@ -1793,6 +1793,20 @@ pub fn funcall(
     let tok_loc = tok.loc;
     let line_no = tok.line_no;
     let funcname: String = src.chars().skip(tok.loc).take(tok.len).collect();
+
+    let sc = find_var(scope_stack, globals, &funcname)
+        .ok_or_else(|| error_tok(filename, src, tok, "implicit declaration of a function"))?;
+
+    let var = sc
+        .var
+        .ok_or_else(|| error_tok(filename, src, tok, "implicit declaration of a function"))?;
+
+    if var.ty.kind != TypeKind::Func {
+        return Err(error_tok(filename, src, tok, "not a function"));
+    }
+
+    let ty = var.ty.return_ty.as_ref().unwrap().as_ref().clone();
+
     let mut tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
 
     let mut head = Node {
@@ -1821,7 +1835,7 @@ pub fn funcall(
         if cur.tok_loc != tok_loc || cur.kind != NodeKind::Num {
             tok = skip(filename, src, &tok, ",")?;
         }
-        let (arg, new_tok) = assign(
+        let (mut arg, new_tok) = assign(
             filename,
             src,
             &tok,
@@ -1831,6 +1845,7 @@ pub fn funcall(
             tag_scope_stack,
         )?;
         tok = new_tok;
+        add_type(&mut arg);
         cur.next = Some(Box::new(arg));
         cur = cur.next.as_mut().unwrap();
     }
@@ -1839,6 +1854,7 @@ pub fn funcall(
 
     let mut node = new_node(NodeKind::FuncCall, tok_loc, line_no);
     node.funcname = Some(funcname);
+    node.ty = Some(ty);
     node.args = head.next;
     Ok((node, tok))
 }

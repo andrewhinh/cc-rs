@@ -134,7 +134,7 @@ cargo run
 - [x] Use 32 bit registers for char, short and int
 - [x] Add type cast
 - [x] Implement usual arithmetic conversion
-- [ ] Report an error on undefined/undeclared functions
+- [x] Report an error on undefined/undeclared functions
 - [ ] Add \_Bool type
 - [ ] Add enum
 - [ ] Add +=, -=, \*= and /=
