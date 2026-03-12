@@ -105,6 +105,7 @@ fn is_keyword(name: &str) -> bool {
             | "void"
             | "typedef"
             | "_Bool"
+            | "enum"
     )
 }
 

@@ -591,7 +591,7 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
             src,
             &tok,
             &mut tag_scope_stack,
-            &scope_stack,
+            &mut scope_stack,
             Some(&mut attr),
         )?;
         tok = new_tok;
@@ -609,7 +609,7 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
                 basety,
                 &mut globals,
                 &mut tag_scope_stack,
-                &scope_stack,
+                &mut scope_stack,
             )?;
             tok = new_tok;
             globals.push(func);
@@ -621,7 +621,7 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
                 basety,
                 &mut globals,
                 &mut tag_scope_stack,
-                &scope_stack,
+                &mut scope_stack,
             )?;
         }
     }
