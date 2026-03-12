@@ -64,6 +64,7 @@ pub enum NodeKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeKind {
     Void,
+    Bool,
     Char,
     Short,
     Int,
@@ -103,6 +104,21 @@ impl Type {
     pub fn new_void() -> Type {
         Type {
             kind: TypeKind::Void,
+            size: 1,
+            align: 1,
+            base: None,
+            name: None,
+            return_ty: None,
+            params: None,
+            next: None,
+            array_len: 0,
+            members: None,
+        }
+    }
+
+    pub fn new_bool() -> Type {
+        Type {
+            kind: TypeKind::Bool,
             size: 1,
             align: 1,
             base: None,
