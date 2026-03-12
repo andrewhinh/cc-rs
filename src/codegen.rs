@@ -66,9 +66,9 @@ fn load(ty: &Type, result: &mut String) {
         return;
     }
     if ty.size == 1 {
-        result.push_str("  movsbq (%rax), %rax\n");
+        result.push_str("  movsbl (%rax), %eax\n");
     } else if ty.size == 2 {
-        result.push_str("  movswq (%rax), %rax\n");
+        result.push_str("  movswl (%rax), %eax\n");
     } else if ty.size == 4 {
         result.push_str("  movsxd (%rax), %rax\n");
     } else {
