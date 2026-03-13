@@ -138,7 +138,7 @@ cargo run
 - [x] Add \_Bool type
 - [x] Add enum
 - [x] Add +=, -=, \*= and /=
-- [ ] Add pre ++ and --
+- [x] Add pre ++ and --
 - [ ] Add post ++ and --
 - [ ] Add hexadecimal, octal and binary number literals
 - [ ] Add ! operator
