@@ -1,6 +1,6 @@
 use crate::{
     Node, NodeKind, Obj, TagScope, Token, TokenKind, Type, TypeKind, VarAttr, VarScope, align_to,
-    error_at, error_tok, new_unique_name,
+    error_at, error_tok, new_unique_name, new_var_unique_id,
 };
 use crate::{consume, equal, skip};
 
@@ -139,6 +139,7 @@ pub fn new_var(name: String, ty: Type) -> Obj {
         body: None,
         locals: Vec::new(),
         stack_size: 0,
+        unique_id: new_var_unique_id(),
     }
 }
 
@@ -1261,17 +1262,38 @@ pub fn stmt(
         let mut node = new_node(NodeKind::For, tok_loc, line_no);
         let mut tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
 
-        let (init, new_tok) = expr_stmt(
-            filename,
-            src,
-            &tok,
-            locals,
-            globals,
-            scope_stack,
-            tag_scope_stack,
-        )?;
-        node.init = Some(Box::new(init));
-        tok = new_tok;
+        scope_stack.push(Vec::new());
+        tag_scope_stack.push(Vec::new());
+
+        if is_typename(src, &tok, scope_stack) {
+            let (basety, new_tok) =
+                declspec(filename, src, &tok, tag_scope_stack, scope_stack, None)?;
+            tok = new_tok;
+            let (init, new_tok) = declaration(
+                filename,
+                src,
+                &tok,
+                basety,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+            node.init = Some(Box::new(init));
+            tok = new_tok;
+        } else {
+            let (init, new_tok) = expr_stmt(
+                filename,
+                src,
+                &tok,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+            node.init = Some(Box::new(init));
+            tok = new_tok;
+        }
 
         if !equal(src, &tok, ";") {
             let (cond, new_tok) = expr(
@@ -1314,6 +1336,10 @@ pub fn stmt(
             return_ty,
         )?;
         node.then = Some(Box::new(then));
+
+        scope_stack.pop();
+        tag_scope_stack.pop();
+
         return Ok((node, tok));
     }
     if equal(src, tok, "while") {

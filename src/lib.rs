@@ -8,7 +8,7 @@ pub use parse::{
 };
 pub use tokenize::{consume, equal, skip, tokenize};
 
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
@@ -253,6 +253,7 @@ pub struct Obj {
     pub locals: Vec<Obj>,
     #[allow(dead_code)]
     pub stack_size: i64,
+    pub unique_id: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -334,10 +335,15 @@ pub fn align_to(n: i64, align: i64) -> i64 {
 }
 
 static UNIQUE_ID: AtomicI32 = AtomicI32::new(0);
+static VAR_UNIQUE_ID: AtomicU64 = AtomicU64::new(0);
 
 pub fn new_unique_name() -> String {
     let id = UNIQUE_ID.fetch_add(1, Ordering::SeqCst);
     format!(".L..{}", id)
+}
+
+pub fn new_var_unique_id() -> u64 {
+    VAR_UNIQUE_ID.fetch_add(1, Ordering::SeqCst)
 }
 
 #[derive(Debug, Clone)]
