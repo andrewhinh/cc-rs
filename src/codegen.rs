@@ -521,7 +521,7 @@ fn align_to(n: i64, align: i64) -> i64 {
 
 fn fix_var_offsets(node: &mut Node, locals: &[Obj]) {
     if let Some(var) = &mut node.var
-        && let Some(lv) = locals.iter().find(|l| l.name == var.name)
+        && let Some(lv) = locals.iter().find(|l| l.unique_id == var.unique_id)
     {
         var.offset = lv.offset;
     }
@@ -657,10 +657,10 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         }
 
         let mut offset = 0;
-        for var in func.locals.iter_mut().rev() {
-            offset += var.ty.size;
+        for var in func.locals.iter_mut() {
             offset = align_to(offset, var.ty.align);
-            var.offset = offset;
+            var.offset = offset + var.ty.size;
+            offset += var.ty.size;
         }
         let stack_size = align_to(offset, 16);
 

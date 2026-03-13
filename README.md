@@ -70,7 +70,7 @@ cargo run
 - [x] Add a representative node to each Node to improve error messages
 - [x] Handle block scope
 - [ ] Use hashmap for block-scope lookup
-- [ ] Allow for-loops to define local variables
+- [x] Allow for-loops to define local variables
 - [ ] Add goto and labeled statement
 - [ ] Resolve conflict between labels and typedefs
 - [ ] Add break statement
