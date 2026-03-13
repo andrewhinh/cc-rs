@@ -246,6 +246,7 @@ pub struct Obj {
     pub offset: i64,
     pub is_function: bool,
     pub is_definition: bool,
+    pub is_static: bool,
     pub init_data: Option<Vec<u8>>,
     pub params: Vec<Obj>,
     pub body: Option<Box<Node>>,
@@ -357,4 +358,5 @@ pub struct TagScope {
 #[derive(Debug, Clone, Default)]
 pub struct VarAttr {
     pub is_typedef: bool,
+    pub is_static: bool,
 }

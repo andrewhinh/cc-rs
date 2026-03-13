@@ -133,6 +133,7 @@ pub fn new_var(name: String, ty: Type) -> Obj {
         offset: 0,
         is_function: false,
         is_definition: false,
+        is_static: false,
         init_data: None,
         params: Vec::new(),
         body: None,
@@ -503,9 +504,21 @@ pub fn declspec(
     let mut tok = tok.clone();
 
     while is_typename(src, &tok, scope_stack) {
-        if equal(src, &tok, "typedef") {
+        if equal(src, &tok, "typedef") || equal(src, &tok, "static") {
             if let Some(a) = attr.as_mut() {
-                a.is_typedef = true;
+                if equal(src, &tok, "typedef") {
+                    a.is_typedef = true;
+                } else {
+                    a.is_static = true;
+                }
+                if a.is_typedef as i32 + a.is_static as i32 > 1 {
+                    return Err(error_tok(
+                        filename,
+                        src,
+                        &tok,
+                        "typedef and static may not be used together",
+                    ));
+                }
             } else {
                 return Err(error_tok(
                     filename,
@@ -599,6 +612,7 @@ pub fn is_typename(src: &str, tok: &Token, scope_stack: &[Vec<VarScope>]) -> boo
         || equal(src, tok, "union")
         || equal(src, tok, "typedef")
         || equal(src, tok, "enum")
+        || equal(src, tok, "static")
         || find_typedef(scope_stack, tok, src).is_some()
 }
 
@@ -1010,6 +1024,7 @@ pub fn create_param_lvars(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn function(
     filename: &str,
     src: &str,
@@ -1018,6 +1033,7 @@ pub fn function(
     globals: &mut Vec<Obj>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
     scope_stack: &mut [Vec<VarScope>],
+    attr: &VarAttr,
 ) -> Result<(Obj, Token), String> {
     let (ty, tok) = declarator(filename, src, tok, basety, tag_scope_stack, scope_stack)?;
     let name = get_ident(src, ty.name.as_ref().unwrap())?;
@@ -1027,6 +1043,7 @@ pub fn function(
 
     let (is_definition, tok) = consume(src, &tok, ";");
     fn_obj.is_definition = !is_definition;
+    fn_obj.is_static = attr.is_static;
 
     if !fn_obj.is_definition {
         return Ok((fn_obj, tok));
