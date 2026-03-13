@@ -91,7 +91,7 @@ cargo run
 - [x] Add function declaration
 - [x] Handle return type conversion
 - [x] Handle function argument type conversion
-- [ ] Support file-scope functions
+- [x] Support file-scope functions
 - [ ] Align stack frame to 16 byte boundaries
 - [ ] Handle a function returning bool, char or short
 - [ ] Allow to call a variadic function
