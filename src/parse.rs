@@ -2008,6 +2008,52 @@ pub fn unary(
         return Ok((new_unary(NodeKind::Deref, node, tok_loc, line_no), tok));
     }
 
+    if equal(src, tok, "++") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (node, tok) = unary(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let binary = new_add(
+            node,
+            new_num(1, tok_loc, line_no),
+            tok_loc,
+            line_no,
+            filename,
+            src,
+        )?;
+        return Ok((to_assign(binary, locals, scope_stack), tok));
+    }
+
+    if equal(src, tok, "--") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (node, tok) = unary(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let binary = new_sub(
+            node,
+            new_num(1, tok_loc, line_no),
+            tok_loc,
+            line_no,
+            filename,
+            src,
+        )?;
+        return Ok((to_assign(binary, locals, scope_stack), tok));
+    }
+
     postfix(
         filename,
         src,
