@@ -137,7 +137,7 @@ cargo run
 - [x] Report an error on undefined/undeclared functions
 - [x] Add \_Bool type
 - [x] Add enum
-- [ ] Add +=, -=, \*= and /=
+- [x] Add +=, -=, \*= and /=
 - [ ] Add pre ++ and --
 - [ ] Add post ++ and --
 - [ ] Add hexadecimal, octal and binary number literals
