@@ -610,6 +610,7 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
                 &mut globals,
                 &mut tag_scope_stack,
                 &mut scope_stack,
+                &attr,
             )?;
             tok = new_tok;
             globals.push(func);
@@ -669,7 +670,11 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         }
 
         result.push_str("  .text\n");
-        result.push_str(&format!("  .globl {}\n", func.name));
+        if func.is_static {
+            result.push_str(&format!("  .local {}\n", func.name));
+        } else {
+            result.push_str(&format!("  .globl {}\n", func.name));
+        }
         result.push_str(&format!("{}:\n", func.name));
 
         result.push_str("  push %rbp\n");
