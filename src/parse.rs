@@ -1466,6 +1466,58 @@ pub fn expr(
     Ok((node, tok))
 }
 
+fn to_assign(
+    mut binary: Node,
+    locals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+) -> Node {
+    add_type(binary.lhs.as_mut().unwrap());
+    add_type(binary.rhs.as_mut().unwrap());
+
+    let tok_loc = binary.tok_loc;
+    let line_no = binary.line_no;
+    let lhs_ty = binary.lhs.as_ref().unwrap().ty.as_ref().unwrap().clone();
+
+    let var = new_lvar(String::new(), pointer_to(lhs_ty), locals, scope_stack);
+
+    let expr1 = new_binary(
+        NodeKind::Assign,
+        new_var_node(var.clone(), tok_loc, line_no),
+        new_unary(
+            NodeKind::Addr,
+            binary.lhs.as_ref().unwrap().as_ref().clone(),
+            tok_loc,
+            line_no,
+        ),
+        tok_loc,
+        line_no,
+    );
+
+    let deref_var = new_unary(
+        NodeKind::Deref,
+        new_var_node(var.clone(), tok_loc, line_no),
+        tok_loc,
+        line_no,
+    );
+
+    let op_node = new_binary(
+        binary.kind,
+        new_unary(
+            NodeKind::Deref,
+            new_var_node(var, tok_loc, line_no),
+            tok_loc,
+            line_no,
+        ),
+        binary.rhs.as_ref().unwrap().as_ref().clone(),
+        tok_loc,
+        line_no,
+    );
+
+    let expr2 = new_binary(NodeKind::Assign, deref_var, op_node, tok_loc, line_no);
+
+    new_binary(NodeKind::Comma, expr1, expr2, tok_loc, line_no)
+}
+
 pub fn assign(
     filename: &str,
     src: &str,
@@ -1499,6 +1551,71 @@ pub fn assign(
         node = new_binary(NodeKind::Assign, node, rhs, tok_loc, line_no);
         return Ok((node, tok));
     }
+
+    if equal(src, &tok, "+=") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (rhs, tok) = assign(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let binary = new_add(node, rhs, tok_loc, line_no, filename, src)?;
+        return Ok((to_assign(binary, locals, scope_stack), tok));
+    }
+
+    if equal(src, &tok, "-=") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (rhs, tok) = assign(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let binary = new_sub(node, rhs, tok_loc, line_no, filename, src)?;
+        return Ok((to_assign(binary, locals, scope_stack), tok));
+    }
+
+    if equal(src, &tok, "*=") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (rhs, tok) = assign(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let binary = new_binary(NodeKind::Mul, node, rhs, tok_loc, line_no);
+        return Ok((to_assign(binary, locals, scope_stack), tok));
+    }
+
+    if equal(src, &tok, "/=") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (rhs, tok) = assign(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let binary = new_binary(NodeKind::Div, node, rhs, tok_loc, line_no);
+        return Ok((to_assign(binary, locals, scope_stack), tok));
+    }
+
     Ok((node, tok))
 }
 
