@@ -1518,6 +1518,41 @@ fn to_assign(
     new_binary(NodeKind::Comma, expr1, expr2, tok_loc, line_no)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn new_inc_dec(
+    node: Node,
+    tok_loc: usize,
+    line_no: usize,
+    addend: i64,
+    filename: &str,
+    src: &str,
+    locals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+) -> Result<Node, String> {
+    let mut node = node;
+    add_type(&mut node);
+    let ty = node.ty.as_ref().unwrap().clone();
+
+    let binary = new_add(
+        node,
+        new_num(addend, tok_loc, line_no),
+        tok_loc,
+        line_no,
+        filename,
+        src,
+    )?;
+    let assigned = to_assign(binary, locals, scope_stack);
+    let result = new_add(
+        assigned,
+        new_num(-addend, tok_loc, line_no),
+        tok_loc,
+        line_no,
+        filename,
+        src,
+    )?;
+    Ok(new_cast(result, ty))
+}
+
 pub fn assign(
     filename: &str,
     src: &str,
@@ -2119,6 +2154,40 @@ pub fn postfix(
             let tok_next = tok.next.as_ref().unwrap();
             node = struct_ref(filename, src, node, tok_next)?;
             tok = *tok_next.next.as_ref().unwrap().clone();
+            continue;
+        }
+
+        if equal(src, &tok, "++") {
+            let tok_loc = tok.loc;
+            let line_no = tok.line_no;
+            node = new_inc_dec(
+                node,
+                tok_loc,
+                line_no,
+                1,
+                filename,
+                src,
+                locals,
+                scope_stack,
+            )?;
+            tok = *tok.next.as_ref().unwrap().clone();
+            continue;
+        }
+
+        if equal(src, &tok, "--") {
+            let tok_loc = tok.loc;
+            let line_no = tok.line_no;
+            node = new_inc_dec(
+                node,
+                tok_loc,
+                line_no,
+                -1,
+                filename,
+                src,
+                locals,
+                scope_stack,
+            )?;
+            tok = *tok.next.as_ref().unwrap().clone();
             continue;
         }
 
