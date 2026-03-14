@@ -139,7 +139,7 @@ cargo run
 - [x] Add enum
 - [x] Add +=, -=, \*= and /=
 - [x] Add pre ++ and --
-- [ ] Add post ++ and --
+- [x] Add post ++ and --
 - [ ] Add hexadecimal, octal and binary number literals
 - [ ] Add ! operator
 - [ ] Add ~ operator
