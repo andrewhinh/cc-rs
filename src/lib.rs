@@ -2,13 +2,13 @@ pub mod codegen;
 pub mod parse;
 pub mod tokenize;
 
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
+
 pub use parse::{
     add_type, declspec, find_tag, find_typedef, function, global_variable, is_function,
     is_typename, parse_typedef, push_tag_scope,
 };
 pub use tokenize::{consume, equal, skip, tokenize};
-
-use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
