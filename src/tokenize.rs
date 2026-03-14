@@ -152,6 +152,40 @@ fn add_line_numbers(src: &str, tok: &mut Token) {
     }
 }
 
+fn read_int_literal(chars: &[char], pos: usize) -> Result<(i64, usize), String> {
+    let mut p = pos;
+
+    let base = if p + 2 < chars.len()
+        && chars[p] == '0'
+        && (chars[p + 1] == 'x' || chars[p + 1] == 'X')
+        && chars[p + 2].is_ascii_alphanumeric()
+    {
+        p += 2;
+        16
+    } else if p + 2 < chars.len()
+        && chars[p] == '0'
+        && (chars[p + 1] == 'b' || chars[p + 1] == 'B')
+        && chars[p + 2].is_ascii_alphanumeric()
+    {
+        p += 2;
+        2
+    } else if chars[p] == '0' {
+        8
+    } else {
+        10
+    };
+
+    let mut num_str = String::new();
+    while p < chars.len() && chars[p].is_ascii_alphanumeric() {
+        num_str.push(chars[p]);
+        p += 1;
+    }
+
+    let val = i64::from_str_radix(&num_str, base).map_err(|_| "invalid digit".to_string())?;
+
+    Ok((val, p))
+}
+
 pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
     let mut head = Token {
         kind: TokenKind::Eof,
@@ -268,14 +302,9 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
 
         if chars[pos].is_ascii_digit() {
             let start = pos;
-            let mut num_str = String::new();
-            while pos < chars.len() && chars[pos].is_ascii_digit() {
-                num_str.push(chars[pos]);
-                pos += 1;
-            }
-            let val = num_str
-                .parse::<i64>()
-                .map_err(|_| format!("Invalid number: {num_str}"))?;
+            let (val, end) =
+                read_int_literal(&chars, pos).map_err(|e| error_at(filename, src, pos, &e))?;
+            pos = end;
             let mut tok = new_token(TokenKind::Num, start, pos);
             tok.val = val;
             cur.next = Some(Box::new(tok));
