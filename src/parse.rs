@@ -233,6 +233,7 @@ pub fn struct_members(
             let mem = crate::Member {
                 next: None,
                 ty: mem_ty.clone(),
+                tok: Some(Box::new(tok.clone())),
                 name: mem_ty.name.clone(),
                 offset: 0,
             };
@@ -663,6 +664,14 @@ pub fn global_variable(
             scope_stack,
         )?;
         tok = new_tok;
+        if ty.kind == TypeKind::Array && ty.array_len < 0 {
+            return Err(error_tok(
+                filename,
+                src,
+                &tok,
+                "variable has incomplete type",
+            ));
+        }
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
         let var = new_gvar(name, ty);
         globals.push(var);
@@ -718,6 +727,32 @@ pub fn func_params(
     Ok((func_ty, rest))
 }
 
+pub fn array_dimensions(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    ty: Type,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+    scope_stack: &mut [Vec<VarScope>],
+) -> Result<(Type, Token), String> {
+    if equal(src, tok, "]") {
+        let (ty, rest) = type_suffix(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            ty,
+            tag_scope_stack,
+            scope_stack,
+        )?;
+        return Ok((Type::new_array(ty, -1), rest));
+    }
+
+    let sz = get_number(tok)?;
+    let tok = skip(filename, src, tok.next.as_ref().unwrap(), "]")?;
+    let (ty, rest) = type_suffix(filename, src, &tok, ty, tag_scope_stack, scope_stack)?;
+    Ok((Type::new_array(ty, sz), rest))
+}
+
 pub fn type_suffix(
     filename: &str,
     src: &str,
@@ -738,15 +773,14 @@ pub fn type_suffix(
     }
 
     if equal(src, tok, "[") {
-        let sz = get_number(tok.next.as_ref().unwrap())?;
-        let tok = skip(
+        return array_dimensions(
             filename,
             src,
-            tok.next.as_ref().unwrap().next.as_ref().unwrap(),
-            "]",
-        )?;
-        let (ty, rest) = type_suffix(filename, src, &tok, ty, tag_scope_stack, scope_stack)?;
-        return Ok((Type::new_array(ty, sz), rest));
+            tok.next.as_ref().unwrap(),
+            ty,
+            tag_scope_stack,
+            scope_stack,
+        );
     }
 
     Ok((ty, tok.clone()))
@@ -920,6 +954,14 @@ pub fn declaration(
             scope_stack,
         )?;
         tok = new_tok;
+        if ty.kind == TypeKind::Array && ty.array_len < 0 {
+            return Err(error_tok(
+                filename,
+                src,
+                &tok,
+                "variable has incomplete type",
+            ));
+        }
         if ty.kind == TypeKind::Void {
             return Err(error_tok(
                 filename,

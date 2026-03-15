@@ -201,7 +201,7 @@ cargo run
 - [x] Add -> operator
 - [x] Add union
 - [x] Add struct assignment
-- [ ] Add a notion of an incomplete array type
+- [x] Add a notion of an incomplete array type
 - [ ] Decay an array to a pointer in the func param context
 - [ ] Add a notion of an incomplete struct type
 - [ ] Support local variable initializers

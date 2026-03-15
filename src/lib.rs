@@ -89,6 +89,7 @@ pub enum TypeKind {
 pub struct Member {
     pub next: Option<Box<Member>>,
     pub ty: Type,
+    pub tok: Option<Box<Token>>,
     pub name: Option<Box<Token>>,
     pub offset: i64,
 }
@@ -216,9 +217,10 @@ impl Type {
     }
 
     pub fn new_array(base: Type, len: i64) -> Type {
+        let size = if len < 0 { 0 } else { base.size * len };
         Type {
             kind: TypeKind::Array,
-            size: base.size * len,
+            size,
             align: base.align,
             base: Some(Box::new(base)),
             name: None,
