@@ -240,6 +240,17 @@ fn gen_expr(
             result.push_str("  movzb %al, %rax\n");
             return Ok(());
         }
+        NodeKind::BitNot => {
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            result.push_str("  not %rax\n");
+            return Ok(());
+        }
         NodeKind::Assign => {
             gen_addr(
                 node.lhs.as_ref().unwrap(),
@@ -379,6 +390,7 @@ fn gen_expr(
         | NodeKind::Addr
         | NodeKind::Deref
         | NodeKind::Not
+        | NodeKind::BitNot
         | NodeKind::Return
         | NodeKind::Block
         | NodeKind::If

@@ -142,7 +142,7 @@ cargo run
 - [x] Add post ++ and --
 - [x] Add hexadecimal, octal and binary number literals
 - [x] Add ! operator
-- [ ] Add ~ operator
+- [x] Add ~ operator
 - [ ] Add % and %=
 - [ ] Add &, |, ^, &=, |= and ^=
 - [ ] Add && and ||
