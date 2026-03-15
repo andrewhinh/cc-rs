@@ -83,6 +83,9 @@ fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
         || remaining.starts_with("*=")
         || remaining.starts_with("/=")
         || remaining.starts_with("%=")
+        || remaining.starts_with("&=")
+        || remaining.starts_with("|=")
+        || remaining.starts_with("^=")
         || remaining.starts_with("++")
         || remaining.starts_with("--")
     {

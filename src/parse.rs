@@ -1556,7 +1556,7 @@ pub fn assign(
     scope_stack: &mut Vec<Vec<VarScope>>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
-    let (mut node, tok) = equality(
+    let (mut node, tok) = bitor(
         filename,
         src,
         tok,
@@ -1659,6 +1659,168 @@ pub fn assign(
         )?;
         let binary = new_binary(NodeKind::Mod, node, rhs, tok_loc, line_no);
         return Ok((to_assign(binary, locals, scope_stack), tok));
+    }
+
+    if equal(src, &tok, "&=") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (rhs, tok) = assign(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let binary = new_binary(NodeKind::BitAnd, node, rhs, tok_loc, line_no);
+        return Ok((to_assign(binary, locals, scope_stack), tok));
+    }
+
+    if equal(src, &tok, "|=") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (rhs, tok) = assign(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let binary = new_binary(NodeKind::BitOr, node, rhs, tok_loc, line_no);
+        return Ok((to_assign(binary, locals, scope_stack), tok));
+    }
+
+    if equal(src, &tok, "^=") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (rhs, tok) = assign(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let binary = new_binary(NodeKind::BitXor, node, rhs, tok_loc, line_no);
+        return Ok((to_assign(binary, locals, scope_stack), tok));
+    }
+
+    Ok((node, tok))
+}
+
+pub fn bitor(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<(Node, Token), String> {
+    let (mut node, mut tok) = bitxor(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
+
+    while equal(src, &tok, "|") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (rhs, new_tok) = bitxor(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        node = new_binary(NodeKind::BitOr, node, rhs, tok_loc, line_no);
+        tok = new_tok;
+    }
+
+    Ok((node, tok))
+}
+
+pub fn bitxor(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<(Node, Token), String> {
+    let (mut node, mut tok) = bitand(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
+
+    while equal(src, &tok, "^") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (rhs, new_tok) = bitand(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        node = new_binary(NodeKind::BitXor, node, rhs, tok_loc, line_no);
+        tok = new_tok;
+    }
+
+    Ok((node, tok))
+}
+
+pub fn bitand(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<(Node, Token), String> {
+    let (mut node, mut tok) = equality(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
+
+    while equal(src, &tok, "&") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (rhs, new_tok) = equality(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        node = new_binary(NodeKind::BitAnd, node, rhs, tok_loc, line_no);
+        tok = new_tok;
     }
 
     Ok((node, tok))
@@ -2588,7 +2750,14 @@ pub fn add_type(node: &mut Node) {
                 Some(Type::new_long())
             };
         }
-        NodeKind::Add | NodeKind::Sub | NodeKind::Mul | NodeKind::Div | NodeKind::Mod => {
+        NodeKind::Add
+        | NodeKind::Sub
+        | NodeKind::Mul
+        | NodeKind::Div
+        | NodeKind::Mod
+        | NodeKind::BitAnd
+        | NodeKind::BitOr
+        | NodeKind::BitXor => {
             usual_arith_conv(node.lhs.as_mut().unwrap(), node.rhs.as_mut().unwrap());
             node.ty = node.lhs.as_ref().unwrap().ty.clone();
         }
