@@ -54,6 +54,8 @@ pub enum NodeKind {
     Deref,
     Not,
     BitNot,
+    LogAnd,
+    LogOr,
     Return,
     If,
     For,
