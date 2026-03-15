@@ -48,6 +48,7 @@ pub enum NodeKind {
     Member,
     Addr,
     Deref,
+    Not,
     Return,
     If,
     For,
