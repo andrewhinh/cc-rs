@@ -38,6 +38,7 @@ pub enum NodeKind {
     Sub,
     Mul,
     Div,
+    Mod,
     Neg,
     Eq,
     Ne,
