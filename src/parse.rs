@@ -1651,6 +1651,22 @@ pub fn assign(
         return Ok((to_assign(binary, locals, scope_stack), tok));
     }
 
+    if equal(src, &tok, "%=") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (rhs, tok) = assign(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let binary = new_binary(NodeKind::Mod, node, rhs, tok_loc, line_no);
+        return Ok((to_assign(binary, locals, scope_stack), tok));
+    }
+
     Ok((node, tok))
 }
 
@@ -1912,6 +1928,23 @@ pub fn mul(
                 tag_scope_stack,
             )?;
             node = new_binary(NodeKind::Div, node, rhs, tok_loc, line_no);
+            tok = new_tok;
+            continue;
+        }
+
+        if equal(src, &tok, "%") {
+            let tok_loc = tok.loc;
+            let line_no = tok.line_no;
+            let (rhs, new_tok) = cast(
+                filename,
+                src,
+                tok.next.as_ref().unwrap(),
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+            node = new_binary(NodeKind::Mod, node, rhs, tok_loc, line_no);
             tok = new_tok;
             continue;
         }
@@ -2561,7 +2594,7 @@ pub fn add_type(node: &mut Node) {
                 Some(Type::new_long())
             };
         }
-        NodeKind::Add | NodeKind::Sub | NodeKind::Mul | NodeKind::Div => {
+        NodeKind::Add | NodeKind::Sub | NodeKind::Mul | NodeKind::Div | NodeKind::Mod => {
             usual_arith_conv(node.lhs.as_mut().unwrap(), node.rhs.as_mut().unwrap());
             node.ty = node.lhs.as_ref().unwrap().ty.clone();
         }

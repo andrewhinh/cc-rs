@@ -368,6 +368,15 @@ fn gen_expr(
             }
             result.push_str(&format!("  idiv {}\n", di));
         }
+        NodeKind::Mod => {
+            if lhs_ty.size == 8 {
+                result.push_str("  cqo\n");
+            } else {
+                result.push_str("  cdq\n");
+            }
+            result.push_str(&format!("  idiv {}\n", di));
+            result.push_str("  mov %rdx, %rax\n");
+        }
         NodeKind::Eq | NodeKind::Ne | NodeKind::Lt | NodeKind::Le => {
             result.push_str(&format!("  cmp {}, {}\n", di, ax));
             match node.kind {
