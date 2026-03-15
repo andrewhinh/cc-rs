@@ -49,6 +49,7 @@ pub enum NodeKind {
     Addr,
     Deref,
     Not,
+    BitNot,
     Return,
     If,
     For,
