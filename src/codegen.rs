@@ -251,6 +251,60 @@ fn gen_expr(
             result.push_str("  not %rax\n");
             return Ok(());
         }
+        NodeKind::LogAnd => {
+            let c = count();
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            result.push_str("  cmp $0, %rax\n");
+            result.push_str(&format!("  je .L.false.{}\n", c));
+            gen_expr(
+                node.rhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            result.push_str("  cmp $0, %rax\n");
+            result.push_str(&format!("  je .L.false.{}\n", c));
+            result.push_str("  mov $1, %rax\n");
+            result.push_str(&format!("  jmp .L.end.{}\n", c));
+            result.push_str(&format!(".L.false.{}:\n", c));
+            result.push_str("  mov $0, %rax\n");
+            result.push_str(&format!(".L.end.{}:\n", c));
+            return Ok(());
+        }
+        NodeKind::LogOr => {
+            let c = count();
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            result.push_str("  cmp $0, %rax\n");
+            result.push_str(&format!("  jne .L.true.{}\n", c));
+            gen_expr(
+                node.rhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            result.push_str("  cmp $0, %rax\n");
+            result.push_str(&format!("  jne .L.true.{}\n", c));
+            result.push_str("  mov $0, %rax\n");
+            result.push_str(&format!("  jmp .L.end.{}\n", c));
+            result.push_str(&format!(".L.true.{}:\n", c));
+            result.push_str("  mov $1, %rax\n");
+            result.push_str(&format!(".L.end.{}:\n", c));
+            return Ok(());
+        }
         NodeKind::Assign => {
             gen_addr(
                 node.lhs.as_ref().unwrap(),
@@ -403,6 +457,8 @@ fn gen_expr(
         | NodeKind::Deref
         | NodeKind::Not
         | NodeKind::BitNot
+        | NodeKind::LogAnd
+        | NodeKind::LogOr
         | NodeKind::Return
         | NodeKind::Block
         | NodeKind::If

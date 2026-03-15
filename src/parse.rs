@@ -1562,7 +1562,7 @@ pub fn assign(
     scope_stack: &mut Vec<Vec<VarScope>>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
-    let (mut node, tok) = bitor(
+    let (mut node, tok) = logor(
         filename,
         src,
         tok,
@@ -1713,6 +1713,82 @@ pub fn assign(
         )?;
         let binary = new_binary(NodeKind::BitXor, node, rhs, tok_loc, line_no);
         return Ok((to_assign(binary, locals, scope_stack), tok));
+    }
+
+    Ok((node, tok))
+}
+
+pub fn logor(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<(Node, Token), String> {
+    let (mut node, mut tok) = logand(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
+
+    while equal(src, &tok, "||") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (rhs, new_tok) = logand(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        node = new_binary(NodeKind::LogOr, node, rhs, tok_loc, line_no);
+        tok = new_tok;
+    }
+
+    Ok((node, tok))
+}
+
+pub fn logand(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<(Node, Token), String> {
+    let (mut node, mut tok) = bitor(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
+
+    while equal(src, &tok, "&&") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (rhs, new_tok) = bitor(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        node = new_binary(NodeKind::LogAnd, node, rhs, tok_loc, line_no);
+        tok = new_tok;
     }
 
     Ok((node, tok))
@@ -2799,7 +2875,7 @@ pub fn add_type(node: &mut Node) {
         NodeKind::FuncCall => {
             node.ty = Some(Type::new_long());
         }
-        NodeKind::Not => {
+        NodeKind::Not | NodeKind::LogAnd | NodeKind::LogOr => {
             node.ty = Some(Type::new_int());
         }
         NodeKind::BitNot => {
