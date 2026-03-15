@@ -227,6 +227,19 @@ fn gen_expr(
             load(node.ty.as_ref().unwrap(), result);
             return Ok(());
         }
+        NodeKind::Not => {
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            result.push_str("  cmp $0, %rax\n");
+            result.push_str("  sete %al\n");
+            result.push_str("  movzb %al, %rax\n");
+            return Ok(());
+        }
         NodeKind::Assign => {
             gen_addr(
                 node.lhs.as_ref().unwrap(),
@@ -365,6 +378,7 @@ fn gen_expr(
         | NodeKind::Assign
         | NodeKind::Addr
         | NodeKind::Deref
+        | NodeKind::Not
         | NodeKind::Return
         | NodeKind::Block
         | NodeKind::If

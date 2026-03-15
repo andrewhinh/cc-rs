@@ -2043,6 +2043,21 @@ pub fn unary(
         return Ok((new_unary(NodeKind::Deref, node, tok_loc, line_no), tok));
     }
 
+    if equal(src, tok, "!") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (node, tok) = cast(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        return Ok((new_unary(NodeKind::Not, node, tok_loc, line_no), tok));
+    }
+
     if equal(src, tok, "++") {
         let tok_loc = tok.loc;
         let line_no = tok.line_no;
@@ -2566,6 +2581,9 @@ pub fn add_type(node: &mut Node) {
         }
         NodeKind::FuncCall => {
             node.ty = Some(Type::new_long());
+        }
+        NodeKind::Not => {
+            node.ty = Some(Type::new_int());
         }
         NodeKind::Return
         | NodeKind::If
