@@ -75,7 +75,7 @@ cargo run
 - [x] Resolve conflict between labels and typedefs
 - [x] Add break statement
 - [x] Add continue statement
-- [ ] Add switch-case
+- [x] Add switch-case
 - [ ] Add return that doesn't take any value
 - [ ] Add do ... while
 - [ ] Make "main" to implicitly return 0

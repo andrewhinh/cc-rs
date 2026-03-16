@@ -13,6 +13,7 @@ thread_local! {
     static LABELS: Cell<Option<Box<Node>>> = const { Cell::new(None) };
     static BRK_LABEL: Cell<Option<String>> = const { Cell::new(None) };
     static CONT_LABEL: Cell<Option<String>> = const { Cell::new(None) };
+    static CURRENT_SWITCH: Cell<Option<Box<Node>>> = const { Cell::new(None) };
 }
 
 fn gotos_get() -> Option<Box<Node>> {
@@ -47,6 +48,14 @@ fn cont_label_set(label: Option<String>) {
     CONT_LABEL.with(|c| c.set(label));
 }
 
+fn current_switch_get() -> Option<Box<Node>> {
+    CURRENT_SWITCH.with(|c| c.take())
+}
+
+fn current_switch_set(node: Option<Box<Node>>) {
+    CURRENT_SWITCH.with(|c| c.set(node));
+}
+
 pub fn new_node(kind: NodeKind, tok_loc: usize, line_no: usize) -> Node {
     Node {
         kind,
@@ -73,6 +82,8 @@ pub fn new_node(kind: NodeKind, tok_loc: usize, line_no: usize) -> Node {
         goto_next: None,
         brk_label: None,
         cont_label: None,
+        case_next: None,
+        default_case: None,
     }
 }
 
@@ -1055,6 +1066,8 @@ pub fn declaration(
         goto_next: None,
         brk_label: None,
         cont_label: None,
+        case_next: None,
+        default_case: None,
     };
     let mut cur = &mut head;
     let mut i = 0;
@@ -1393,6 +1406,8 @@ pub fn compound_stmt(
         goto_next: None,
         brk_label: None,
         cont_label: None,
+        case_next: None,
+        default_case: None,
     };
     let mut cur = &mut head;
 
@@ -1701,6 +1716,118 @@ pub fn stmt(
         let mut node = new_node(NodeKind::Goto, tok_loc, line_no);
         node.unique_label = cont;
         let tok = skip(filename, src, tok.next.as_ref().unwrap(), ";")?;
+        return Ok((node, tok));
+    }
+    if equal(src, tok, "switch") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let mut node = new_node(NodeKind::Switch, tok_loc, line_no);
+        let tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
+        let (cond, tok) = expr(
+            filename,
+            src,
+            &tok,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        node.cond = Some(Box::new(cond));
+        let tok = skip(filename, src, &tok, ")")?;
+
+        let sw = current_switch_get();
+        let brk = brk_label_get();
+        let brk_name = new_unique_name();
+        node.brk_label = Some(brk_name.clone());
+        brk_label_set(Some(brk_name));
+        current_switch_set(Some(Box::new(node.clone())));
+
+        let (then, tok) = stmt(
+            filename,
+            src,
+            &tok,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+            return_ty,
+        )?;
+        node.then = Some(Box::new(then));
+
+        let updated_sw = current_switch_get();
+        if let Some(sw_node) = updated_sw {
+            node.case_next = sw_node.case_next;
+            node.default_case = sw_node.default_case;
+        }
+
+        current_switch_set(sw);
+        brk_label_set(brk);
+        return Ok((node, tok));
+    }
+    if equal(src, tok, "case") {
+        let sw = current_switch_get();
+        current_switch_set(sw.clone());
+        if sw.is_none() {
+            return Err(error_tok(filename, src, tok, "stray case"));
+        }
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let val = get_number(tok.next.as_ref().unwrap())?;
+        let tok = skip(
+            filename,
+            src,
+            tok.next.as_ref().unwrap().next.as_ref().unwrap(),
+            ":",
+        )?;
+
+        let mut node = new_node(NodeKind::Case, tok_loc, line_no);
+        node.label = Some(new_unique_name());
+        node.val = val;
+        let (lhs, tok) = stmt(
+            filename,
+            src,
+            &tok,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+            return_ty,
+        )?;
+        node.lhs = Some(Box::new(lhs));
+
+        let mut sw_node = sw.unwrap();
+        node.case_next = sw_node.case_next.clone();
+        sw_node.case_next = Some(Box::new(node.clone()));
+        current_switch_set(Some(sw_node));
+        return Ok((node, tok));
+    }
+    if equal(src, tok, "default") {
+        let sw = current_switch_get();
+        current_switch_set(sw.clone());
+        if sw.is_none() {
+            return Err(error_tok(filename, src, tok, "stray default"));
+        }
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let tok = skip(filename, src, tok.next.as_ref().unwrap(), ":")?;
+
+        let mut node = new_node(NodeKind::Case, tok_loc, line_no);
+        node.label = Some(new_unique_name());
+        let (lhs, tok) = stmt(
+            filename,
+            src,
+            &tok,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+            return_ty,
+        )?;
+        node.lhs = Some(Box::new(lhs));
+
+        let mut sw_node = sw.unwrap();
+        sw_node.default_case = Some(Box::new(node.clone()));
+        current_switch_set(Some(sw_node));
         return Ok((node, tok));
     }
     if tok.kind == TokenKind::Ident && equal(src, tok.next.as_ref().unwrap(), ":") {
@@ -2904,6 +3031,8 @@ pub fn funcall(
         goto_next: None,
         brk_label: None,
         cont_label: None,
+        case_next: None,
+        default_case: None,
     };
     let mut cur = &mut head;
 
@@ -3252,7 +3381,9 @@ pub fn add_type(node: &mut Node) {
         | NodeKind::ExprStmt
         | NodeKind::Cast
         | NodeKind::Goto
-        | NodeKind::Label => {}
+        | NodeKind::Label
+        | NodeKind::Switch
+        | NodeKind::Case => {}
         NodeKind::Var => {
             node.ty = Some(node.var.as_ref().unwrap().ty.clone());
         }

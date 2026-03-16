@@ -122,6 +122,9 @@ fn is_keyword(name: &str) -> bool {
             | "goto"
             | "break"
             | "continue"
+            | "switch"
+            | "case"
+            | "default"
     )
 }
 
