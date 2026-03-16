@@ -71,6 +71,8 @@ pub enum NodeKind {
     Cast,
     Goto,
     Label,
+    Switch,
+    Case,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -338,6 +340,8 @@ pub struct Node {
     pub goto_next: Option<Box<Node>>,
     pub brk_label: Option<String>,
     pub cont_label: Option<String>,
+    pub case_next: Option<Box<Node>>,
+    pub default_case: Option<Box<Node>>,
 }
 
 pub fn error_at(filename: &str, src: &str, loc: usize, msg: &str) -> String {

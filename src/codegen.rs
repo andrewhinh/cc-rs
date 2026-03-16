@@ -467,7 +467,9 @@ fn gen_expr(
         | NodeKind::Comma
         | NodeKind::Cast
         | NodeKind::Goto
-        | NodeKind::Label => unreachable!(),
+        | NodeKind::Label
+        | NodeKind::Switch
+        | NodeKind::Case => unreachable!(),
     }
     Ok(())
 }
@@ -607,6 +609,51 @@ fn gen_stmt(
                 current_fn,
             )?;
         }
+        NodeKind::Switch => {
+            gen_expr(
+                node.cond.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+
+            let mut case_node = node.case_next.as_ref();
+            while let Some(cn) = case_node {
+                let reg = if node.cond.as_ref().unwrap().ty.as_ref().unwrap().size == 8 {
+                    "%rax"
+                } else {
+                    "%eax"
+                };
+                result.push_str(&format!("  cmp ${}, {}\n", cn.val, reg));
+                result.push_str(&format!("  je {}\n", cn.label.as_ref().unwrap()));
+                case_node = cn.case_next.as_ref();
+            }
+
+            if let Some(default) = node.default_case.as_ref() {
+                result.push_str(&format!("  jmp {}\n", default.label.as_ref().unwrap()));
+            }
+
+            result.push_str(&format!("  jmp {}\n", node.brk_label.as_ref().unwrap()));
+            gen_stmt(
+                node.then.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            result.push_str(&format!("{}:\n", node.brk_label.as_ref().unwrap()));
+        }
+        NodeKind::Case => {
+            result.push_str(&format!("{}:\n", node.label.as_ref().unwrap()));
+            gen_stmt(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+        }
         _ => return Err(error_at(filename, src, node.tok_loc, "invalid statement")),
     }
     Ok(())
@@ -681,6 +728,12 @@ fn fix_var_offsets(node: &mut Node, locals: &[Obj]) {
     }
     if let Some(goto_next) = &mut node.goto_next {
         fix_var_offsets(goto_next, locals);
+    }
+    if let Some(case_next) = &mut node.case_next {
+        fix_var_offsets(case_next, locals);
+    }
+    if let Some(default_case) = &mut node.default_case {
+        fix_var_offsets(default_case, locals);
     }
 }
 
