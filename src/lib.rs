@@ -2,6 +2,8 @@ pub mod codegen;
 pub mod parse;
 pub mod tokenize;
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 
 pub use parse::{
@@ -99,7 +101,7 @@ pub struct Type {
     pub kind: TypeKind,
     pub size: i64,
     pub align: i64,
-    pub base: Option<Box<Type>>,
+    pub base: Option<Rc<RefCell<Type>>>,
     pub name: Option<Box<Token>>,
     #[allow(unused)]
     pub return_ty: Option<Box<Type>>,
@@ -108,6 +110,7 @@ pub struct Type {
     #[allow(dead_code)]
     pub array_len: i64,
     pub members: Option<Box<Member>>,
+    pub origin: Option<Rc<RefCell<Type>>>,
 }
 
 impl Type {
@@ -123,6 +126,7 @@ impl Type {
             next: None,
             array_len: 0,
             members: None,
+            origin: None,
         }
     }
 
@@ -138,6 +142,7 @@ impl Type {
             next: None,
             array_len: 0,
             members: None,
+            origin: None,
         }
     }
 
@@ -153,6 +158,7 @@ impl Type {
             next: None,
             array_len: 0,
             members: None,
+            origin: None,
         }
     }
 
@@ -168,6 +174,7 @@ impl Type {
             next: None,
             array_len: 0,
             members: None,
+            origin: None,
         }
     }
 
@@ -183,6 +190,7 @@ impl Type {
             next: None,
             array_len: 0,
             members: None,
+            origin: None,
         }
     }
 
@@ -198,6 +206,7 @@ impl Type {
             next: None,
             array_len: 0,
             members: None,
+            origin: None,
         }
     }
 
@@ -206,13 +215,30 @@ impl Type {
             kind: TypeKind::Ptr,
             size: 8,
             align: 8,
-            base: Some(Box::new(base)),
+            base: Some(Rc::new(RefCell::new(base))),
             name: None,
             return_ty: None,
             params: None,
             next: None,
             array_len: 0,
             members: None,
+            origin: None,
+        }
+    }
+
+    pub fn new_ptr_shared(base: Rc<RefCell<Type>>) -> Type {
+        Type {
+            kind: TypeKind::Ptr,
+            size: 8,
+            align: 8,
+            base: Some(base),
+            name: None,
+            return_ty: None,
+            params: None,
+            next: None,
+            array_len: 0,
+            members: None,
+            origin: None,
         }
     }
 
@@ -222,13 +248,30 @@ impl Type {
             kind: TypeKind::Array,
             size,
             align: base.align,
-            base: Some(Box::new(base)),
+            base: Some(Rc::new(RefCell::new(base))),
             name: None,
             return_ty: None,
             params: None,
             next: None,
             array_len: len,
             members: None,
+            origin: None,
+        }
+    }
+
+    pub fn new_struct() -> Type {
+        Type {
+            kind: TypeKind::Struct,
+            size: 0,
+            align: 1,
+            base: None,
+            name: None,
+            return_ty: None,
+            params: None,
+            next: None,
+            array_len: 0,
+            members: None,
+            origin: None,
         }
     }
 
@@ -244,6 +287,7 @@ impl Type {
             next: None,
             array_len: 0,
             members: None,
+            origin: None,
         }
     }
 }
@@ -360,7 +404,7 @@ pub fn new_var_unique_id() -> u64 {
 pub struct VarScope {
     pub name: String,
     pub var: Option<Obj>,
-    pub type_def: Option<Type>,
+    pub type_def: Option<Rc<RefCell<Type>>>,
     pub enum_ty: Option<Type>,
     pub enum_val: i64,
 }
@@ -368,7 +412,7 @@ pub struct VarScope {
 #[derive(Debug, Clone)]
 pub struct TagScope {
     pub name: String,
-    pub ty: Type,
+    pub ty: Rc<RefCell<Type>>,
 }
 
 #[derive(Debug, Clone, Default)]
