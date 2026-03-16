@@ -202,7 +202,7 @@ cargo run
 - [x] Add union
 - [x] Add struct assignment
 - [x] Add a notion of an incomplete array type
-- [ ] Decay an array to a pointer in the func param context
+- [x] Decay an array to a pointer in the func param context
 - [ ] Add a notion of an incomplete struct type
 - [ ] Support local variable initializers
 - [ ] Initialize excess array elements with zero
