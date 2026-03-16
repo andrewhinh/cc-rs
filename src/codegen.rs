@@ -465,7 +465,9 @@ fn gen_expr(
         | NodeKind::For
         | NodeKind::While
         | NodeKind::Comma
-        | NodeKind::Cast => unreachable!(),
+        | NodeKind::Cast
+        | NodeKind::Goto
+        | NodeKind::Label => unreachable!(),
     }
     Ok(())
 }
@@ -590,6 +592,19 @@ fn gen_stmt(
                 current_fn,
             )?;
         }
+        NodeKind::Goto => {
+            result.push_str(&format!("  jmp {}\n", node.unique_label.as_ref().unwrap()));
+        }
+        NodeKind::Label => {
+            result.push_str(&format!("{}:\n", node.unique_label.as_ref().unwrap()));
+            gen_stmt(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+        }
         _ => return Err(error_at(filename, src, node.tok_loc, "invalid statement")),
     }
     Ok(())
@@ -661,6 +676,9 @@ fn fix_var_offsets(node: &mut Node, locals: &[Obj]) {
                 break;
             }
         }
+    }
+    if let Some(goto_next) = &mut node.goto_next {
+        fix_var_offsets(goto_next, locals);
     }
 }
 

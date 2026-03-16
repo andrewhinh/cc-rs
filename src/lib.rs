@@ -69,6 +69,8 @@ pub enum NodeKind {
     Var,
     Num,
     Cast,
+    Goto,
+    Label,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -331,6 +333,9 @@ pub struct Node {
     pub var: Option<Box<Obj>>,
     pub val: i64,
     pub member: Option<Box<Member>>,
+    pub label: Option<String>,
+    pub unique_label: Option<String>,
+    pub goto_next: Option<Box<Node>>,
 }
 
 pub fn error_at(filename: &str, src: &str, loc: usize, msg: &str) -> String {

@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -6,6 +7,27 @@ use crate::{
     error_at, error_tok, new_unique_name, new_var_unique_id,
 };
 use crate::{consume, equal, skip};
+
+thread_local! {
+    static GOTOS: Cell<Option<Box<Node>>> = const { Cell::new(None) };
+    static LABELS: Cell<Option<Box<Node>>> = const { Cell::new(None) };
+}
+
+fn gotos_get() -> Option<Box<Node>> {
+    GOTOS.with(|g| g.take())
+}
+
+fn gotos_set(node: Option<Box<Node>>) {
+    GOTOS.with(|g| g.set(node));
+}
+
+fn labels_get() -> Option<Box<Node>> {
+    LABELS.with(|l| l.take())
+}
+
+fn labels_set(node: Option<Box<Node>>) {
+    LABELS.with(|l| l.set(node));
+}
 
 pub fn new_node(kind: NodeKind, tok_loc: usize, line_no: usize) -> Node {
     Node {
@@ -28,6 +50,9 @@ pub fn new_node(kind: NodeKind, tok_loc: usize, line_no: usize) -> Node {
         var: None,
         val: 0,
         member: None,
+        label: None,
+        unique_label: None,
+        goto_next: None,
     }
 }
 
@@ -1024,6 +1049,9 @@ pub fn declaration(
         var: None,
         val: 0,
         member: None,
+        label: None,
+        unique_label: None,
+        goto_next: None,
     };
     let mut cur = &mut head;
     let mut i = 0;
@@ -1161,6 +1189,105 @@ pub fn create_param_lvars(
     }
 }
 
+fn resolve_goto_labels(filename: &str, src: &str, body: &mut Node) -> Result<(), String> {
+    let mut gotos_vec: Vec<Node> = Vec::new();
+    let mut labels_vec: Vec<Node> = Vec::new();
+
+    let mut current = gotos_get();
+    while let Some(node) = current {
+        gotos_vec.push(node.as_ref().clone());
+        current = node.goto_next;
+    }
+
+    let mut current = labels_get();
+    while let Some(node) = current {
+        labels_vec.push(node.as_ref().clone());
+        current = node.goto_next;
+    }
+
+    gotos_set(None);
+    labels_set(None);
+
+    for goto in &mut gotos_vec {
+        let mut found = false;
+        for label in &labels_vec {
+            if goto.label == label.label {
+                set_unique_label(body, &goto.label, &label.unique_label);
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            let label_name = goto.label.as_ref().unwrap();
+            let tok = Token {
+                kind: TokenKind::Ident,
+                next: None,
+                val: 0,
+                loc: goto.tok_loc,
+                len: label_name.len(),
+                ty: None,
+                str: None,
+                line_no: goto.line_no,
+            };
+            return Err(error_tok(filename, src, &tok, "use of undeclared label"));
+        }
+    }
+
+    Ok(())
+}
+
+fn set_unique_label(node: &mut Node, label: &Option<String>, unique_label: &Option<String>) {
+    if node.kind == NodeKind::Goto && node.label == *label {
+        node.unique_label = unique_label.clone();
+    }
+    if let Some(lhs) = &mut node.lhs {
+        set_unique_label(lhs, label, unique_label);
+    }
+    if let Some(rhs) = &mut node.rhs {
+        set_unique_label(rhs, label, unique_label);
+    }
+    if let Some(cond) = &mut node.cond {
+        set_unique_label(cond, label, unique_label);
+    }
+    if let Some(then) = &mut node.then {
+        set_unique_label(then, label, unique_label);
+    }
+    if let Some(els) = &mut node.els {
+        set_unique_label(els, label, unique_label);
+    }
+    if let Some(init) = &mut node.init {
+        set_unique_label(init, label, unique_label);
+    }
+    if let Some(inc) = &mut node.inc {
+        set_unique_label(inc, label, unique_label);
+    }
+    if let Some(body) = &mut node.body {
+        let mut n = body;
+        loop {
+            set_unique_label(n, label, unique_label);
+            if let Some(next) = &mut n.next {
+                n = next;
+            } else {
+                break;
+            }
+        }
+    }
+    if let Some(args) = &mut node.args {
+        let mut n = args;
+        loop {
+            set_unique_label(n, label, unique_label);
+            if let Some(next) = &mut n.next {
+                n = next;
+            } else {
+                break;
+            }
+        }
+    }
+    if let Some(goto_next) = &mut node.goto_next {
+        set_unique_label(goto_next, label, unique_label);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn function(
     filename: &str,
@@ -1211,6 +1338,7 @@ pub fn function(
     )?;
 
     add_type(&mut body);
+    resolve_goto_labels(filename, src, &mut body)?;
 
     fn_obj.body = Some(Box::new(body));
     fn_obj.locals = locals;
@@ -1257,6 +1385,9 @@ pub fn compound_stmt(
         var: None,
         val: 0,
         member: None,
+        label: None,
+        unique_label: None,
+        goto_next: None,
     };
     let mut cur = &mut head;
 
@@ -1505,6 +1636,38 @@ pub fn stmt(
             return_ty,
         )?;
         node.then = Some(Box::new(then));
+        return Ok((node, tok));
+    }
+    if equal(src, tok, "goto") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let mut node = new_node(NodeKind::Goto, tok_loc, line_no);
+        let label_tok = tok.next.as_ref().unwrap();
+        node.label = Some(get_ident(src, label_tok)?);
+        node.goto_next = gotos_get();
+        gotos_set(Some(Box::new(node.clone())));
+        let tok = skip(filename, src, label_tok.next.as_ref().unwrap(), ";")?;
+        return Ok((node, tok));
+    }
+    if tok.kind == TokenKind::Ident && equal(src, tok.next.as_ref().unwrap(), ":") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let mut node = new_node(NodeKind::Label, tok_loc, line_no);
+        node.label = Some(src.chars().skip(tok.loc).take(tok.len).collect());
+        node.unique_label = Some(new_unique_name());
+        let (lhs, tok) = stmt(
+            filename,
+            src,
+            tok.next.as_ref().unwrap().next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+            return_ty,
+        )?;
+        node.lhs = Some(Box::new(lhs));
+        node.goto_next = labels_get();
+        labels_set(Some(Box::new(node.clone())));
         return Ok((node, tok));
     }
     if equal(src, tok, "{") {
@@ -2682,6 +2845,9 @@ pub fn funcall(
         var: None,
         val: 0,
         member: None,
+        label: None,
+        unique_label: None,
+        goto_next: None,
     };
     let mut cur = &mut head;
 
@@ -3028,7 +3194,9 @@ pub fn add_type(node: &mut Node) {
         | NodeKind::While
         | NodeKind::Block
         | NodeKind::ExprStmt
-        | NodeKind::Cast => {}
+        | NodeKind::Cast
+        | NodeKind::Goto
+        | NodeKind::Label => {}
         NodeKind::Var => {
             node.ty = Some(node.var.as_ref().unwrap().ty.clone());
         }

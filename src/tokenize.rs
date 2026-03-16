@@ -119,6 +119,7 @@ fn is_keyword(name: &str) -> bool {
             | "_Bool"
             | "enum"
             | "static"
+            | "goto"
     )
 }
 
