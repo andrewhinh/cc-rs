@@ -73,7 +73,7 @@ cargo run
 - [x] Allow for-loops to define local variables
 - [x] Add goto and labeled statement
 - [x] Resolve conflict between labels and typedefs
-- [ ] Add break statement
+- [x] Add break statement
 - [ ] Add continue statement
 - [ ] Add switch-case
 - [ ] Add return that doesn't take any value

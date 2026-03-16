@@ -529,7 +529,7 @@ fn gen_stmt(
             if let Some(cond) = node.cond.as_ref() {
                 gen_expr(cond, result, filename, src, current_fn)?;
                 result.push_str("  cmp $0, %rax\n");
-                result.push_str(&format!("  je .L.end.{}\n", c));
+                result.push_str(&format!("  je {}\n", node.brk_label.as_ref().unwrap()));
             }
             gen_stmt(
                 node.then.as_ref().unwrap(),
@@ -542,7 +542,7 @@ fn gen_stmt(
                 gen_expr(inc, result, filename, src, current_fn)?;
             }
             result.push_str(&format!("  jmp .L.begin.{}\n", c));
-            result.push_str(&format!(".L.end.{}:\n", c));
+            result.push_str(&format!("{}:\n", node.brk_label.as_ref().unwrap()));
         }
         NodeKind::While => {
             let c = count();
@@ -555,7 +555,7 @@ fn gen_stmt(
                 current_fn,
             )?;
             result.push_str("  cmp $0, %rax\n");
-            result.push_str(&format!("  je .L.end.{}\n", c));
+            result.push_str(&format!("  je {}\n", node.brk_label.as_ref().unwrap()));
             gen_stmt(
                 node.then.as_ref().unwrap(),
                 result,
@@ -564,7 +564,7 @@ fn gen_stmt(
                 current_fn,
             )?;
             result.push_str(&format!("  jmp .L.begin.{}\n", c));
-            result.push_str(&format!(".L.end.{}:\n", c));
+            result.push_str(&format!("{}:\n", node.brk_label.as_ref().unwrap()));
         }
         NodeKind::Block => {
             let mut n = node.body.as_ref();

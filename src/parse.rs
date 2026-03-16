@@ -11,6 +11,7 @@ use crate::{consume, equal, skip};
 thread_local! {
     static GOTOS: Cell<Option<Box<Node>>> = const { Cell::new(None) };
     static LABELS: Cell<Option<Box<Node>>> = const { Cell::new(None) };
+    static BRK_LABEL: Cell<Option<String>> = const { Cell::new(None) };
 }
 
 fn gotos_get() -> Option<Box<Node>> {
@@ -27,6 +28,14 @@ fn labels_get() -> Option<Box<Node>> {
 
 fn labels_set(node: Option<Box<Node>>) {
     LABELS.with(|l| l.set(node));
+}
+
+fn brk_label_get() -> Option<String> {
+    BRK_LABEL.with(|b| b.take())
+}
+
+fn brk_label_set(label: Option<String>) {
+    BRK_LABEL.with(|b| b.set(label));
 }
 
 pub fn new_node(kind: NodeKind, tok_loc: usize, line_no: usize) -> Node {
@@ -53,6 +62,7 @@ pub fn new_node(kind: NodeKind, tok_loc: usize, line_no: usize) -> Node {
         label: None,
         unique_label: None,
         goto_next: None,
+        brk_label: None,
     }
 }
 
@@ -1033,6 +1043,7 @@ pub fn declaration(
         label: None,
         unique_label: None,
         goto_next: None,
+        brk_label: None,
     };
     let mut cur = &mut head;
     let mut i = 0;
@@ -1369,6 +1380,7 @@ pub fn compound_stmt(
         label: None,
         unique_label: None,
         goto_next: None,
+        brk_label: None,
     };
     let mut cur = &mut head;
 
@@ -1513,6 +1525,11 @@ pub fn stmt(
         scope_stack.push(Vec::new());
         tag_scope_stack.push(Vec::new());
 
+        let brk = brk_label_get();
+        let brk_name = new_unique_name();
+        brk_label_set(Some(brk_name.clone()));
+        node.brk_label = Some(brk_name);
+
         if is_typename(src, &tok, scope_stack) {
             let (basety, new_tok) =
                 declspec(filename, src, &tok, tag_scope_stack, scope_stack, None)?;
@@ -1587,6 +1604,7 @@ pub fn stmt(
 
         scope_stack.pop();
         tag_scope_stack.pop();
+        brk_label_set(brk);
 
         return Ok((node, tok));
     }
@@ -1606,6 +1624,12 @@ pub fn stmt(
         )?;
         node.cond = Some(Box::new(cond));
         let tok = skip(filename, src, &tok, ")")?;
+
+        let brk = brk_label_get();
+        let brk_name = new_unique_name();
+        brk_label_set(Some(brk_name.clone()));
+        node.brk_label = Some(brk_name);
+
         let (then, tok) = stmt(
             filename,
             src,
@@ -1617,6 +1641,7 @@ pub fn stmt(
             return_ty,
         )?;
         node.then = Some(Box::new(then));
+        brk_label_set(brk);
         return Ok((node, tok));
     }
     if equal(src, tok, "goto") {
@@ -1628,6 +1653,19 @@ pub fn stmt(
         node.goto_next = gotos_get();
         gotos_set(Some(Box::new(node.clone())));
         let tok = skip(filename, src, label_tok.next.as_ref().unwrap(), ";")?;
+        return Ok((node, tok));
+    }
+    if equal(src, tok, "break") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let brk = brk_label_get();
+        brk_label_set(brk.clone());
+        if brk.is_none() {
+            return Err(error_tok(filename, src, tok, "stray break"));
+        }
+        let mut node = new_node(NodeKind::Goto, tok_loc, line_no);
+        node.unique_label = brk;
+        let tok = skip(filename, src, tok.next.as_ref().unwrap(), ";")?;
         return Ok((node, tok));
     }
     if tok.kind == TokenKind::Ident && equal(src, tok.next.as_ref().unwrap(), ":") {
@@ -2829,6 +2867,7 @@ pub fn funcall(
         label: None,
         unique_label: None,
         goto_next: None,
+        brk_label: None,
     };
     let mut cur = &mut head;
 

@@ -120,6 +120,7 @@ fn is_keyword(name: &str) -> bool {
             | "enum"
             | "static"
             | "goto"
+            | "break"
     )
 }
 
