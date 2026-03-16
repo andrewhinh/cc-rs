@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use crate::{
     Node, NodeKind, Obj, TagScope, Token, TokenKind, Type, TypeKind, VarAttr, VarScope, align_to,
     error_at, error_tok, new_unique_name, new_var_unique_id,
@@ -92,7 +95,11 @@ pub fn find_var(scope_stack: &[Vec<VarScope>], globals: &[Obj], name: &str) -> O
     None
 }
 
-pub fn find_typedef(scope_stack: &[Vec<VarScope>], tok: &Token, src: &str) -> Option<Type> {
+pub fn find_typedef(
+    scope_stack: &[Vec<VarScope>],
+    tok: &Token,
+    src: &str,
+) -> Option<Rc<RefCell<Type>>> {
     if tok.kind != TokenKind::Ident {
         return None;
     }
@@ -107,7 +114,7 @@ pub fn find_typedef(scope_stack: &[Vec<VarScope>], tok: &Token, src: &str) -> Op
     None
 }
 
-pub fn find_tag(tag_scope_stack: &[Vec<TagScope>], name: &str) -> Option<Type> {
+pub fn find_tag(tag_scope_stack: &[Vec<TagScope>], name: &str) -> Option<Rc<RefCell<Type>>> {
     for scope in tag_scope_stack.iter().rev() {
         for ts in scope.iter().rev() {
             if ts.name == name {
@@ -118,7 +125,7 @@ pub fn find_tag(tag_scope_stack: &[Vec<TagScope>], name: &str) -> Option<Type> {
     None
 }
 
-pub fn push_tag_scope(tag_scope_stack: &mut [Vec<TagScope>], name: String, ty: Type) {
+pub fn push_tag_scope(tag_scope_stack: &mut [Vec<TagScope>], name: String, ty: Rc<RefCell<Type>>) {
     tag_scope_stack
         .last_mut()
         .unwrap()
@@ -199,9 +206,8 @@ pub fn struct_members(
     filename: &str,
     src: &str,
     tok: &Token,
-    ty: &mut Type,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-) -> Result<Token, String> {
+) -> Result<(Option<Box<crate::Member>>, Token), String> {
     let mut tok = tok.clone();
     let mut members: Vec<crate::Member> = Vec::new();
 
@@ -245,7 +251,7 @@ pub fn struct_members(
     let rest = tok.next.as_ref().unwrap().as_ref().clone();
 
     if members.is_empty() {
-        ty.members = None;
+        Ok((None, rest))
     } else {
         let mut current: Option<Box<crate::Member>> = None;
         for mem in members.into_iter().rev() {
@@ -253,10 +259,8 @@ pub fn struct_members(
             m.next = current;
             current = Some(Box::new(m));
         }
-        ty.members = current;
+        Ok((current, rest))
     }
-
-    Ok(rest)
 }
 
 pub fn struct_union_decl(
@@ -264,7 +268,7 @@ pub fn struct_union_decl(
     src: &str,
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-) -> Result<(Type, Token), String> {
+) -> Result<(Rc<RefCell<Type>>, Token), String> {
     let mut tok = tok.clone();
 
     let tag = if tok.kind == TokenKind::Ident {
@@ -282,32 +286,39 @@ pub fn struct_union_decl(
         if let Some(ty) = find_tag(tag_scope_stack, &tag_name) {
             return Ok((ty, tok));
         }
-        return Err(error_tok(filename, src, tag_tok, "unknown struct type"));
+
+        let ty = Rc::new(RefCell::new(Type::new_struct()));
+        ty.borrow_mut().size = -1;
+        push_tag_scope(tag_scope_stack, tag_name, ty.clone());
+        return Ok((ty, tok));
     }
 
     tok = skip(filename, src, &tok, "{")?;
 
-    let mut ty = Type {
-        kind: TypeKind::Struct,
-        size: 0,
-        align: 1,
-        base: None,
-        name: None,
-        return_ty: None,
-        params: None,
-        next: None,
-        array_len: 0,
-        members: None,
+    let ty_rc = if let Some(tag_tok) = &tag {
+        let tag_name: String = src.chars().skip(tag_tok.loc).take(tag_tok.len).collect();
+        if let Some(existing_ty) = find_tag(tag_scope_stack, &tag_name) {
+            existing_ty.clone()
+        } else {
+            let ty = Rc::new(RefCell::new(Type::new_struct()));
+            push_tag_scope(tag_scope_stack, tag_name, ty.clone());
+            ty
+        }
+    } else {
+        Rc::new(RefCell::new(Type::new_struct()))
     };
 
-    let rest = struct_members(filename, src, &tok, &mut ty, tag_scope_stack)?;
+    let (members, rest) = struct_members(filename, src, &tok, tag_scope_stack)?;
 
-    if let Some(tag_tok) = tag {
-        let tag_name: String = src.chars().skip(tag_tok.loc).take(tag_tok.len).collect();
-        push_tag_scope(tag_scope_stack, tag_name, ty.clone());
+    {
+        let mut ty = ty_rc.borrow_mut();
+        ty.kind = TypeKind::Struct;
+        ty.members = members;
+        ty.size = 0;
+        ty.align = 1;
     }
 
-    Ok((ty, rest))
+    Ok((ty_rc, rest))
 }
 
 pub fn struct_decl(
@@ -316,24 +327,51 @@ pub fn struct_decl(
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Type, Token), String> {
-    let (mut ty, rest) = struct_union_decl(filename, src, tok, tag_scope_stack)?;
-    ty.kind = TypeKind::Struct;
+    let (ty_rc, rest) = struct_union_decl(filename, src, tok, tag_scope_stack)?;
+    ty_rc.borrow_mut().kind = TypeKind::Struct;
+
+    if ty_rc.borrow().size < 0 {
+        let mut ty = ty_rc.borrow().clone();
+        ty.origin = Some(ty_rc.clone());
+        return Ok((ty, rest));
+    }
 
     let mut offset = 0;
-    let mut current = ty.members.as_mut();
-    while let Some(mem) = current {
-        offset = align_to(offset, mem.ty.align);
-        mem.offset = offset;
-        offset += mem.ty.size;
-
-        if ty.align < mem.ty.align {
-            ty.align = mem.ty.align;
+    let mut max_align = 1;
+    {
+        let ty = ty_rc.borrow();
+        let mut current = ty.members.as_ref();
+        while let Some(mem) = current {
+            offset = align_to(offset, mem.ty.align);
+            if max_align < mem.ty.align {
+                max_align = mem.ty.align;
+            }
+            offset += mem.ty.size;
+            current = mem.next.as_ref();
         }
-
-        current = mem.next.as_mut();
     }
-    ty.size = align_to(offset, ty.align);
 
+    let size = align_to(offset, max_align);
+    {
+        let mut ty = ty_rc.borrow_mut();
+        ty.align = max_align;
+        ty.size = size;
+    }
+
+    let mut offset = 0;
+    {
+        let mut ty = ty_rc.borrow_mut();
+        let mut current = ty.members.as_mut();
+        while let Some(mem) = current {
+            offset = align_to(offset, mem.ty.align);
+            mem.offset = offset;
+            offset += mem.ty.size;
+            current = mem.next.as_mut();
+        }
+    }
+
+    let mut ty = ty_rc.borrow().clone();
+    ty.origin = Some(ty_rc.clone());
     Ok((ty, rest))
 }
 
@@ -343,19 +381,39 @@ pub fn union_decl(
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Type, Token), String> {
-    let (mut ty, rest) = struct_union_decl(filename, src, tok, tag_scope_stack)?;
-    ty.kind = TypeKind::Union;
+    let (ty_rc, rest) = struct_union_decl(filename, src, tok, tag_scope_stack)?;
+    ty_rc.borrow_mut().kind = TypeKind::Union;
 
-    for mem in ty.members.iter() {
-        if ty.align < mem.ty.align {
-            ty.align = mem.ty.align;
-        }
-        if ty.size < mem.ty.size {
-            ty.size = mem.ty.size;
+    if ty_rc.borrow().size < 0 {
+        let mut ty = ty_rc.borrow().clone();
+        ty.origin = Some(ty_rc.clone());
+        return Ok((ty, rest));
+    }
+
+    let mut max_align = 1;
+    let mut max_size = 0;
+    {
+        let ty = ty_rc.borrow();
+        let mut current = ty.members.as_ref();
+        while let Some(mem) = current {
+            if max_align < mem.ty.align {
+                max_align = mem.ty.align;
+            }
+            if max_size < mem.ty.size {
+                max_size = mem.ty.size;
+            }
+            current = mem.next.as_ref();
         }
     }
-    ty.size = align_to(ty.size, ty.align);
 
+    {
+        let mut ty = ty_rc.borrow_mut();
+        ty.align = max_align;
+        ty.size = align_to(max_size, max_align);
+    }
+
+    let mut ty = ty_rc.borrow().clone();
+    ty.origin = Some(ty_rc.clone());
     Ok((ty, rest))
 }
 
@@ -383,10 +441,10 @@ pub fn enum_specifier(
     {
         let tag_name: String = src.chars().skip(tag_tok.loc).take(tag_tok.len).collect();
         if let Some(ty) = find_tag(tag_scope_stack, &tag_name) {
-            if ty.kind != TypeKind::Enum {
+            if ty.borrow().kind != TypeKind::Enum {
                 return Err(error_tok(filename, src, tag_tok, "not an enum tag"));
             }
-            return Ok((ty, tok));
+            return Ok((ty.borrow().clone(), tok));
         }
         return Err(error_tok(filename, src, tag_tok, "unknown enum type"));
     }
@@ -437,7 +495,7 @@ pub fn enum_specifier(
 
     if let Some(tag_tok) = tag {
         let tag_name: String = src.chars().skip(tag_tok.loc).take(tag_tok.len).collect();
-        push_tag_scope(tag_scope_stack, tag_name, ty.clone());
+        push_tag_scope(tag_scope_stack, tag_name, Rc::new(RefCell::new(ty.clone())));
     }
 
     Ok((ty, rest))
@@ -564,7 +622,7 @@ pub fn declspec(
                 ty = new_ty;
                 tok = new_tok;
             } else {
-                ty = ty2.unwrap();
+                ty = ty2.unwrap().borrow().clone();
                 tok = *tok.next.as_ref().unwrap().clone();
             }
             counter += OTHER;
@@ -701,6 +759,7 @@ pub fn func_params(
         next: None,
         array_len: 0,
         members: None,
+        origin: None,
     };
     let mut cur = &mut head;
     let mut first = true;
@@ -720,7 +779,7 @@ pub fn func_params(
         // "array of T" is converted to "pointer to T" in parameter context
         let param_ty = if param_ty.kind == TypeKind::Array {
             let name = param_ty.name.clone();
-            let mut ptr_ty = Type::new_ptr((*param_ty.base.unwrap()).clone());
+            let mut ptr_ty = Type::new_ptr(param_ty.base.unwrap().borrow().clone());
             ptr_ty.name = name;
             ptr_ty
         } else {
@@ -1049,10 +1108,15 @@ pub fn parse_typedef(
         )?;
         tok = new_tok;
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
+        let type_def = if let Some(origin) = &ty.origin {
+            origin.clone()
+        } else {
+            Rc::new(RefCell::new(ty))
+        };
         scope_stack.last_mut().unwrap().push(VarScope {
             name,
             var: None,
-            type_def: Some(ty),
+            type_def: Some(type_def),
             enum_ty: None,
             enum_val: 0,
         });
@@ -2355,7 +2419,7 @@ pub fn unary(
         add_type(&mut node);
         let lhs_ty = node.ty.as_ref().unwrap();
         if (lhs_ty.kind == TypeKind::Ptr || lhs_ty.kind == TypeKind::Array)
-            && lhs_ty.base.as_ref().unwrap().kind == TypeKind::Void
+            && lhs_ty.base.as_ref().unwrap().borrow().kind == TypeKind::Void
         {
             return Err(error_at(
                 filename,
@@ -2779,7 +2843,11 @@ pub fn primary(
 }
 
 pub fn pointer_to(base: Type) -> Type {
-    Type::new_ptr(base)
+    if let Some(origin) = &base.origin {
+        Type::new_ptr_shared(origin.clone())
+    } else {
+        Type::new_ptr(base)
+    }
 }
 
 pub fn func_type(return_ty: Type) -> Type {
@@ -2794,6 +2862,7 @@ pub fn func_type(return_ty: Type) -> Type {
         next: None,
         array_len: 0,
         members: None,
+        origin: None,
     }
 }
 
@@ -2812,7 +2881,7 @@ pub fn copy_type(ty: &Type) -> Type {
 
 pub fn get_common_type(ty1: &Type, ty2: &Type) -> Type {
     if let Some(base) = &ty1.base {
-        return Type::new_ptr(base.as_ref().clone());
+        return Type::new_ptr(base.borrow().clone());
     }
     if ty1.size == 8 || ty2.size == 8 {
         return Type::new_long();
@@ -2954,7 +3023,7 @@ pub fn add_type(node: &mut Node) {
             let lhs_ty = node.lhs.as_ref().unwrap().ty.as_ref().unwrap();
             if lhs_ty.kind == TypeKind::Array {
                 node.ty = Some(Type::new_ptr(
-                    lhs_ty.base.as_ref().unwrap().as_ref().clone(),
+                    lhs_ty.base.as_ref().unwrap().borrow().clone(),
                 ));
             } else {
                 node.ty = Some(Type::new_ptr(lhs_ty.clone()));
@@ -2963,7 +3032,7 @@ pub fn add_type(node: &mut Node) {
         NodeKind::Deref => {
             let lhs_ty = node.lhs.as_ref().unwrap().ty.as_ref().unwrap();
             if lhs_ty.kind == TypeKind::Ptr || lhs_ty.kind == TypeKind::Array {
-                node.ty = Some(lhs_ty.base.as_ref().unwrap().as_ref().clone());
+                node.ty = Some(lhs_ty.base.as_ref().unwrap().borrow().clone());
             } else {
                 node.ty = Some(Type::new_int());
             }
@@ -3018,7 +3087,15 @@ pub fn new_add(
         std::mem::swap(&mut lhs, &mut rhs);
     }
 
-    let base_size = lhs.ty.as_ref().unwrap().base.as_ref().unwrap().size;
+    let base_size = lhs
+        .ty
+        .as_ref()
+        .unwrap()
+        .base
+        .as_ref()
+        .unwrap()
+        .borrow()
+        .size;
     let rhs = new_binary(
         NodeKind::Mul,
         rhs,
@@ -3051,7 +3128,15 @@ pub fn new_sub(
 
     if (lhs_ty.kind == TypeKind::Ptr || lhs_ty.kind == TypeKind::Array) && is_integer(rhs_ty) {
         let lhs_ty_clone = lhs.ty.clone();
-        let base_size = lhs.ty.as_ref().unwrap().base.as_ref().unwrap().size;
+        let base_size = lhs
+            .ty
+            .as_ref()
+            .unwrap()
+            .base
+            .as_ref()
+            .unwrap()
+            .borrow()
+            .size;
         let rhs = new_binary(
             NodeKind::Mul,
             rhs,
@@ -3066,7 +3151,7 @@ pub fn new_sub(
                 .base
                 .as_ref()
                 .unwrap()
-                .as_ref()
+                .borrow()
                 .clone(),
         ));
         return Ok(node);
@@ -3075,7 +3160,15 @@ pub fn new_sub(
     if (lhs_ty.kind == TypeKind::Ptr || lhs_ty.kind == TypeKind::Array)
         && (rhs_ty.kind == TypeKind::Ptr || rhs_ty.kind == TypeKind::Array)
     {
-        let base_size = lhs.ty.as_ref().unwrap().base.as_ref().unwrap().size;
+        let base_size = lhs
+            .ty
+            .as_ref()
+            .unwrap()
+            .base
+            .as_ref()
+            .unwrap()
+            .borrow()
+            .size;
         let mut node = new_binary(NodeKind::Sub, lhs, rhs, tok_loc, line_no);
         node.ty = Some(Type::new_int());
         let mut result = new_binary(
