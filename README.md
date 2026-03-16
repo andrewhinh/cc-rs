@@ -146,7 +146,7 @@ cargo run
 - [x] Add % and %=
 - [x] Add &, |, ^, &=, |= and ^=
 - [x] Add && and ||
-- [ ] Add <<, >>, <<= and >>=
+- [x] Add <<, >>, <<= and >>=
 - [ ] Add ?: operator
 - [ ] Add constant expression
 - [ ] Add extern

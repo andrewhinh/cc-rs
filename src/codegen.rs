@@ -434,6 +434,14 @@ fn gen_expr(
         NodeKind::BitAnd => result.push_str(&format!("  and {}, {}\n", di, ax)),
         NodeKind::BitOr => result.push_str(&format!("  or {}, {}\n", di, ax)),
         NodeKind::BitXor => result.push_str(&format!("  xor {}, {}\n", di, ax)),
+        NodeKind::Shl => {
+            result.push_str("  mov %rdi, %rcx\n");
+            result.push_str(&format!("  shl %cl, {}\n", ax));
+        }
+        NodeKind::Shr => {
+            result.push_str("  mov %rdi, %rcx\n");
+            result.push_str(&format!("  sar %cl, {}\n", ax));
+        }
         NodeKind::Eq | NodeKind::Ne | NodeKind::Lt | NodeKind::Le => {
             result.push_str(&format!("  cmp {}, {}\n", di, ax));
             match node.kind {

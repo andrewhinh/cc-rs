@@ -45,6 +45,8 @@ pub enum NodeKind {
     BitAnd,
     BitOr,
     BitXor,
+    Shl,
+    Shr,
     Eq,
     Ne,
     Lt,
