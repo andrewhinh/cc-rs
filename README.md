@@ -71,7 +71,7 @@ cargo run
 - [x] Handle block scope
 - [ ] Use hashmap for block-scope lookup
 - [x] Allow for-loops to define local variables
-- [ ] Add goto and labeled statement
+- [x] Add goto and labeled statement
 - [ ] Resolve conflict between labels and typedefs
 - [ ] Add break statement
 - [ ] Add continue statement
