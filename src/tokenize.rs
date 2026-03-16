@@ -121,6 +121,7 @@ fn is_keyword(name: &str) -> bool {
             | "static"
             | "goto"
             | "break"
+            | "continue"
     )
 }
 

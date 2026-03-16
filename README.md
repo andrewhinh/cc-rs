@@ -76,7 +76,7 @@ cargo run
 - [x] Add goto and labeled statement
 - [x] Resolve conflict between labels and typedefs
 - [x] Add break statement
-- [ ] Add continue statement
+- [x] Add continue statement
 - [ ] Add switch-case
 - [ ] Add return that doesn't take any value
 - [ ] Add do ... while
