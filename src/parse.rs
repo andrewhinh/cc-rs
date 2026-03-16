@@ -723,6 +723,17 @@ pub fn func_params(
         let (param_ty, new_tok) =
             declarator(filename, src, &tok, basety, tag_scope_stack, scope_stack)?;
         tok = new_tok;
+
+        // "array of T" is converted to "pointer to T" in parameter context
+        let param_ty = if param_ty.kind == TypeKind::Array {
+            let name = param_ty.name.clone();
+            let mut ptr_ty = Type::new_ptr((*param_ty.base.unwrap()).clone());
+            ptr_ty.name = name;
+            ptr_ty
+        } else {
+            param_ty
+        };
+
         let param_copy = copy_type(&param_ty);
         cur.next = Some(Box::new(param_copy));
         cur = cur.next.as_mut().unwrap();
