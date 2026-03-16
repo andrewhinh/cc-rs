@@ -337,6 +337,7 @@ pub struct Node {
     pub unique_label: Option<String>,
     pub goto_next: Option<Box<Node>>,
     pub brk_label: Option<String>,
+    pub cont_label: Option<String>,
 }
 
 pub fn error_at(filename: &str, src: &str, loc: usize, msg: &str) -> String {

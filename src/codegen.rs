@@ -538,6 +538,7 @@ fn gen_stmt(
                 src,
                 current_fn,
             )?;
+            result.push_str(&format!("{}:\n", node.cont_label.as_ref().unwrap()));
             if let Some(inc) = node.inc.as_ref() {
                 gen_expr(inc, result, filename, src, current_fn)?;
             }
@@ -546,6 +547,7 @@ fn gen_stmt(
         }
         NodeKind::While => {
             let c = count();
+            result.push_str(&format!("{}:\n", node.cont_label.as_ref().unwrap()));
             result.push_str(&format!(".L.begin.{}:\n", c));
             gen_expr(
                 node.cond.as_ref().unwrap(),
