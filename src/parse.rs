@@ -1393,7 +1393,7 @@ pub fn compound_stmt(
 
     let mut tok = tok.clone();
     while !equal(src, &tok, "}") {
-        if is_typename(src, &tok, scope_stack) {
+        if is_typename(src, &tok, scope_stack) && !equal(src, tok.next.as_ref().unwrap(), ":") {
             let mut attr = VarAttr::default();
             let (basety, new_tok) = declspec(
                 filename,
