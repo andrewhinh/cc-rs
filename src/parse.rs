@@ -2222,6 +2222,38 @@ pub fn assign(
         return Ok((to_assign(binary, locals, scope_stack), tok));
     }
 
+    if equal(src, &tok, "<<=") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (rhs, tok) = assign(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let binary = new_binary(NodeKind::Shl, node, rhs, tok_loc, line_no);
+        return Ok((to_assign(binary, locals, scope_stack), tok));
+    }
+
+    if equal(src, &tok, ">>=") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (rhs, tok) = assign(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let binary = new_binary(NodeKind::Shr, node, rhs, tok_loc, line_no);
+        return Ok((to_assign(binary, locals, scope_stack), tok));
+    }
+
     Ok((node, tok))
 }
 
@@ -2482,7 +2514,7 @@ pub fn relational(
     scope_stack: &mut Vec<Vec<VarScope>>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
-    let (mut node, mut tok) = add(
+    let (mut node, mut tok) = shift(
         filename,
         src,
         tok,
@@ -2496,7 +2528,7 @@ pub fn relational(
         if equal(src, &tok, "<") {
             let tok_loc = tok.loc;
             let line_no = tok.line_no;
-            let (rhs, new_tok) = add(
+            let (rhs, new_tok) = shift(
                 filename,
                 src,
                 tok.next.as_ref().unwrap(),
@@ -2513,7 +2545,7 @@ pub fn relational(
         if equal(src, &tok, "<=") {
             let tok_loc = tok.loc;
             let line_no = tok.line_no;
-            let (rhs, new_tok) = add(
+            let (rhs, new_tok) = shift(
                 filename,
                 src,
                 tok.next.as_ref().unwrap(),
@@ -2530,7 +2562,7 @@ pub fn relational(
         if equal(src, &tok, ">") {
             let tok_loc = tok.loc;
             let line_no = tok.line_no;
-            let (lhs, new_tok) = add(
+            let (lhs, new_tok) = shift(
                 filename,
                 src,
                 tok.next.as_ref().unwrap(),
@@ -2547,7 +2579,7 @@ pub fn relational(
         if equal(src, &tok, ">=") {
             let tok_loc = tok.loc;
             let line_no = tok.line_no;
-            let (lhs, new_tok) = add(
+            let (lhs, new_tok) = shift(
                 filename,
                 src,
                 tok.next.as_ref().unwrap(),
@@ -2557,6 +2589,64 @@ pub fn relational(
                 tag_scope_stack,
             )?;
             node = new_binary(NodeKind::Le, lhs, node, tok_loc, line_no);
+            tok = new_tok;
+            continue;
+        }
+
+        return Ok((node, tok));
+    }
+}
+
+pub fn shift(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<(Node, Token), String> {
+    let (mut node, mut tok) = add(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
+
+    loop {
+        if equal(src, &tok, "<<") {
+            let tok_loc = tok.loc;
+            let line_no = tok.line_no;
+            let (rhs, new_tok) = add(
+                filename,
+                src,
+                tok.next.as_ref().unwrap(),
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+            node = new_binary(NodeKind::Shl, node, rhs, tok_loc, line_no);
+            tok = new_tok;
+            continue;
+        }
+
+        if equal(src, &tok, ">>") {
+            let tok_loc = tok.loc;
+            let line_no = tok.line_no;
+            let (rhs, new_tok) = add(
+                filename,
+                src,
+                tok.next.as_ref().unwrap(),
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+            node = new_binary(NodeKind::Shr, node, rhs, tok_loc, line_no);
             tok = new_tok;
             continue;
         }
@@ -3358,7 +3448,9 @@ pub fn add_type(node: &mut Node) {
         | NodeKind::Mod
         | NodeKind::BitAnd
         | NodeKind::BitOr
-        | NodeKind::BitXor => {
+        | NodeKind::BitXor
+        | NodeKind::Shl
+        | NodeKind::Shr => {
             usual_arith_conv(node.lhs.as_mut().unwrap(), node.rhs.as_mut().unwrap());
             node.ty = node.lhs.as_ref().unwrap().ty.clone();
         }
