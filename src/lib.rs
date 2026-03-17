@@ -52,6 +52,7 @@ pub enum NodeKind {
     Lt,
     Le,
     Assign,
+    Cond,
     Comma,
     Member,
     Addr,

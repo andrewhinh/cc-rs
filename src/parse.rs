@@ -2042,7 +2042,7 @@ pub fn assign(
     scope_stack: &mut Vec<Vec<VarScope>>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
-    let (mut node, tok) = logor(
+    let (mut node, tok) = conditional(
         filename,
         src,
         tok,
@@ -2227,6 +2227,60 @@ pub fn assign(
         return Ok((to_assign(binary, locals, scope_stack), tok));
     }
 
+    Ok((node, tok))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn conditional(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<(Node, Token), String> {
+    let (cond, mut tok) = logor(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
+
+    if !equal(src, &tok, "?") {
+        return Ok((cond, tok));
+    }
+
+    let tok_loc = tok.loc;
+    let line_no = tok.line_no;
+    let (then, new_tok) = expr(
+        filename,
+        src,
+        tok.next.as_ref().unwrap(),
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
+    tok = skip(filename, src, &new_tok, ":")?;
+
+    let (els, tok) = conditional(
+        filename,
+        src,
+        &tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
+
+    let mut node = new_node(NodeKind::Cond, tok_loc, line_no);
+    node.cond = Some(Box::new(cond));
+    node.then = Some(Box::new(then));
+    node.els = Some(Box::new(els));
     Ok((node, tok))
 }
 
@@ -3478,6 +3532,16 @@ pub fn add_type(node: &mut Node) {
         | NodeKind::Case => {}
         NodeKind::Var => {
             node.ty = Some(node.var.as_ref().unwrap().ty.clone());
+        }
+        NodeKind::Cond => {
+            let then_ty = node.then.as_ref().unwrap().ty.as_ref().unwrap();
+            let els_ty = node.els.as_ref().unwrap().ty.as_ref().unwrap();
+            if then_ty.kind == TypeKind::Void || els_ty.kind == TypeKind::Void {
+                node.ty = Some(Type::new_void());
+            } else {
+                usual_arith_conv(node.then.as_mut().unwrap(), node.els.as_mut().unwrap());
+                node.ty = node.then.as_ref().unwrap().ty.clone();
+            }
         }
         NodeKind::Comma => {
             node.ty = node.rhs.as_ref().unwrap().ty.clone();
