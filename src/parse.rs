@@ -546,16 +546,15 @@ pub fn enum_specifier(
         tok = tok.next.as_ref().unwrap().as_ref().clone();
 
         if equal(src, &tok, "=") {
-            val = get_number(tok.next.as_ref().unwrap())?;
-            tok = tok
-                .next
-                .as_ref()
-                .unwrap()
-                .next
-                .as_ref()
-                .unwrap()
-                .as_ref()
-                .clone();
+            let (v, new_tok) = const_expr(
+                filename,
+                src,
+                tok.next.as_ref().unwrap(),
+                tag_scope_stack,
+                scope_stack,
+            )?;
+            val = v;
+            tok = new_tok;
         }
 
         let scope = VarScope {
@@ -899,8 +898,8 @@ pub fn array_dimensions(
         return Ok((Type::new_array(ty, -1), rest));
     }
 
-    let sz = get_number(tok)?;
-    let tok = skip(filename, src, tok.next.as_ref().unwrap(), "]")?;
+    let (sz, tok) = const_expr(filename, src, tok, tag_scope_stack, scope_stack)?;
+    let tok = skip(filename, src, &tok, "]")?;
     let (ty, rest) = type_suffix(filename, src, &tok, ty, tag_scope_stack, scope_stack)?;
     Ok((Type::new_array(ty, sz), rest))
 }
@@ -1798,13 +1797,14 @@ pub fn stmt(
         }
         let tok_loc = tok.loc;
         let line_no = tok.line_no;
-        let val = get_number(tok.next.as_ref().unwrap())?;
-        let tok = skip(
+        let (val, new_tok) = const_expr(
             filename,
             src,
-            tok.next.as_ref().unwrap().next.as_ref().unwrap(),
-            ":",
+            tok.next.as_ref().unwrap(),
+            tag_scope_stack,
+            scope_stack,
         )?;
+        let tok = skip(filename, src, &new_tok, ":")?;
 
         let mut node = new_node(NodeKind::Case, tok_loc, line_no);
         node.label = Some(new_unique_name());
@@ -1931,6 +1931,166 @@ pub fn expr_stmt(
     let tok = skip(filename, src, &tok, ";")?;
     let node = new_unary(NodeKind::ExprStmt, expr_node, tok_loc, line_no);
     Ok((node, tok))
+}
+
+pub fn eval(filename: &str, src: &str, node: &mut Node) -> Result<i64, String> {
+    add_type(node);
+
+    match node.kind {
+        NodeKind::Add => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok(lhs.wrapping_add(rhs))
+        }
+        NodeKind::Sub => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok(lhs.wrapping_sub(rhs))
+        }
+        NodeKind::Mul => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok(lhs.wrapping_mul(rhs))
+        }
+        NodeKind::Div => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok(lhs.wrapping_div(rhs))
+        }
+        NodeKind::Neg => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            Ok(-lhs)
+        }
+        NodeKind::Mod => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok(lhs % rhs)
+        }
+        NodeKind::BitAnd => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok(lhs & rhs)
+        }
+        NodeKind::BitOr => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok(lhs | rhs)
+        }
+        NodeKind::BitXor => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok(lhs ^ rhs)
+        }
+        NodeKind::Shl => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok(lhs << rhs)
+        }
+        NodeKind::Shr => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok(lhs >> rhs)
+        }
+        NodeKind::Eq => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok((lhs == rhs) as i64)
+        }
+        NodeKind::Ne => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok((lhs != rhs) as i64)
+        }
+        NodeKind::Lt => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok((lhs < rhs) as i64)
+        }
+        NodeKind::Le => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok((lhs <= rhs) as i64)
+        }
+        NodeKind::Cond => {
+            let cond = eval(filename, src, node.cond.as_mut().unwrap())?;
+            if cond != 0 {
+                eval(filename, src, node.then.as_mut().unwrap())
+            } else {
+                eval(filename, src, node.els.as_mut().unwrap())
+            }
+        }
+        NodeKind::Comma => eval(filename, src, node.rhs.as_mut().unwrap()),
+        NodeKind::Not => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            Ok((lhs == 0) as i64)
+        }
+        NodeKind::BitNot => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            Ok(!lhs)
+        }
+        NodeKind::LogAnd => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok((lhs != 0 && rhs != 0) as i64)
+        }
+        NodeKind::LogOr => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok((lhs != 0 || rhs != 0) as i64)
+        }
+        NodeKind::Cast => {
+            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let ty = node.ty.as_ref().unwrap();
+            if is_integer(ty) {
+                match ty.size {
+                    1 => Ok((lhs as u8) as i64),
+                    2 => Ok((lhs as u16) as i64),
+                    4 => Ok((lhs as u32) as i64),
+                    _ => Ok(lhs),
+                }
+            } else if ty.kind == TypeKind::Ptr {
+                Ok(lhs)
+            } else {
+                Err(error_at(
+                    filename,
+                    src,
+                    node.tok_loc,
+                    "not a compile-time constant",
+                ))
+            }
+        }
+        NodeKind::Num => Ok(node.val),
+        _ => Err(error_at(
+            filename,
+            src,
+            node.tok_loc,
+            "not a compile-time constant",
+        )),
+    }
+}
+
+pub fn const_expr(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    tag_scope_stack: &mut [Vec<TagScope>],
+    scope_stack: &mut [Vec<VarScope>],
+) -> Result<(i64, Token), String> {
+    let mut empty_locals: Vec<Obj> = Vec::new();
+    let mut empty_globals: Vec<Obj> = Vec::new();
+    let mut tag_scope_stack = tag_scope_stack.to_vec();
+    let mut scope_stack = scope_stack.to_owned();
+    let mut node = conditional(
+        filename,
+        src,
+        tok,
+        &mut empty_locals,
+        &mut empty_globals,
+        &mut scope_stack,
+        &mut tag_scope_stack,
+    )?;
+    let val = eval(filename, src, &mut node.0)?;
+    Ok((val, node.1))
 }
 
 pub fn expr(
