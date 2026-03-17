@@ -61,6 +61,7 @@ struct Initializer {
     ty: Type,
     expr: Option<Node>,
     children: Vec<Initializer>,
+    is_flexible: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -70,21 +71,33 @@ struct InitDesg {
     var: Option<Obj>,
 }
 
-fn new_initializer(ty: &Type) -> Initializer {
-    let children = if ty.kind == TypeKind::Array {
+fn new_initializer(ty: &Type, is_flexible: bool) -> Initializer {
+    if ty.kind == TypeKind::Array {
+        if is_flexible && ty.array_len < 0 {
+            return Initializer {
+                ty: ty.clone(),
+                expr: None,
+                children: Vec::new(),
+                is_flexible: true,
+            };
+        }
         let mut children = Vec::with_capacity(ty.array_len as usize);
         for _ in 0..ty.array_len {
             let base_ty = ty.base.as_ref().unwrap().borrow().clone();
-            children.push(new_initializer(&base_ty));
+            children.push(new_initializer(&base_ty, false));
         }
-        children
-    } else {
-        Vec::new()
-    };
+        return Initializer {
+            ty: ty.clone(),
+            expr: None,
+            children,
+            is_flexible: false,
+        };
+    }
     Initializer {
         ty: ty.clone(),
         expr: None,
-        children,
+        children: Vec::new(),
+        is_flexible: false,
     }
 }
 
@@ -343,7 +356,50 @@ fn skip_excess_element(
     Ok(tok)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn count_array_init_elements(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    ty: &Type,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<i64, String> {
+    let base_ty = ty.base.as_ref().unwrap().borrow().clone();
+    let dummy = new_initializer(&base_ty, false);
+    let mut tok = tok.clone();
+    let mut i = 0;
+
+    while !equal(src, &tok, "}") {
+        if i > 0 {
+            tok = skip(filename, src, &tok, ",")?;
+        }
+        let mut dummy = dummy.clone();
+        tok = initializer2(
+            filename,
+            src,
+            &tok,
+            &mut dummy,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        i += 1;
+    }
+    Ok(i)
+}
+
 fn string_initializer(tok: &Token, init: &mut Initializer) -> Token {
+    if init.is_flexible {
+        let base_ty = init.ty.base.as_ref().unwrap().borrow().clone();
+        let str_len = tok.ty.as_ref().unwrap().array_len;
+        let new_ty = Type::new_array(base_ty, str_len);
+        *init = new_initializer(&new_ty, false);
+    }
+
     let str_content = tok.str.as_ref().unwrap();
     let str_len = tok.ty.as_ref().unwrap().array_len as usize;
     let array_len = init.ty.array_len as usize;
@@ -366,6 +422,22 @@ fn array_initializer(
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<Token, String> {
     let mut tok = skip(filename, src, tok, "{")?;
+
+    if init.is_flexible {
+        let len = count_array_init_elements(
+            filename,
+            src,
+            &tok,
+            &init.ty,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let base_ty = init.ty.base.as_ref().unwrap().borrow().clone();
+        let new_ty = Type::new_array(base_ty, len);
+        *init = new_initializer(&new_ty, false);
+    }
 
     let mut i = 0;
     loop {
@@ -454,8 +526,8 @@ fn initializer(
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-) -> Result<(Initializer, Token), String> {
-    let mut init = new_initializer(ty);
+) -> Result<(Initializer, Type, Token), String> {
+    let mut init = new_initializer(ty, true);
     let tok = initializer2(
         filename,
         src,
@@ -466,7 +538,8 @@ fn initializer(
         scope_stack,
         tag_scope_stack,
     )?;
-    Ok((init, tok))
+    let new_ty = init.ty.clone();
+    Ok((init, new_ty, tok))
 }
 
 fn init_desg_expr(
@@ -537,7 +610,7 @@ fn lvar_initializer(
     filename: &str,
     src: &str,
     tok: &Token,
-    var: &Obj,
+    var_name: &str,
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
@@ -545,16 +618,36 @@ fn lvar_initializer(
 ) -> Result<(Node, Token), String> {
     let tok_loc = tok.loc;
     let line_no = tok.line_no;
-    let (init, tok) = initializer(
+
+    let var_idx = locals
+        .iter()
+        .position(|v| v.name == var_name)
+        .ok_or_else(|| format!("variable not found: {}", var_name))?;
+    let old_ty = locals[var_idx].ty.clone();
+    let (init, new_ty, tok) = initializer(
         filename,
         src,
         tok,
-        &var.ty,
+        &old_ty,
         locals,
         globals,
         scope_stack,
         tag_scope_stack,
     )?;
+    locals[var_idx].ty = new_ty.clone();
+
+    for scope in scope_stack.iter_mut().rev() {
+        for vs in scope.iter_mut().rev() {
+            if vs.name == var_name {
+                if let Some(ref mut var) = vs.var {
+                    var.ty = new_ty.clone();
+                }
+                break;
+            }
+        }
+    }
+
+    let var = locals[var_idx].clone();
 
     let mut lhs = new_node(NodeKind::Memzero, tok_loc, line_no);
     lhs.var = Some(Box::new(var.clone()));
@@ -564,7 +657,7 @@ fn lvar_initializer(
         idx: 0,
         var: Some(var.clone()),
     };
-    let rhs = create_lvar_init(&init, &var.ty, &desg, tok_loc, line_no, filename, src)?;
+    let rhs = create_lvar_init(&init, &new_ty, &desg, tok_loc, line_no, filename, src)?;
     Ok((new_binary(NodeKind::Comma, lhs, rhs, tok_loc, line_no), tok))
 }
 
@@ -1404,14 +1497,6 @@ pub fn declaration(
             scope_stack,
         )?;
         tok = new_tok;
-        if ty.kind == TypeKind::Array && ty.array_len < 0 {
-            return Err(error_tok(
-                filename,
-                src,
-                &tok,
-                "variable has incomplete type",
-            ));
-        }
         if ty.kind == TypeKind::Void {
             return Err(error_tok(
                 filename,
@@ -1421,7 +1506,7 @@ pub fn declaration(
             ));
         }
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
-        let var = new_lvar(name, ty.clone(), locals, scope_stack);
+        new_lvar(name.clone(), ty, locals, scope_stack);
 
         if equal(src, &tok, "=") {
             let tok_loc = tok.loc;
@@ -1431,7 +1516,7 @@ pub fn declaration(
                 filename,
                 src,
                 &tok_next,
-                &var,
+                &name,
                 locals,
                 globals,
                 scope_stack,
@@ -1445,6 +1530,24 @@ pub fn declaration(
                 line_no,
             )));
             cur = cur.next.as_mut().unwrap();
+        }
+
+        let var_idx = locals.iter().position(|v| v.name == name).unwrap();
+        if locals[var_idx].ty.size < 0 {
+            return Err(error_tok(
+                filename,
+                src,
+                locals[var_idx].ty.name.as_ref().unwrap(),
+                "variable has incomplete type",
+            ));
+        }
+        if locals[var_idx].ty.kind == TypeKind::Void {
+            return Err(error_tok(
+                filename,
+                src,
+                locals[var_idx].ty.name.as_ref().unwrap(),
+                "variable declared void",
+            ));
         }
     }
 
