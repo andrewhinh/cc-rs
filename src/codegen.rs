@@ -386,6 +386,14 @@ fn gen_expr(
             );
             return Ok(());
         }
+        NodeKind::Memzero => {
+            let var = node.var.as_ref().unwrap();
+            result.push_str(&format!("  mov ${}, %rcx\n", var.ty.size));
+            result.push_str(&format!("  lea -{}(%rbp), %rdi\n", var.offset));
+            result.push_str("  mov $0, %al\n");
+            result.push_str("  rep stosb\n");
+            return Ok(());
+        }
         NodeKind::Cond => {
             let c = count();
             gen_expr(
@@ -512,7 +520,8 @@ fn gen_expr(
         | NodeKind::Label
         | NodeKind::Switch
         | NodeKind::Case
-        | NodeKind::NullExpr => unreachable!(),
+        | NodeKind::NullExpr
+        | NodeKind::Memzero => unreachable!(),
     }
     Ok(())
 }

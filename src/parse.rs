@@ -297,6 +297,9 @@ fn initializer2(
         let mut tok = skip(filename, src, tok, "{")?;
 
         for i in 0..init.ty.array_len as usize {
+            if equal(src, &tok, "}") {
+                break;
+            }
             if i > 0 {
                 tok = skip(filename, src, &tok, ",")?;
             }
@@ -409,6 +412,9 @@ fn create_lvar_init(
     }
 
     let lhs = init_desg_expr(desg, tok_loc, line_no, filename, src)?;
+    if init.expr.is_none() {
+        return Ok(new_node(NodeKind::NullExpr, tok_loc, line_no));
+    }
     let rhs = init.expr.as_ref().unwrap().clone();
     Ok(new_binary(NodeKind::Assign, lhs, rhs, tok_loc, line_no))
 }
@@ -436,15 +442,17 @@ fn lvar_initializer(
         scope_stack,
         tag_scope_stack,
     )?;
+
+    let mut lhs = new_node(NodeKind::Memzero, tok_loc, line_no);
+    lhs.var = Some(Box::new(var.clone()));
+
     let desg = InitDesg {
         next: None,
         idx: 0,
         var: Some(var.clone()),
     };
-    Ok((
-        create_lvar_init(&init, &var.ty, &desg, tok_loc, line_no, filename, src)?,
-        tok,
-    ))
+    let rhs = create_lvar_init(&init, &var.ty, &desg, tok_loc, line_no, filename, src)?;
+    Ok((new_binary(NodeKind::Comma, lhs, rhs, tok_loc, line_no), tok))
 }
 
 pub fn get_ident(src: &str, tok: &Token) -> Result<String, String> {
@@ -3880,7 +3888,8 @@ pub fn add_type(node: &mut Node) {
         | NodeKind::Label
         | NodeKind::Switch
         | NodeKind::Case
-        | NodeKind::NullExpr => {}
+        | NodeKind::NullExpr
+        | NodeKind::Memzero => {}
         NodeKind::Var => {
             node.ty = Some(node.var.as_ref().unwrap().ty.clone());
         }
