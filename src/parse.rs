@@ -343,6 +343,66 @@ fn skip_excess_element(
     Ok(tok)
 }
 
+fn string_initializer(tok: &Token, init: &mut Initializer) -> Token {
+    let str_content = tok.str.as_ref().unwrap();
+    let str_len = tok.ty.as_ref().unwrap().array_len as usize;
+    let array_len = init.ty.array_len as usize;
+    let len = array_len.min(str_len);
+    for (i, &c) in str_content.iter().take(len).enumerate() {
+        init.children[i].expr = Some(new_num(c as i64, tok.loc, tok.line_no));
+    }
+    tok.next.as_ref().unwrap().as_ref().clone()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn array_initializer(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    init: &mut Initializer,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<Token, String> {
+    let mut tok = skip(filename, src, tok, "{")?;
+
+    let mut i = 0;
+    loop {
+        let (consumed, new_tok) = consume(src, &tok, "}");
+        if consumed {
+            return Ok(new_tok);
+        }
+        if i > 0 {
+            tok = skip(filename, src, &tok, ",")?;
+        }
+
+        if i < init.ty.array_len as usize {
+            tok = initializer2(
+                filename,
+                src,
+                &tok,
+                &mut init.children[i],
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+        } else {
+            tok = skip_excess_element(
+                filename,
+                src,
+                &tok,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+        }
+        i += 1;
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn initializer2(
     filename: &str,
@@ -354,43 +414,21 @@ fn initializer2(
     scope_stack: &mut Vec<Vec<VarScope>>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<Token, String> {
+    if init.ty.kind == TypeKind::Array && tok.kind == TokenKind::Str {
+        return Ok(string_initializer(tok, init));
+    }
+
     if init.ty.kind == TypeKind::Array {
-        let mut tok = skip(filename, src, tok, "{")?;
-
-        let mut i = 0;
-        loop {
-            let (consumed, new_tok) = consume(src, &tok, "}");
-            if consumed {
-                return Ok(new_tok);
-            }
-            if i > 0 {
-                tok = skip(filename, src, &tok, ",")?;
-            }
-
-            if i < init.ty.array_len as usize {
-                tok = initializer2(
-                    filename,
-                    src,
-                    &tok,
-                    &mut init.children[i],
-                    locals,
-                    globals,
-                    scope_stack,
-                    tag_scope_stack,
-                )?;
-            } else {
-                tok = skip_excess_element(
-                    filename,
-                    src,
-                    &tok,
-                    locals,
-                    globals,
-                    scope_stack,
-                    tag_scope_stack,
-                )?;
-            }
-            i += 1;
-        }
+        return array_initializer(
+            filename,
+            src,
+            tok,
+            init,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        );
     }
 
     let (expr_node, tok) = assign(
