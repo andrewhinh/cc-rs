@@ -181,6 +181,9 @@ fn gen_expr(
     result.push_str(&format!("  .loc 1 {}\n", node.line_no));
 
     match node.kind {
+        NodeKind::NullExpr => {
+            return Ok(());
+        }
         NodeKind::Num => {
             result.push_str(&format!("  mov ${}, %rax\n", node.val));
             return Ok(());
@@ -508,7 +511,8 @@ fn gen_expr(
         | NodeKind::Goto
         | NodeKind::Label
         | NodeKind::Switch
-        | NodeKind::Case => unreachable!(),
+        | NodeKind::Case
+        | NodeKind::NullExpr => unreachable!(),
     }
     Ok(())
 }
