@@ -383,6 +383,36 @@ fn gen_expr(
             );
             return Ok(());
         }
+        NodeKind::Cond => {
+            let c = count();
+            gen_expr(
+                node.cond.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            result.push_str("  cmp $0, %rax\n");
+            result.push_str(&format!("  je .L.else.{}\n", c));
+            gen_expr(
+                node.then.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            result.push_str(&format!("  jmp .L.end.{}\n", c));
+            result.push_str(&format!(".L.else.{}:\n", c));
+            gen_expr(
+                node.els.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            result.push_str(&format!(".L.end.{}:\n", c));
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -474,6 +504,7 @@ fn gen_expr(
         | NodeKind::While
         | NodeKind::Comma
         | NodeKind::Cast
+        | NodeKind::Cond
         | NodeKind::Goto
         | NodeKind::Label
         | NodeKind::Switch

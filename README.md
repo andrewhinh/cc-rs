@@ -149,7 +149,7 @@ cargo run
 - [x] Add &, |, ^, &=, |= and ^=
 - [x] Add && and ||
 - [x] Add <<, >>, <<= and >>=
-- [ ] Add ?: operator
+- [x] Add ?: operator
 - [ ] Add constant expression
 - [ ] Add extern
 - [ ] Handle extern declarations in a block
