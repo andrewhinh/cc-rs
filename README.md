@@ -148,7 +148,7 @@ cargo run
 - [x] Add && and ||
 - [x] Add <<, >>, <<= and >>=
 - [x] Add ?: operator
-- [ ] Add constant expression
+- [x] Add constant expression
 - [ ] Add extern
 - [ ] Handle extern declarations in a block
 - [ ] Detect function redefinition and conflicting redeclarations
