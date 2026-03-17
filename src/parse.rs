@@ -56,6 +56,38 @@ fn current_switch_set(node: Option<Box<Node>>) {
     CURRENT_SWITCH.with(|c| c.set(node));
 }
 
+#[derive(Debug, Clone)]
+struct Initializer {
+    ty: Type,
+    expr: Option<Node>,
+    children: Vec<Initializer>,
+}
+
+#[derive(Debug, Clone)]
+struct InitDesg {
+    next: Option<Box<InitDesg>>,
+    idx: i64,
+    var: Option<Obj>,
+}
+
+fn new_initializer(ty: &Type) -> Initializer {
+    let children = if ty.kind == TypeKind::Array {
+        let mut children = Vec::with_capacity(ty.array_len as usize);
+        for _ in 0..ty.array_len {
+            let base_ty = ty.base.as_ref().unwrap().borrow().clone();
+            children.push(new_initializer(&base_ty));
+        }
+        children
+    } else {
+        Vec::new()
+    };
+    Initializer {
+        ty: ty.clone(),
+        expr: None,
+        children,
+    }
+}
+
 pub fn new_node(kind: NodeKind, tok_loc: usize, line_no: usize) -> Node {
     Node {
         kind,
@@ -248,6 +280,171 @@ pub fn new_gvar(name: String, ty: Type) -> Obj {
     let mut var = new_var(name, ty);
     var.is_local = false;
     var
+}
+
+#[allow(clippy::too_many_arguments)]
+fn initializer2(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    init: &mut Initializer,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<Token, String> {
+    if init.ty.kind == TypeKind::Array {
+        let mut tok = skip(filename, src, tok, "{")?;
+
+        for i in 0..init.ty.array_len as usize {
+            if i > 0 {
+                tok = skip(filename, src, &tok, ",")?;
+            }
+            tok = initializer2(
+                filename,
+                src,
+                &tok,
+                &mut init.children[i],
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+        }
+
+        return skip(filename, src, &tok, "}");
+    }
+
+    let (expr_node, tok) = assign(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
+    init.expr = Some(expr_node);
+    Ok(tok)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn initializer(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    ty: &Type,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<(Initializer, Token), String> {
+    let mut init = new_initializer(ty);
+    let tok = initializer2(
+        filename,
+        src,
+        tok,
+        &mut init,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
+    Ok((init, tok))
+}
+
+fn init_desg_expr(
+    desg: &InitDesg,
+    tok_loc: usize,
+    line_no: usize,
+    filename: &str,
+    src: &str,
+) -> Result<Node, String> {
+    if let Some(var) = &desg.var {
+        return Ok(new_var_node(var.clone(), tok_loc, line_no));
+    }
+
+    let lhs = init_desg_expr(
+        desg.next.as_ref().unwrap().as_ref(),
+        tok_loc,
+        line_no,
+        filename,
+        src,
+    )?;
+    let rhs = new_num(desg.idx, tok_loc, line_no);
+    let add_node = new_add(lhs, rhs, tok_loc, line_no, filename, src)?;
+    Ok(new_unary(NodeKind::Deref, add_node, tok_loc, line_no))
+}
+
+fn create_lvar_init(
+    init: &Initializer,
+    ty: &Type,
+    desg: &InitDesg,
+    tok_loc: usize,
+    line_no: usize,
+    filename: &str,
+    src: &str,
+) -> Result<Node, String> {
+    if ty.kind == TypeKind::Array {
+        let mut node = new_node(NodeKind::NullExpr, tok_loc, line_no);
+        for i in 0..ty.array_len as usize {
+            let desg2 = InitDesg {
+                next: Some(Box::new(desg.clone())),
+                idx: i as i64,
+                var: None,
+            };
+            let base_ty = ty.base.as_ref().unwrap().borrow().clone();
+            let rhs = create_lvar_init(
+                &init.children[i],
+                &base_ty,
+                &desg2,
+                tok_loc,
+                line_no,
+                filename,
+                src,
+            )?;
+            node = new_binary(NodeKind::Comma, node, rhs, tok_loc, line_no);
+        }
+        return Ok(node);
+    }
+
+    let lhs = init_desg_expr(desg, tok_loc, line_no, filename, src)?;
+    let rhs = init.expr.as_ref().unwrap().clone();
+    Ok(new_binary(NodeKind::Assign, lhs, rhs, tok_loc, line_no))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lvar_initializer(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    var: &Obj,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<(Node, Token), String> {
+    let tok_loc = tok.loc;
+    let line_no = tok.line_no;
+    let (init, tok) = initializer(
+        filename,
+        src,
+        tok,
+        &var.ty,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
+    let desg = InitDesg {
+        next: None,
+        idx: 0,
+        var: Some(var.clone()),
+    };
+    Ok((
+        create_lvar_init(&init, &var.ty, &desg, tok_loc, line_no, filename, src)?,
+        tok,
+    ))
 }
 
 pub fn get_ident(src: &str, tok: &Token) -> Result<String, String> {
@@ -1105,36 +1302,29 @@ pub fn declaration(
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
         let var = new_lvar(name, ty.clone(), locals, scope_stack);
 
-        if !equal(src, &tok, "=") {
-            continue;
+        if equal(src, &tok, "=") {
+            let tok_loc = tok.loc;
+            let line_no = tok.line_no;
+            let tok_next = tok.next.as_ref().unwrap().clone();
+            let (expr_node, new_tok) = lvar_initializer(
+                filename,
+                src,
+                &tok_next,
+                &var,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+            tok = new_tok;
+            cur.next = Some(Box::new(new_unary(
+                NodeKind::ExprStmt,
+                expr_node,
+                tok_loc,
+                line_no,
+            )));
+            cur = cur.next.as_mut().unwrap();
         }
-
-        let tok_loc = tok.loc;
-        let line_no = tok.line_no;
-        let tok_next = tok.next.as_ref().unwrap().clone();
-        let (rhs, new_tok) = assign(
-            filename,
-            src,
-            &tok_next,
-            locals,
-            globals,
-            scope_stack,
-            tag_scope_stack,
-        )?;
-        tok = new_tok;
-        let lhs = new_var_node(
-            var,
-            ty.name.as_ref().unwrap().loc,
-            ty.name.as_ref().unwrap().line_no,
-        );
-        let node = new_binary(NodeKind::Assign, lhs, rhs, tok_loc, line_no);
-        cur.next = Some(Box::new(new_unary(
-            NodeKind::ExprStmt,
-            node,
-            tok_loc,
-            line_no,
-        )));
-        cur = cur.next.as_mut().unwrap();
     }
 
     let tok_loc = tok.loc;
@@ -3689,7 +3879,8 @@ pub fn add_type(node: &mut Node) {
         | NodeKind::Goto
         | NodeKind::Label
         | NodeKind::Switch
-        | NodeKind::Case => {}
+        | NodeKind::Case
+        | NodeKind::NullExpr => {}
         NodeKind::Var => {
             node.ty = Some(node.var.as_ref().unwrap().ty.clone());
         }
