@@ -206,7 +206,7 @@ cargo run
 - [x] Add a notion of an incomplete struct type
 - [x] Support local variable initializers
 - [x] Initialize excess array elements with zero
-- [ ] Skip excess initializer elements
+- [x] Skip excess initializer elements
 - [ ] Add string literal initializer
 - [ ] Allow to omit array length if an initializer is given
 - [ ] Handle struct initializers for local variables

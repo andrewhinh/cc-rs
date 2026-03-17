@@ -282,6 +282,41 @@ pub fn new_gvar(name: String, ty: Type) -> Obj {
     var
 }
 
+fn skip_excess_element(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<Token, String> {
+    if equal(src, tok, "{") {
+        let tok = skip(filename, src, tok, "{")?;
+        let tok = skip_excess_element(
+            filename,
+            src,
+            &tok,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        return skip(filename, src, &tok, "}");
+    }
+
+    let (_, tok) = assign(
+        filename,
+        src,
+        tok,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
+    Ok(tok)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn initializer2(
     filename: &str,
@@ -296,26 +331,40 @@ fn initializer2(
     if init.ty.kind == TypeKind::Array {
         let mut tok = skip(filename, src, tok, "{")?;
 
-        for i in 0..init.ty.array_len as usize {
-            if equal(src, &tok, "}") {
-                break;
+        let mut i = 0;
+        loop {
+            let (consumed, new_tok) = consume(src, &tok, "}");
+            if consumed {
+                return Ok(new_tok);
             }
             if i > 0 {
                 tok = skip(filename, src, &tok, ",")?;
             }
-            tok = initializer2(
-                filename,
-                src,
-                &tok,
-                &mut init.children[i],
-                locals,
-                globals,
-                scope_stack,
-                tag_scope_stack,
-            )?;
-        }
 
-        return skip(filename, src, &tok, "}");
+            if i < init.ty.array_len as usize {
+                tok = initializer2(
+                    filename,
+                    src,
+                    &tok,
+                    &mut init.children[i],
+                    locals,
+                    globals,
+                    scope_stack,
+                    tag_scope_stack,
+                )?;
+            } else {
+                tok = skip_excess_element(
+                    filename,
+                    src,
+                    &tok,
+                    locals,
+                    globals,
+                    scope_stack,
+                    tag_scope_stack,
+                )?;
+            }
+            i += 1;
+        }
     }
 
     let (expr_node, tok) = assign(
