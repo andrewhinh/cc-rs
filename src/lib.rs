@@ -77,6 +77,7 @@ pub enum NodeKind {
     Switch,
     Case,
     NullExpr,
+    Memzero,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

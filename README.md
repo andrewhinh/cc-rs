@@ -207,7 +207,7 @@ cargo run
 - [x] Decay an array to a pointer in the func param context
 - [x] Add a notion of an incomplete struct type
 - [x] Support local variable initializers
-- [ ] Initialize excess array elements with zero
+- [x] Initialize excess array elements with zero
 - [ ] Skip excess initializer elements
 - [ ] Add string literal initializer
 - [ ] Allow to omit array length if an initializer is given
