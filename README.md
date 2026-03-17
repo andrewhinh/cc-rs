@@ -208,7 +208,7 @@ cargo run
 - [x] Initialize excess array elements with zero
 - [x] Skip excess initializer elements
 - [x] Add string literal initializer
-- [ ] Allow to omit array length if an initializer is given
+- [x] Allow to omit array length if an initializer is given
 - [ ] Handle struct initializers for local variables
 - [ ] Allow to initialize a struct with other struct
 - [ ] Handle union initializers for local variables
