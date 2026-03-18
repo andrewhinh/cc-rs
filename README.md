@@ -212,7 +212,7 @@ cargo run
 - [x] Add string literal initializer
 - [x] Allow to omit array length if an initializer is given
 - [x] Handle struct initializers for local variables
-- [ ] Allow to initialize a struct with other struct
+- [x] Allow to initialize a struct with other struct
 - [ ] Handle union initializers for local variables
 - [ ] Add global initializer for scalar and string
 - [ ] Add struct initializer for global variable

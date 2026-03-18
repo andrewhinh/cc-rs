@@ -591,6 +591,23 @@ fn initializer2(
     }
 
     if init.ty.kind == TypeKind::Struct {
+        if !equal(src, tok, "{") {
+            let (expr_node, tok) = assign(
+                filename,
+                src,
+                tok,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+            let mut expr_node = expr_node;
+            add_type(&mut expr_node);
+            if expr_node.ty.as_ref().unwrap().kind == TypeKind::Struct {
+                init.expr = Some(expr_node);
+                return Ok(tok);
+            }
+        }
         return struct_initializer(
             filename,
             src,
@@ -712,6 +729,17 @@ fn create_lvar_init(
     }
 
     if ty.kind == TypeKind::Struct {
+        if let Some(rhs) = &init.expr {
+            let lhs = init_desg_expr(desg, tok_loc, line_no, filename, src)?;
+            return Ok(new_binary(
+                NodeKind::Assign,
+                lhs,
+                rhs.clone(),
+                tok_loc,
+                line_no,
+            ));
+        }
+
         let mut node = new_node(NodeKind::NullExpr, tok_loc, line_no);
 
         let mut current = ty.members.as_ref();
