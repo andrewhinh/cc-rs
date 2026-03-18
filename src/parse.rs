@@ -1363,6 +1363,87 @@ pub fn is_function(src: &str, tok: &Token) -> Result<bool, String> {
     Ok(ty.kind == TypeKind::Func)
 }
 
+fn write_buf(buf: &mut [u8], offset: usize, val: u64, sz: i64) {
+    match sz {
+        1 => buf[offset] = val as u8,
+        2 => {
+            let bytes = (val as u16).to_le_bytes();
+            buf[offset..offset + 2].copy_from_slice(&bytes);
+        }
+        4 => {
+            let bytes = (val as u32).to_le_bytes();
+            buf[offset..offset + 4].copy_from_slice(&bytes);
+        }
+        8 => {
+            let bytes = val.to_le_bytes();
+            buf[offset..offset + 8].copy_from_slice(&bytes);
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn write_gvar_data(
+    filename: &str,
+    src: &str,
+    init: &Initializer,
+    ty: &Type,
+    buf: &mut [u8],
+    offset: usize,
+) -> Result<(), String> {
+    if ty.kind == TypeKind::Array {
+        let base_ty = ty.base.as_ref().unwrap().borrow().clone();
+        let sz = base_ty.size as usize;
+        for i in 0..ty.array_len as usize {
+            write_gvar_data(
+                filename,
+                src,
+                &init.children[i],
+                &base_ty,
+                buf,
+                offset + sz * i,
+            )?;
+        }
+        return Ok(());
+    }
+
+    if let Some(expr) = &init.expr {
+        let mut expr = expr.clone();
+        let val = eval(filename, src, &mut expr)?;
+        write_buf(buf, offset, val as u64, ty.size);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn gvar_initializer(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    var: &mut Obj,
+    globals: &mut Vec<Obj>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+    _scope_stack: &mut [Vec<VarScope>],
+) -> Result<Token, String> {
+    let mut empty_locals: Vec<Obj> = Vec::new();
+    let mut empty_scope_stack: Vec<Vec<VarScope>> = Vec::new();
+    let (init, new_ty, tok) = initializer(
+        filename,
+        src,
+        tok,
+        &var.ty,
+        &mut empty_locals,
+        globals,
+        &mut empty_scope_stack,
+        tag_scope_stack,
+    )?;
+
+    var.ty = new_ty;
+    let mut buf = vec![0u8; var.ty.size as usize];
+    write_gvar_data(filename, src, &init, &var.ty, &mut buf, 0)?;
+    var.init_data = Some(buf);
+    Ok(tok)
+}
+
 pub fn global_variable(
     filename: &str,
     src: &str,
@@ -1390,7 +1471,7 @@ pub fn global_variable(
             scope_stack,
         )?;
         tok = new_tok;
-        if ty.kind == TypeKind::Array && ty.array_len < 0 {
+        if ty.kind == TypeKind::Array && ty.array_len < 0 && !equal(src, &tok, "=") {
             return Err(error_tok(
                 filename,
                 src,
@@ -1399,7 +1480,18 @@ pub fn global_variable(
             ));
         }
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
-        let var = new_gvar(name, ty);
+        let mut var = new_gvar(name, ty);
+        if equal(src, &tok, "=") {
+            tok = gvar_initializer(
+                filename,
+                src,
+                tok.next.as_ref().unwrap(),
+                &mut var,
+                globals,
+                tag_scope_stack,
+                scope_stack,
+            )?;
+        }
         globals.push(var);
     }
 

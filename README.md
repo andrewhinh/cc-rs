@@ -212,7 +212,7 @@ cargo run
 - [x] Handle struct initializers for local variables
 - [x] Allow to initialize a struct with other struct
 - [x] Handle union initializers for local variables
-- [ ] Add global initializer for scalar and string
+- [x] Add global initializer for scalar and string
 - [ ] Add struct initializer for global variable
 - [ ] Handle union initializers for global variable
 - [ ] Allow parentheses in initializers to be omitted
