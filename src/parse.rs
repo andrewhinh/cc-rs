@@ -95,7 +95,7 @@ fn new_initializer(ty: &Type, is_flexible: bool) -> Initializer {
         };
     }
 
-    if ty.kind == TypeKind::Struct {
+    if ty.kind == TypeKind::Struct || ty.kind == TypeKind::Union {
         let mut len = 0;
         let mut current = ty.members.as_ref();
         while let Some(mem) = current {
@@ -537,6 +537,31 @@ fn struct_initializer(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn union_initializer(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    init: &mut Initializer,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<Token, String> {
+    let tok = skip(filename, src, tok, "{")?;
+    let tok = initializer2(
+        filename,
+        src,
+        &tok,
+        &mut init.children[0],
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
+    skip(filename, src, &tok, "}")
+}
+
+#[allow(clippy::too_many_arguments)]
 fn initializer2(
     filename: &str,
     src: &str,
@@ -583,6 +608,19 @@ fn initializer2(
             }
         }
         return struct_initializer(
+            filename,
+            src,
+            tok,
+            init,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        );
+    }
+
+    if init.ty.kind == TypeKind::Union {
+        return union_initializer(
             filename,
             src,
             tok,
@@ -737,6 +775,24 @@ fn create_lvar_init(
             current = mem.next.as_ref();
         }
         return Ok(node);
+    }
+
+    if ty.kind == TypeKind::Union {
+        let desg2 = InitDesg {
+            next: Some(Box::new(desg.clone())),
+            idx: 0,
+            member: Some(ty.members.as_ref().unwrap().as_ref().clone()),
+            var: None,
+        };
+        return create_lvar_init(
+            &init.children[0],
+            &ty.members.as_ref().unwrap().ty,
+            &desg2,
+            tok_loc,
+            line_no,
+            filename,
+            src,
+        );
     }
 
     let lhs = init_desg_expr(desg, tok_loc, line_no, filename, src)?;
