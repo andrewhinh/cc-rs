@@ -102,6 +102,7 @@ pub struct Member {
     pub ty: Type,
     pub tok: Option<Box<Token>>,
     pub name: Option<Box<Token>>,
+    pub idx: i64,
     pub offset: i64,
 }
 
