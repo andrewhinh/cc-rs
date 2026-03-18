@@ -68,6 +68,7 @@ struct Initializer {
 struct InitDesg {
     next: Option<Box<InitDesg>>,
     idx: i64,
+    member: Option<crate::Member>,
     var: Option<Obj>,
 }
 
@@ -93,6 +94,39 @@ fn new_initializer(ty: &Type, is_flexible: bool) -> Initializer {
             is_flexible: false,
         };
     }
+
+    if ty.kind == TypeKind::Struct {
+        let mut len = 0;
+        let mut current = ty.members.as_ref();
+        while let Some(mem) = current {
+            len += 1;
+            current = mem.next.as_ref();
+        }
+
+        let mut children = vec![
+            Initializer {
+                ty: Type::new_int(),
+                expr: None,
+                children: Vec::new(),
+                is_flexible: false,
+            };
+            len
+        ];
+
+        let mut current = ty.members.as_ref();
+        while let Some(mem) = current {
+            children[mem.idx as usize] = new_initializer(&mem.ty, false);
+            current = mem.next.as_ref();
+        }
+
+        return Initializer {
+            ty: ty.clone(),
+            expr: None,
+            children,
+            is_flexible: false,
+        };
+    }
+
     Initializer {
         ty: ty.clone(),
         expr: None,
@@ -450,6 +484,59 @@ fn array_initializer(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn struct_initializer(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    init: &mut Initializer,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<Token, String> {
+    let mut tok = skip(filename, src, tok, "{")?;
+
+    let mut mem = init.ty.members.as_ref();
+    let mut first = true;
+
+    loop {
+        let (consumed, new_tok) = consume(src, &tok, "}");
+        if consumed {
+            return Ok(new_tok);
+        }
+
+        if !first {
+            tok = skip(filename, src, &tok, ",")?;
+        }
+        first = false;
+
+        if let Some(m) = mem {
+            tok = initializer2(
+                filename,
+                src,
+                &tok,
+                &mut init.children[m.idx as usize],
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+            mem = m.next.as_ref();
+        } else {
+            tok = skip_excess_element(
+                filename,
+                src,
+                &tok,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn initializer2(
     filename: &str,
     src: &str,
@@ -466,6 +553,19 @@ fn initializer2(
 
     if init.ty.kind == TypeKind::Array {
         return array_initializer(
+            filename,
+            src,
+            tok,
+            init,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        );
+    }
+
+    if init.ty.kind == TypeKind::Struct {
+        return struct_initializer(
             filename,
             src,
             tok,
@@ -527,6 +627,19 @@ fn init_desg_expr(
         return Ok(new_var_node(var.clone(), tok_loc, line_no));
     }
 
+    if let Some(member) = &desg.member {
+        let node = init_desg_expr(
+            desg.next.as_ref().unwrap().as_ref(),
+            tok_loc,
+            line_no,
+            filename,
+            src,
+        )?;
+        let mut node = new_unary(NodeKind::Member, node, tok_loc, line_no);
+        node.member = Some(Box::new(member.clone()));
+        return Ok(node);
+    }
+
     let lhs = init_desg_expr(
         desg.next.as_ref().unwrap().as_ref(),
         tok_loc,
@@ -554,6 +667,7 @@ fn create_lvar_init(
             let desg2 = InitDesg {
                 next: Some(Box::new(desg.clone())),
                 idx: i as i64,
+                member: None,
                 var: None,
             };
             let base_ty = ty.base.as_ref().unwrap().borrow().clone();
@@ -567,6 +681,32 @@ fn create_lvar_init(
                 src,
             )?;
             node = new_binary(NodeKind::Comma, node, rhs, tok_loc, line_no);
+        }
+        return Ok(node);
+    }
+
+    if ty.kind == TypeKind::Struct {
+        let mut node = new_node(NodeKind::NullExpr, tok_loc, line_no);
+
+        let mut current = ty.members.as_ref();
+        while let Some(mem) = current {
+            let desg2 = InitDesg {
+                next: Some(Box::new(desg.clone())),
+                idx: 0,
+                member: Some(mem.as_ref().clone()),
+                var: None,
+            };
+            let rhs = create_lvar_init(
+                &init.children[mem.idx as usize],
+                &mem.ty,
+                &desg2,
+                tok_loc,
+                line_no,
+                filename,
+                src,
+            )?;
+            node = new_binary(NodeKind::Comma, node, rhs, tok_loc, line_no);
+            current = mem.next.as_ref();
         }
         return Ok(node);
     }
@@ -629,6 +769,7 @@ fn lvar_initializer(
     let desg = InitDesg {
         next: None,
         idx: 0,
+        member: None,
         var: Some(var.clone()),
     };
     let rhs = create_lvar_init(&init, &new_ty, &desg, tok_loc, line_no, filename, src)?;
@@ -651,19 +792,20 @@ pub fn struct_members(
 ) -> Result<(Option<Box<crate::Member>>, Token), String> {
     let mut tok = tok.clone();
     let mut members: Vec<crate::Member> = Vec::new();
+    let mut idx: i64 = 0;
 
     while !equal(src, &tok, "}") {
         let mut empty_scope: Vec<Vec<VarScope>> = vec![];
         let (basety, new_tok) =
             declspec(filename, src, &tok, tag_scope_stack, &mut empty_scope, None)?;
         tok = new_tok;
-        let mut i = 0;
+        let mut first = true;
 
         while !equal(src, &tok, ";") {
-            if i > 0 {
+            if !first {
                 tok = skip(filename, src, &tok, ",")?;
             }
-            i += 1;
+            first = false;
 
             let (mem_ty, new_tok) = {
                 let mut empty_scope: Vec<Vec<VarScope>> = vec![];
@@ -682,8 +824,10 @@ pub fn struct_members(
                 ty: mem_ty.clone(),
                 tok: Some(Box::new(tok.clone())),
                 name: mem_ty.name.clone(),
+                idx,
                 offset: 0,
             };
+            idx += 1;
             members.push(mem);
         }
         tok = skip(filename, src, &tok, ";")?;
