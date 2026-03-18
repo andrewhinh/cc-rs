@@ -1432,6 +1432,22 @@ fn write_gvar_data(
         return Ok(());
     }
 
+    if ty.kind == TypeKind::Struct {
+        let mut current = ty.members.as_ref();
+        while let Some(mem) = current {
+            write_gvar_data(
+                filename,
+                src,
+                &init.children[mem.idx as usize],
+                &mem.ty,
+                buf,
+                offset + mem.offset as usize,
+            )?;
+            current = mem.next.as_ref();
+        }
+        return Ok(());
+    }
+
     if let Some(expr) = &init.expr {
         let mut expr = expr.clone();
         let val = eval(filename, src, &mut expr)?;
