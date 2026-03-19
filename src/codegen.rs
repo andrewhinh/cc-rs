@@ -854,6 +854,7 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
             continue;
         }
         result.push_str(&format!("  .globl {}\n", var.name));
+        result.push_str(&format!("  .align {}\n", var.ty.align));
 
         if let Some(init_data) = &var.init_data {
             result.push_str("  .data\n");
