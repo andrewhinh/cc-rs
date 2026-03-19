@@ -1775,6 +1775,21 @@ pub fn func_params(
 ) -> Result<(Type, Token), String> {
     let mut tok = tok.clone();
 
+    // Handle "void" as an empty parameter list: foo(void)
+    if equal(src, &tok, "void") && tok.next.as_ref().is_some_and(|next| equal(src, next, ")")) {
+        let func_ty = func_type(ty);
+        let rest = tok
+            .next
+            .as_ref()
+            .unwrap()
+            .next
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .clone();
+        return Ok((func_ty, rest));
+    }
+
     let mut head = Type {
         kind: TypeKind::Int,
         size: 0,
