@@ -56,6 +56,31 @@ fn current_switch_set(node: Option<Box<Node>>) {
     CURRENT_SWITCH.with(|c| c.set(node));
 }
 
+fn is_end(src: &str, tok: &Token) -> bool {
+    equal(src, tok, "}")
+        || (equal(src, tok, ",") && tok.next.as_ref().is_some_and(|n| equal(src, n, "}")))
+}
+
+fn consume_end(src: &str, tok: &Token) -> (bool, Token) {
+    if equal(src, tok, "}") {
+        return (true, tok.next.as_ref().unwrap().as_ref().clone());
+    }
+    if equal(src, tok, ",") && tok.next.as_ref().is_some_and(|n| equal(src, n, "}")) {
+        return (
+            true,
+            tok.next
+                .as_ref()
+                .unwrap()
+                .next
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .clone(),
+        );
+    }
+    (false, tok.clone())
+}
+
 #[derive(Debug, Clone)]
 struct Initializer {
     ty: Type,
@@ -381,7 +406,11 @@ fn count_array_init_elements(
     let mut tok = tok.clone();
     let mut i = 0;
 
-    while !equal(src, &tok, "}") {
+    loop {
+        let (is_end, _) = consume_end(src, &tok);
+        if is_end {
+            break;
+        }
         if i > 0 {
             tok = skip(filename, src, &tok, ",")?;
         }
@@ -450,8 +479,8 @@ fn array_initializer1(
 
     let mut i = 0;
     loop {
-        let (consumed, new_tok) = consume(src, &tok, "}");
-        if consumed {
+        let (is_end, new_tok) = consume_end(src, &tok);
+        if is_end {
             return Ok(new_tok);
         }
         if i > 0 {
@@ -513,7 +542,7 @@ fn array_initializer2(
 
     let mut tok = tok.clone();
     for i in 0..init.ty.array_len as usize {
-        if equal(src, &tok, "}") {
+        if is_end(src, &tok) {
             break;
         }
         if i > 0 {
@@ -550,8 +579,8 @@ fn struct_initializer1(
     let mut first = true;
 
     loop {
-        let (consumed, new_tok) = consume(src, &tok, "}");
-        if consumed {
+        let (is_end, new_tok) = consume_end(src, &tok);
+        if is_end {
             return Ok(new_tok);
         }
 
@@ -602,7 +631,7 @@ fn struct_initializer2(
 
     let mut mem = init.ty.members.as_ref();
     while let Some(m) = mem {
-        if equal(src, &tok, "}") {
+        if is_end(src, &tok) {
             break;
         }
         if !first {
@@ -647,6 +676,7 @@ fn union_initializer(
             scope_stack,
             tag_scope_stack,
         )?;
+        let (_, tok) = consume(src, &tok, ",");
         return skip(filename, src, &tok, "}");
     }
     initializer2(
@@ -1261,7 +1291,12 @@ pub fn enum_specifier(
     let mut val: i64 = 0;
     let mut i = 0;
 
-    while !equal(src, &tok, "}") {
+    loop {
+        let (is_end, new_tok) = consume_end(src, &tok);
+        if is_end {
+            tok = new_tok;
+            break;
+        }
         if i > 0 {
             tok = skip(filename, src, &tok, ",")?;
         }
@@ -1297,14 +1332,12 @@ pub fn enum_specifier(
         val += 1;
     }
 
-    let rest = tok.next.as_ref().unwrap().as_ref().clone();
-
     if let Some(tag_tok) = tag {
         let tag_name: String = src.chars().skip(tag_tok.loc).take(tag_tok.len).collect();
         push_tag_scope(tag_scope_stack, tag_name, Rc::new(RefCell::new(ty.clone())));
     }
 
-    Ok((ty, rest))
+    Ok((ty, tok))
 }
 
 pub fn get_struct_member(
