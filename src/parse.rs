@@ -420,7 +420,7 @@ fn string_initializer(tok: &Token, init: &mut Initializer) -> Token {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn array_initializer(
+fn array_initializer1(
     filename: &str,
     src: &str,
     tok: &Token,
@@ -485,7 +485,56 @@ fn array_initializer(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn struct_initializer(
+fn array_initializer2(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    init: &mut Initializer,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<Token, String> {
+    if init.is_flexible {
+        let len = count_array_init_elements(
+            filename,
+            src,
+            tok,
+            &init.ty,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let base_ty = init.ty.base.as_ref().unwrap().borrow().clone();
+        let new_ty = Type::new_array(base_ty, len);
+        *init = new_initializer(&new_ty, false);
+    }
+
+    let mut tok = tok.clone();
+    for i in 0..init.ty.array_len as usize {
+        if equal(src, &tok, "}") {
+            break;
+        }
+        if i > 0 {
+            tok = skip(filename, src, &tok, ",")?;
+        }
+        tok = initializer2(
+            filename,
+            src,
+            &tok,
+            &mut init.children[i],
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+    }
+    Ok(tok)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn struct_initializer1(
     filename: &str,
     src: &str,
     tok: &Token,
@@ -538,6 +587,44 @@ fn struct_initializer(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn struct_initializer2(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    init: &mut Initializer,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<Token, String> {
+    let mut tok = tok.clone();
+    let mut first = true;
+
+    let mut mem = init.ty.members.as_ref();
+    while let Some(m) = mem {
+        if equal(src, &tok, "}") {
+            break;
+        }
+        if !first {
+            tok = skip(filename, src, &tok, ",")?;
+        }
+        first = false;
+        tok = initializer2(
+            filename,
+            src,
+            &tok,
+            &mut init.children[m.idx as usize],
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        mem = m.next.as_ref();
+    }
+    Ok(tok)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn union_initializer(
     filename: &str,
     src: &str,
@@ -548,18 +635,30 @@ fn union_initializer(
     scope_stack: &mut Vec<Vec<VarScope>>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<Token, String> {
-    let tok = skip(filename, src, tok, "{")?;
-    let tok = initializer2(
+    if equal(src, tok, "{") {
+        let tok = skip(filename, src, tok, "{")?;
+        let tok = initializer2(
+            filename,
+            src,
+            &tok,
+            &mut init.children[0],
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        return skip(filename, src, &tok, "}");
+    }
+    initializer2(
         filename,
         src,
-        &tok,
+        tok,
         &mut init.children[0],
         locals,
         globals,
         scope_stack,
         tag_scope_stack,
-    )?;
-    skip(filename, src, &tok, "}")
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -578,7 +677,19 @@ fn initializer2(
     }
 
     if init.ty.kind == TypeKind::Array {
-        return array_initializer(
+        if equal(src, tok, "{") {
+            return array_initializer1(
+                filename,
+                src,
+                tok,
+                init,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            );
+        }
+        return array_initializer2(
             filename,
             src,
             tok,
@@ -591,24 +702,36 @@ fn initializer2(
     }
 
     if init.ty.kind == TypeKind::Struct {
-        if !equal(src, tok, "{") {
-            let (expr_node, tok) = assign(
+        if equal(src, tok, "{") {
+            return struct_initializer1(
                 filename,
                 src,
                 tok,
+                init,
                 locals,
                 globals,
                 scope_stack,
                 tag_scope_stack,
-            )?;
-            let mut expr_node = expr_node;
-            add_type(&mut expr_node);
-            if expr_node.ty.as_ref().unwrap().kind == TypeKind::Struct {
-                init.expr = Some(expr_node);
-                return Ok(tok);
-            }
+            );
         }
-        return struct_initializer(
+
+        let (expr_node, new_tok) = assign(
+            filename,
+            src,
+            tok,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let mut expr_node = expr_node;
+        add_type(&mut expr_node);
+        if expr_node.ty.as_ref().unwrap().kind == TypeKind::Struct {
+            init.expr = Some(expr_node);
+            return Ok(new_tok);
+        }
+
+        return struct_initializer2(
             filename,
             src,
             tok,
