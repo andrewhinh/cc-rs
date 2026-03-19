@@ -223,7 +223,7 @@ cargo run
 - [x] Emit uninitialized global data to .bss instead of .data
 - [x] Add flexible array member
 - [x] Allow to initialize struct flexible array member
-- [ ] Accept void as a parameter list
+- [x] Accept void as a parameter list
 - [ ] Align global variables
 - [ ] Add compound literals
 - [ ] Add bitfield
