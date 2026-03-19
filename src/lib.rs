@@ -303,6 +303,14 @@ impl Type {
 }
 
 #[derive(Debug, Clone)]
+pub struct Relocation {
+    pub next: Option<Box<Relocation>>,
+    pub offset: i64,
+    pub label: String,
+    pub addend: i64,
+}
+
+#[derive(Debug, Clone)]
 pub struct Obj {
     pub name: String,
     pub ty: Type,
@@ -312,6 +320,7 @@ pub struct Obj {
     pub is_definition: bool,
     pub is_static: bool,
     pub init_data: Option<Vec<u8>>,
+    pub rel: Option<Box<Relocation>>,
     pub params: Vec<Obj>,
     pub body: Option<Box<Node>>,
     pub locals: Vec<Obj>,
