@@ -1113,6 +1113,14 @@ pub fn struct_members(
 
     let rest = tok.next.as_ref().unwrap().as_ref().clone();
 
+    if let Some(last) = members.last_mut()
+        && last.ty.kind == TypeKind::Array
+        && last.ty.array_len < 0
+    {
+        last.ty.array_len = 0;
+        last.ty.size = 0;
+    }
+
     if members.is_empty() {
         Ok((None, rest))
     } else {

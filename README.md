@@ -221,7 +221,7 @@ cargo run
 - [x] Allow extraneous braces for scalar initializer
 - [x] Allow extraneous comma at the end of enum or initializer list
 - [x] Emit uninitialized global data to .bss instead of .data
-- [ ] Add flexible array member
+- [x] Add flexible array member
 - [ ] Allow to initialize struct flexible array member
 - [ ] Accept void as a parameter list
 - [ ] Align global variables
