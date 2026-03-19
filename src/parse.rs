@@ -140,7 +140,16 @@ fn new_initializer(ty: &Type, is_flexible: bool) -> Initializer {
 
         let mut current = ty.members.as_ref();
         while let Some(mem) = current {
-            children[mem.idx as usize] = new_initializer(&mem.ty, false);
+            if is_flexible && ty.is_flexible && mem.next.is_none() {
+                children[mem.idx as usize] = Initializer {
+                    ty: mem.ty.clone(),
+                    expr: None,
+                    children: Vec::new(),
+                    is_flexible: true,
+                };
+            } else {
+                children[mem.idx as usize] = new_initializer(&mem.ty, false);
+            }
             current = mem.next.as_ref();
         }
 
@@ -835,6 +844,23 @@ fn initializer(
         scope_stack,
         tag_scope_stack,
     )?;
+
+    if (ty.kind == TypeKind::Struct || ty.kind == TypeKind::Union) && ty.is_flexible {
+        let mut new_ty = copy_struct_type(ty);
+
+        let mut mem = new_ty.members.as_mut();
+        while let Some(m) = mem {
+            if m.next.is_none() {
+                m.ty = init.children[m.idx as usize].ty.clone();
+                new_ty.size += m.ty.size;
+                break;
+            }
+            mem = m.next.as_mut();
+        }
+
+        return Ok((init, new_ty, tok));
+    }
+
     let new_ty = init.ty.clone();
     Ok((init, new_ty, tok))
 }
@@ -1041,7 +1067,7 @@ pub fn struct_members(
     src: &str,
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-) -> Result<(Option<Box<crate::Member>>, Token), String> {
+) -> Result<(Option<Box<crate::Member>>, bool, Token), String> {
     let mut tok = tok.clone();
     let mut members: Vec<crate::Member> = Vec::new();
     let mut idx: i64 = 0;
@@ -1087,16 +1113,18 @@ pub fn struct_members(
 
     let rest = tok.next.as_ref().unwrap().as_ref().clone();
 
+    let mut is_flexible = false;
     if let Some(last) = members.last_mut()
         && last.ty.kind == TypeKind::Array
         && last.ty.array_len < 0
     {
         last.ty.array_len = 0;
         last.ty.size = 0;
+        is_flexible = true;
     }
 
     if members.is_empty() {
-        Ok((None, rest))
+        Ok((None, is_flexible, rest))
     } else {
         let mut current: Option<Box<crate::Member>> = None;
         for mem in members.into_iter().rev() {
@@ -1104,7 +1132,7 @@ pub fn struct_members(
             m.next = current;
             current = Some(Box::new(m));
         }
-        Ok((current, rest))
+        Ok((current, is_flexible, rest))
     }
 }
 
@@ -1153,7 +1181,7 @@ pub fn struct_union_decl(
         Rc::new(RefCell::new(Type::new_struct()))
     };
 
-    let (members, rest) = struct_members(filename, src, &tok, tag_scope_stack)?;
+    let (members, is_flexible, rest) = struct_members(filename, src, &tok, tag_scope_stack)?;
 
     {
         let mut ty = ty_rc.borrow_mut();
@@ -1161,6 +1189,7 @@ pub fn struct_union_decl(
         ty.members = members;
         ty.size = 0;
         ty.align = 1;
+        ty.is_flexible = is_flexible;
     }
 
     Ok((ty_rc, rest))
@@ -1758,6 +1787,7 @@ pub fn func_params(
         array_len: 0,
         members: None,
         origin: None,
+        is_flexible: false,
     };
     let mut cur = &mut head;
     let mut first = true;
@@ -4561,6 +4591,7 @@ pub fn func_type(return_ty: Type) -> Type {
         array_len: 0,
         members: None,
         origin: None,
+        is_flexible: false,
     }
 }
 
@@ -4575,6 +4606,27 @@ pub fn is_integer(ty: &Type) -> bool {
 
 pub fn copy_type(ty: &Type) -> Type {
     ty.clone()
+}
+
+fn copy_struct_type(ty: &Type) -> Type {
+    let mut ty = copy_type(ty);
+
+    let mut new_members: Vec<crate::Member> = Vec::new();
+    let mut current = ty.members.as_ref();
+    while let Some(mem) = current {
+        new_members.push(mem.as_ref().clone());
+        current = mem.next.as_ref();
+    }
+
+    let mut members: Option<Box<crate::Member>> = None;
+    for mem in new_members.into_iter().rev() {
+        let mut m = mem;
+        m.next = members;
+        members = Some(Box::new(m));
+    }
+    ty.members = members;
+
+    ty
 }
 
 pub fn get_common_type(ty1: &Type, ty2: &Type) -> Type {
