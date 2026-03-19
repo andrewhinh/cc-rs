@@ -121,6 +121,7 @@ pub struct Type {
     pub array_len: i64,
     pub members: Option<Box<Member>>,
     pub origin: Option<Rc<RefCell<Type>>>,
+    pub is_flexible: bool,
 }
 
 impl Type {
@@ -137,6 +138,7 @@ impl Type {
             array_len: 0,
             members: None,
             origin: None,
+            is_flexible: false,
         }
     }
 
@@ -153,6 +155,7 @@ impl Type {
             array_len: 0,
             members: None,
             origin: None,
+            is_flexible: false,
         }
     }
 
@@ -169,6 +172,7 @@ impl Type {
             array_len: 0,
             members: None,
             origin: None,
+            is_flexible: false,
         }
     }
 
@@ -185,6 +189,7 @@ impl Type {
             array_len: 0,
             members: None,
             origin: None,
+            is_flexible: false,
         }
     }
 
@@ -201,6 +206,7 @@ impl Type {
             array_len: 0,
             members: None,
             origin: None,
+            is_flexible: false,
         }
     }
 
@@ -217,6 +223,7 @@ impl Type {
             array_len: 0,
             members: None,
             origin: None,
+            is_flexible: false,
         }
     }
 
@@ -233,6 +240,7 @@ impl Type {
             array_len: 0,
             members: None,
             origin: None,
+            is_flexible: false,
         }
     }
 
@@ -249,6 +257,7 @@ impl Type {
             array_len: 0,
             members: None,
             origin: None,
+            is_flexible: false,
         }
     }
 
@@ -266,6 +275,7 @@ impl Type {
             array_len: len,
             members: None,
             origin: None,
+            is_flexible: false,
         }
     }
 
@@ -282,6 +292,7 @@ impl Type {
             array_len: 0,
             members: None,
             origin: None,
+            is_flexible: false,
         }
     }
 
@@ -298,6 +309,7 @@ impl Type {
             array_len: 0,
             members: None,
             origin: None,
+            is_flexible: false,
         }
     }
 }
