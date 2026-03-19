@@ -862,8 +862,19 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         result.push_str(&format!("{}:\n", var.name));
 
         if let Some(init_data) = &var.init_data {
-            for byte in init_data {
-                result.push_str(&format!("  .byte {}\n", byte));
+            let mut rel = var.rel.clone();
+            let mut pos = 0;
+            while pos < var.ty.size as usize {
+                if let Some(ref r) = rel
+                    && r.offset as usize == pos
+                {
+                    result.push_str(&format!("  .quad {}+{}\n", r.label, r.addend));
+                    rel = r.next.clone();
+                    pos += 8;
+                    continue;
+                }
+                result.push_str(&format!("  .byte {}\n", init_data[pos]));
+                pos += 1;
             }
         } else {
             result.push_str(&format!("  .zero {}\n", var.ty.size));

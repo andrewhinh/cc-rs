@@ -309,6 +309,7 @@ pub fn new_var(name: String, ty: Type) -> Obj {
         is_definition: false,
         is_static: false,
         init_data: None,
+        rel: None,
         params: Vec::new(),
         body: None,
         locals: Vec::new(),
@@ -1415,6 +1416,7 @@ fn write_gvar_data(
     ty: &Type,
     buf: &mut [u8],
     offset: usize,
+    rel_head: &mut Option<Box<crate::Relocation>>,
 ) -> Result<(), String> {
     if ty.kind == TypeKind::Array {
         let base_ty = ty.base.as_ref().unwrap().borrow().clone();
@@ -1427,6 +1429,7 @@ fn write_gvar_data(
                 &base_ty,
                 buf,
                 offset + sz * i,
+                rel_head,
             )?;
         }
         return Ok(());
@@ -1442,17 +1445,56 @@ fn write_gvar_data(
                 &mem.ty,
                 buf,
                 offset + mem.offset as usize,
+                rel_head,
             )?;
             current = mem.next.as_ref();
         }
         return Ok(());
     }
 
-    if let Some(expr) = &init.expr {
-        let mut expr = expr.clone();
-        let val = eval(filename, src, &mut expr)?;
-        write_buf(buf, offset, val as u64, ty.size);
+    if ty.kind == TypeKind::Union {
+        let first_member_ty = &ty.members.as_ref().unwrap().ty;
+        return write_gvar_data(
+            filename,
+            src,
+            &init.children[0],
+            first_member_ty,
+            buf,
+            offset,
+            rel_head,
+        );
     }
+
+    if init.expr.is_none() {
+        return Ok(());
+    }
+
+    let mut expr = init.expr.as_ref().unwrap().clone();
+    let mut label: Option<String> = None;
+    let val = eval2(filename, src, &mut expr, Some(&mut label))?;
+
+    if label.is_none() {
+        write_buf(buf, offset, val as u64, ty.size);
+        return Ok(());
+    }
+
+    let rel = crate::Relocation {
+        next: None,
+        offset: offset as i64,
+        label: label.unwrap(),
+        addend: val,
+    };
+
+    if let Some(head) = rel_head {
+        let mut cur = head;
+        while cur.next.is_some() {
+            cur = cur.next.as_mut().unwrap();
+        }
+        cur.next = Some(Box::new(rel));
+    } else {
+        *rel_head = Some(Box::new(rel));
+    }
+
     Ok(())
 }
 
@@ -1481,8 +1523,10 @@ fn gvar_initializer(
 
     var.ty = new_ty;
     let mut buf = vec![0u8; var.ty.size as usize];
-    write_gvar_data(filename, src, &init, &var.ty, &mut buf, 0)?;
+    let mut rel_head: Option<Box<crate::Relocation>> = None;
+    write_gvar_data(filename, src, &init, &var.ty, &mut buf, 0, &mut rel_head)?;
     var.init_data = Some(buf);
+    var.rel = rel_head;
     Ok(tok)
 }
 
@@ -2658,16 +2702,25 @@ pub fn expr_stmt(
 }
 
 pub fn eval(filename: &str, src: &str, node: &mut Node) -> Result<i64, String> {
+    eval2(filename, src, node, None)
+}
+
+pub fn eval2(
+    filename: &str,
+    src: &str,
+    node: &mut Node,
+    label: Option<&mut Option<String>>,
+) -> Result<i64, String> {
     add_type(node);
 
     match node.kind {
         NodeKind::Add => {
-            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let lhs = eval2(filename, src, node.lhs.as_mut().unwrap(), label)?;
             let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
             Ok(lhs.wrapping_add(rhs))
         }
         NodeKind::Sub => {
-            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let lhs = eval2(filename, src, node.lhs.as_mut().unwrap(), label)?;
             let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
             Ok(lhs.wrapping_sub(rhs))
         }
@@ -2738,12 +2791,12 @@ pub fn eval(filename: &str, src: &str, node: &mut Node) -> Result<i64, String> {
         NodeKind::Cond => {
             let cond = eval(filename, src, node.cond.as_mut().unwrap())?;
             if cond != 0 {
-                eval(filename, src, node.then.as_mut().unwrap())
+                eval2(filename, src, node.then.as_mut().unwrap(), label)
             } else {
-                eval(filename, src, node.els.as_mut().unwrap())
+                eval2(filename, src, node.els.as_mut().unwrap(), label)
             }
         }
-        NodeKind::Comma => eval(filename, src, node.rhs.as_mut().unwrap()),
+        NodeKind::Comma => eval2(filename, src, node.rhs.as_mut().unwrap(), label),
         NodeKind::Not => {
             let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
             Ok((lhs == 0) as i64)
@@ -2763,17 +2816,17 @@ pub fn eval(filename: &str, src: &str, node: &mut Node) -> Result<i64, String> {
             Ok((lhs != 0 || rhs != 0) as i64)
         }
         NodeKind::Cast => {
-            let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
+            let val = eval2(filename, src, node.lhs.as_mut().unwrap(), label)?;
             let ty = node.ty.as_ref().unwrap();
             if is_integer(ty) {
                 match ty.size {
-                    1 => Ok((lhs as u8) as i64),
-                    2 => Ok((lhs as u16) as i64),
-                    4 => Ok((lhs as u32) as i64),
-                    _ => Ok(lhs),
+                    1 => Ok((val as u8) as i64),
+                    2 => Ok((val as u16) as i64),
+                    4 => Ok((val as u32) as i64),
+                    _ => Ok(val),
                 }
             } else if ty.kind == TypeKind::Ptr {
-                Ok(lhs)
+                Ok(val)
             } else {
                 Err(error_at(
                     filename,
@@ -2783,6 +2836,43 @@ pub fn eval(filename: &str, src: &str, node: &mut Node) -> Result<i64, String> {
                 ))
             }
         }
+        NodeKind::Addr => eval_rval(filename, src, node.lhs.as_mut().unwrap(), label),
+        NodeKind::Member => {
+            if label.is_none() {
+                return Err(error_at(
+                    filename,
+                    src,
+                    node.tok_loc,
+                    "not a compile-time constant",
+                ));
+            }
+            let ty = node.ty.as_ref().unwrap();
+            if ty.kind != TypeKind::Array {
+                return Err(error_at(filename, src, node.tok_loc, "invalid initializer"));
+            }
+            let offset = eval_rval(filename, src, node.lhs.as_mut().unwrap(), label)?
+                + node.member.as_ref().unwrap().offset;
+            Ok(offset)
+        }
+        NodeKind::Var => {
+            if label.is_none() {
+                return Err(error_at(
+                    filename,
+                    src,
+                    node.tok_loc,
+                    "not a compile-time constant",
+                ));
+            }
+            let var = node.var.as_ref().unwrap();
+            let ty = &var.ty;
+            if ty.kind != TypeKind::Array && ty.kind != TypeKind::Func {
+                return Err(error_at(filename, src, node.tok_loc, "invalid initializer"));
+            }
+            if let Some(l) = label {
+                *l = Some(var.name.clone());
+            }
+            Ok(0)
+        }
         NodeKind::Num => Ok(node.val),
         _ => Err(error_at(
             filename,
@@ -2790,6 +2880,38 @@ pub fn eval(filename: &str, src: &str, node: &mut Node) -> Result<i64, String> {
             node.tok_loc,
             "not a compile-time constant",
         )),
+    }
+}
+
+fn eval_rval(
+    filename: &str,
+    src: &str,
+    node: &mut Node,
+    label: Option<&mut Option<String>>,
+) -> Result<i64, String> {
+    match node.kind {
+        NodeKind::Var => {
+            let var = node.var.as_ref().unwrap();
+            if var.is_local {
+                return Err(error_at(
+                    filename,
+                    src,
+                    node.tok_loc,
+                    "not a compile-time constant",
+                ));
+            }
+            if let Some(l) = label {
+                *l = Some(var.name.clone());
+            }
+            Ok(0)
+        }
+        NodeKind::Deref => eval2(filename, src, node.lhs.as_mut().unwrap(), label),
+        NodeKind::Member => {
+            let offset = eval_rval(filename, src, node.lhs.as_mut().unwrap(), label)?
+                + node.member.as_ref().unwrap().offset;
+            Ok(offset)
+        }
+        _ => Err(error_at(filename, src, node.tok_loc, "invalid initializer")),
     }
 }
 
