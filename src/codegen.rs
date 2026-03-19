@@ -849,19 +849,16 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
     let mut result = String::new();
     result.push_str(&format!(".file 1 \"{}\"\n", filename));
 
-    let mut has_data = false;
     for var in globals.iter() {
         if var.is_function {
             continue;
         }
-        if !has_data {
-            result.push_str("  .data\n");
-            has_data = true;
-        }
         result.push_str(&format!("  .globl {}\n", var.name));
-        result.push_str(&format!("{}:\n", var.name));
 
         if let Some(init_data) = &var.init_data {
+            result.push_str("  .data\n");
+            result.push_str(&format!("{}:\n", var.name));
+
             let mut rel = var.rel.clone();
             let mut pos = 0;
             while pos < var.ty.size as usize {
@@ -876,9 +873,12 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
                 result.push_str(&format!("  .byte {}\n", init_data[pos]));
                 pos += 1;
             }
-        } else {
-            result.push_str(&format!("  .zero {}\n", var.ty.size));
+            continue;
         }
+
+        result.push_str("  .bss\n");
+        result.push_str(&format!("{}:\n", var.name));
+        result.push_str(&format!("  .zero {}\n", var.ty.size));
     }
 
     for func in globals.iter_mut() {
