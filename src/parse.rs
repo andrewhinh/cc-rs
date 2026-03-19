@@ -756,6 +756,20 @@ fn initializer2(
         );
     }
 
+    if equal(src, tok, "{") {
+        let tok = initializer2(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            init,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        return skip(filename, src, &tok, "}");
+    }
+
     let (expr_node, tok) = assign(
         filename,
         src,
