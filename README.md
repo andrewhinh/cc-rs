@@ -217,7 +217,7 @@ cargo run
 - [x] Add global initializer for scalar and string
 - [x] Add struct initializer for global variable
 - [x] Handle union initializers for global variable
-- [ ] Allow parentheses in initializers to be omitted
+- [x] Allow parentheses in initializers to be omitted
 - [ ] Allow extraneous braces for scalar initializer
 - [ ] Allow extraneous comma at the end of enum or initializer list
 - [ ] Emit uninitialized global data to .bss instead of .data
