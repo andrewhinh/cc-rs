@@ -365,6 +365,7 @@ pub fn new_gvar(name: String, ty: Type) -> Obj {
     let mut var = new_var(name, ty);
     var.is_local = false;
     var.is_definition = true;
+    var.is_static = true;
     var
 }
 
@@ -1801,6 +1802,7 @@ pub fn global_variable(
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
         let mut var = new_gvar(name, ty);
         var.is_definition = !attr.is_extern;
+        var.is_static = attr.is_static;
         if attr.align > 0 {
             var.align = attr.align;
         }
