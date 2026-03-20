@@ -457,4 +457,5 @@ pub struct TagScope {
 pub struct VarAttr {
     pub is_typedef: bool,
     pub is_static: bool,
+    pub is_extern: bool,
 }

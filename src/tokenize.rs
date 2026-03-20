@@ -130,6 +130,7 @@ fn is_keyword(name: &str) -> bool {
             | "switch"
             | "case"
             | "default"
+            | "extern"
     )
 }
 

@@ -151,8 +151,8 @@ cargo run
 - [x] Add <<, >>, <<= and >>=
 - [x] Add ?: operator
 - [x] Add constant expression
-- [ ] Add extern
-- [ ] Handle extern declarations in a block
+- [x] Add extern
+- [x] Handle extern declarations in a block
 - [ ] Detect function redefinition and conflicting redeclarations
 - [ ] Add _Alignof and _Alignas
 - [ ] [GNU] Allow a variable as an operand of _Alignof

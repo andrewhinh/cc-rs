@@ -842,6 +842,7 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
                 &mut globals,
                 &mut tag_scope_stack,
                 &mut scope_stack,
+                &attr,
             )?;
         }
     }
@@ -850,7 +851,7 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
     result.push_str(&format!(".file 1 \"{}\"\n", filename));
 
     for var in globals.iter() {
-        if var.is_function {
+        if var.is_function || !var.is_definition {
             continue;
         }
         result.push_str(&format!("  .globl {}\n", var.name));
