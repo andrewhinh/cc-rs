@@ -354,7 +354,9 @@ pub fn new_var(name: String, ty: Type) -> Obj {
 }
 
 pub fn new_anon_gvar(ty: Type) -> Obj {
-    new_var(new_unique_name(), ty)
+    let mut var = new_var(new_unique_name(), ty);
+    var.is_definition = true;
+    var
 }
 
 pub fn new_string_literal(str_content: &[u8], ty: Type) -> Obj {
@@ -1761,10 +1763,10 @@ fn gvar_initializer(
     var: &mut Obj,
     globals: &mut Vec<Obj>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    _scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut [Vec<VarScope>],
 ) -> Result<Token, String> {
     let mut empty_locals: Vec<Obj> = Vec::new();
-    let mut empty_scope_stack: Vec<Vec<VarScope>> = Vec::new();
+    let mut scope_stack_vec: Vec<Vec<VarScope>> = scope_stack.to_vec();
     let (init, new_ty, tok) = initializer(
         filename,
         src,
@@ -1772,7 +1774,7 @@ fn gvar_initializer(
         &var.ty,
         &mut empty_locals,
         globals,
-        &mut empty_scope_stack,
+        &mut scope_stack_vec,
         tag_scope_stack,
     )?;
 
@@ -4204,15 +4206,29 @@ pub fn cast(
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
     if equal(src, tok, "(") && is_typename(src, tok.next.as_ref().unwrap(), scope_stack) {
+        let start = tok;
         let tok_loc = tok.loc;
-        let (ty, tok) = typename(
+        let (ty, new_tok) = typename(
             filename,
             src,
             tok.next.as_ref().unwrap(),
             tag_scope_stack,
             scope_stack,
         )?;
-        let tok = skip(filename, src, &tok, ")")?;
+        let tok = skip(filename, src, &new_tok, ")")?;
+
+        if equal(src, &tok, "{") {
+            return unary(
+                filename,
+                src,
+                start,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            );
+        }
+
         let (node, tok) = cast(
             filename,
             src,
@@ -4403,6 +4419,7 @@ pub fn unary(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn postfix(
     filename: &str,
     src: &str,
@@ -4412,6 +4429,48 @@ pub fn postfix(
     scope_stack: &mut Vec<Vec<VarScope>>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
+    if equal(src, tok, "(") && is_typename(src, tok.next.as_ref().unwrap(), scope_stack) {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (ty, tok) = typename(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            tag_scope_stack,
+            scope_stack,
+        )?;
+        let tok = skip(filename, src, &tok, ")")?;
+
+        if scope_stack.len() <= 1 {
+            let mut var = new_anon_gvar(ty);
+            let tok = gvar_initializer(
+                filename,
+                src,
+                &tok,
+                &mut var,
+                globals,
+                tag_scope_stack,
+                scope_stack,
+            )?;
+            globals.push(var.clone());
+            return Ok((new_var_node(var, tok_loc, line_no), tok));
+        }
+
+        let var = new_lvar(String::new(), ty, locals, scope_stack);
+        let (lhs, tok) = lvar_initializer(
+            filename,
+            src,
+            &tok,
+            &var.name,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let rhs = new_var_node(var, tok_loc, line_no);
+        return Ok((new_binary(NodeKind::Comma, lhs, rhs, tok_loc, line_no), tok));
+    }
+
     let (mut node, mut tok) = primary(
         filename,
         src,
