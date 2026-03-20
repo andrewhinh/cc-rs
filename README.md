@@ -157,7 +157,7 @@ cargo run
 - [x] Add _Alignof and _Alignas
 - [x] [GNU] Allow a variable as an operand of _Alignof
 - [x] Add static local variables
-- [ ] Add static global variables
+- [x] Add static global variables
 - [ ] Add signed keyword
 - [ ] Add unsigned integral types
 - [ ] Add U, L and LL suffixes
