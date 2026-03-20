@@ -223,7 +223,7 @@ cargo run
 - [x] Allow to initialize struct flexible array member
 - [x] Accept void as a parameter list
 - [x] Align global variables
-- [ ] Add compound literals
+- [x] Add compound literals
 - [ ] Add bitfield
 - [ ] Support global struct bitfield initializer
 - [ ] Handle op=-style assignments to bitfields
