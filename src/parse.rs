@@ -336,8 +336,9 @@ pub fn push_tag_scope(tag_scope_stack: &mut [Vec<TagScope>], name: String, ty: R
 pub fn new_var(name: String, ty: Type) -> Obj {
     Obj {
         name,
-        ty,
+        ty: ty.clone(),
         is_local: false,
+        align: ty.align,
         offset: 0,
         is_function: false,
         is_definition: false,
@@ -1100,9 +1101,16 @@ pub fn struct_members(
     let mut idx: i64 = 0;
 
     while !equal(src, &tok, "}") {
+        let mut attr = VarAttr::default();
         let mut empty_scope: Vec<Vec<VarScope>> = vec![];
-        let (basety, new_tok) =
-            declspec(filename, src, &tok, tag_scope_stack, &mut empty_scope, None)?;
+        let (basety, new_tok) = declspec(
+            filename,
+            src,
+            &tok,
+            tag_scope_stack,
+            &mut empty_scope,
+            Some(&mut attr),
+        )?;
         tok = new_tok;
         let mut first = true;
 
@@ -1124,12 +1132,18 @@ pub fn struct_members(
                 )?
             };
             tok = new_tok;
+            let mem_align = if attr.align > 0 {
+                attr.align
+            } else {
+                mem_ty.align
+            };
             let mem = crate::Member {
                 next: None,
                 ty: mem_ty.clone(),
                 tok: Some(Box::new(token_snapshot(&tok))),
                 name: mem_ty.name.clone(),
                 idx,
+                align: mem_align,
                 offset: 0,
             };
             idx += 1;
@@ -1243,9 +1257,9 @@ pub fn struct_decl(
         let ty = ty_rc.borrow();
         let mut current = ty.members.as_ref();
         while let Some(mem) = current {
-            offset = align_to(offset, mem.ty.align);
-            if max_align < mem.ty.align {
-                max_align = mem.ty.align;
+            offset = align_to(offset, mem.align);
+            if max_align < mem.align {
+                max_align = mem.align;
             }
             offset += mem.ty.size;
             current = mem.next.as_ref();
@@ -1264,7 +1278,7 @@ pub fn struct_decl(
         let mut ty = ty_rc.borrow_mut();
         let mut current = ty.members.as_mut();
         while let Some(mem) = current {
-            offset = align_to(offset, mem.ty.align);
+            offset = align_to(offset, mem.align);
             mem.offset = offset;
             offset += mem.ty.size;
             current = mem.next.as_mut();
@@ -1297,8 +1311,8 @@ pub fn union_decl(
         let ty = ty_rc.borrow();
         let mut current = ty.members.as_ref();
         while let Some(mem) = current {
-            if max_align < mem.ty.align {
-                max_align = mem.ty.align;
+            if max_align < mem.align {
+                max_align = mem.align;
             }
             if max_size < mem.ty.size {
                 max_size = mem.ty.size;
@@ -1496,6 +1510,35 @@ pub fn declspec(
             continue;
         }
 
+        if equal(src, &tok, "_Alignas") {
+            if attr.is_none() {
+                return Err(error_tok(
+                    filename,
+                    src,
+                    &tok,
+                    "_Alignas is not allowed in this context",
+                ));
+            }
+            tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
+
+            if is_typename(src, &tok, scope_stack) {
+                let (align_ty, new_tok) =
+                    typename(filename, src, &tok, tag_scope_stack, scope_stack)?;
+                tok = new_tok;
+                if let Some(a) = attr.as_mut() {
+                    a.align = align_ty.align;
+                }
+            } else {
+                let (val, new_tok) = const_expr(filename, src, &tok, tag_scope_stack, scope_stack)?;
+                tok = new_tok;
+                if let Some(a) = attr.as_mut() {
+                    a.align = val;
+                }
+            }
+            tok = skip(filename, src, &tok, ")")?;
+            continue;
+        }
+
         let ty2 = find_typedef(scope_stack, &tok, src);
         if equal(src, &tok, "struct")
             || equal(src, &tok, "union")
@@ -1579,6 +1622,7 @@ pub fn is_typename(src: &str, tok: &Token, scope_stack: &[Vec<VarScope>]) -> boo
         || equal(src, tok, "enum")
         || equal(src, tok, "static")
         || equal(src, tok, "extern")
+        || equal(src, tok, "_Alignas")
         || find_typedef(scope_stack, tok, src).is_some()
 }
 
@@ -1781,6 +1825,9 @@ pub fn global_variable(
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
         let mut var = new_gvar(name, ty);
         var.is_definition = !attr.is_extern;
+        if attr.align > 0 {
+            var.align = attr.align;
+        }
         if equal(src, &tok, "=") {
             tok = gvar_initializer(
                 filename,
@@ -2058,6 +2105,7 @@ pub fn declaration(
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
+    attr: Option<&VarAttr>,
 ) -> Result<(Node, Token), String> {
     let mut tok = tok.clone();
 
@@ -2117,6 +2165,13 @@ pub fn declaration(
         }
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
         new_lvar(name.clone(), ty, locals, scope_stack);
+
+        if let Some(a) = attr
+            && a.align > 0
+        {
+            let var_idx = locals.iter().position(|v| v.name == name).unwrap();
+            locals[var_idx].align = a.align;
+        }
 
         if equal(src, &tok, "=") {
             let tok_loc = tok.loc;
@@ -2491,6 +2546,7 @@ pub fn compound_stmt(
                 globals,
                 scope_stack,
                 tag_scope_stack,
+                Some(&attr),
             )?;
             tok = new_tok;
             cur.next = Some(Box::new(node));
@@ -2626,6 +2682,7 @@ pub fn stmt(
                 globals,
                 scope_stack,
                 tag_scope_stack,
+                None,
             )?;
             node.init = Some(Box::new(init));
             tok = new_tok;
@@ -4593,6 +4650,15 @@ pub fn primary(
         add_type(&mut node);
         let size = node.ty.as_ref().unwrap().size;
         return Ok((new_num(size, tok_loc, line_no), tok));
+    }
+
+    if equal(src, tok, "_Alignof") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
+        let (ty, tok) = typename(filename, src, &tok, tag_scope_stack, scope_stack)?;
+        let tok = skip(filename, src, &tok, ")")?;
+        return Ok((new_num(ty.align, tok_loc, line_no), tok));
     }
 
     if tok.kind == TokenKind::Ident {

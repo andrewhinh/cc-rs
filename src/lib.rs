@@ -103,6 +103,7 @@ pub struct Member {
     pub tok: Option<Box<Token>>,
     pub name: Option<Box<Token>>,
     pub idx: i64,
+    pub align: i64,
     pub offset: i64,
 }
 
@@ -327,6 +328,7 @@ pub struct Obj {
     pub name: String,
     pub ty: Type,
     pub is_local: bool,
+    pub align: i64,
     pub offset: i64,
     pub is_function: bool,
     pub is_definition: bool,
@@ -458,4 +460,5 @@ pub struct VarAttr {
     pub is_typedef: bool,
     pub is_static: bool,
     pub is_extern: bool,
+    pub align: i64,
 }
