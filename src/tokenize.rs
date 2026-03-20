@@ -131,6 +131,8 @@ fn is_keyword(name: &str) -> bool {
             | "case"
             | "default"
             | "extern"
+            | "_Alignof"
+            | "_Alignas"
     )
 }
 

@@ -855,10 +855,10 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
             continue;
         }
         result.push_str(&format!("  .globl {}\n", var.name));
-        result.push_str(&format!("  .align {}\n", var.ty.align));
 
         if let Some(init_data) = &var.init_data {
             result.push_str("  .data\n");
+            result.push_str(&format!("  .align {}\n", var.align));
             result.push_str(&format!("{}:\n", var.name));
 
             let mut rel = var.rel.clone();
@@ -879,6 +879,7 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         }
 
         result.push_str("  .bss\n");
+        result.push_str(&format!("  .align {}\n", var.align));
         result.push_str(&format!("{}:\n", var.name));
         result.push_str(&format!("  .zero {}\n", var.ty.size));
     }
@@ -890,9 +891,9 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
 
         let mut offset = 0;
         for var in func.locals.iter_mut() {
-            offset = align_to(offset, var.ty.align);
-            var.offset = offset + var.ty.size;
             offset += var.ty.size;
+            offset = align_to(offset, var.align);
+            var.offset = offset;
         }
         let stack_size = align_to(offset, 16);
 
