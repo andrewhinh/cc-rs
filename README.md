@@ -153,7 +153,7 @@ cargo run
 - [x] Handle extern declarations in a block
 - [ ] Detect function redefinition and conflicting redeclarations
 - [x] Add _Alignof and _Alignas
-- [ ] [GNU] Allow a variable as an operand of _Alignof
+- [x] [GNU] Allow a variable as an operand of _Alignof
 - [ ] Add static local variables
 - [ ] Add static global variables
 - [ ] Add signed keyword

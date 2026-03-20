@@ -4625,13 +4625,42 @@ pub fn primary(
         return Ok((new_num(size, tok_loc, line_no), tok));
     }
 
+    if equal(src, tok, "_Alignof")
+        && equal(src, tok.next.as_ref().unwrap(), "(")
+        && is_typename(
+            src,
+            tok.next.as_ref().unwrap().next.as_ref().unwrap(),
+            scope_stack,
+        )
+    {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let (ty, tok) = typename(
+            filename,
+            src,
+            tok.next.as_ref().unwrap().next.as_ref().unwrap(),
+            tag_scope_stack,
+            scope_stack,
+        )?;
+        let tok = skip(filename, src, &tok, ")")?;
+        return Ok((new_num(ty.align, tok_loc, line_no), tok));
+    }
+
     if equal(src, tok, "_Alignof") {
         let tok_loc = tok.loc;
         let line_no = tok.line_no;
-        let tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
-        let (ty, tok) = typename(filename, src, &tok, tag_scope_stack, scope_stack)?;
-        let tok = skip(filename, src, &tok, ")")?;
-        return Ok((new_num(ty.align, tok_loc, line_no), tok));
+        let (mut node, tok) = unary(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        add_type(&mut node);
+        let align = node.ty.as_ref().unwrap().align;
+        return Ok((new_num(align, tok_loc, line_no), tok));
     }
 
     if tok.kind == TokenKind::Ident {
