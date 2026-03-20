@@ -76,7 +76,7 @@ cargo run
 - [x] Add break statement
 - [x] Add continue statement
 - [x] Add switch-case
-- [ ] Add return that doesn't take any value
+- [x] Add return that doesn't take any value
 - [ ] Add do ... while
 - [ ] Make "main" to implicitly return 0
 - [ ] [GNU] Support labels-as-values

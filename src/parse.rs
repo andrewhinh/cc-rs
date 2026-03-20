@@ -2595,10 +2595,16 @@ pub fn stmt(
     if equal(src, tok, "return") {
         let tok_loc = tok.loc;
         let line_no = tok.line_no;
+        let tok = tok.next.as_ref().unwrap();
+        let (consumed, tok) = consume(src, tok, ";");
+        if consumed {
+            let node = new_node(NodeKind::Return, tok_loc, line_no);
+            return Ok((node, tok));
+        }
         let (mut expr_node, tok) = expr(
             filename,
             src,
-            tok.next.as_ref().unwrap(),
+            &tok,
             locals,
             globals,
             scope_stack,
