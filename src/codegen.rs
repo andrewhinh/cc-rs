@@ -630,13 +630,9 @@ fn gen_stmt(
             }
         }
         NodeKind::Return => {
-            gen_expr(
-                node.lhs.as_ref().unwrap(),
-                result,
-                filename,
-                src,
-                current_fn,
-            )?;
+            if let Some(lhs) = node.lhs.as_ref() {
+                gen_expr(lhs, result, filename, src, current_fn)?;
+            }
             result.push_str(&format!("  jmp .L.return.{}\n", current_fn));
         }
         NodeKind::ExprStmt => {
