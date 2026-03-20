@@ -156,7 +156,7 @@ cargo run
 - [ ] Detect function redefinition and conflicting redeclarations
 - [x] Add _Alignof and _Alignas
 - [x] [GNU] Allow a variable as an operand of _Alignof
-- [ ] Add static local variables
+- [x] Add static local variables
 - [ ] Add static global variables
 - [ ] Add signed keyword
 - [ ] Add unsigned integral types

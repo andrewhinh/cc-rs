@@ -2164,6 +2164,35 @@ pub fn declaration(
             ));
         }
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
+
+        if let Some(a) = attr
+            && a.is_static
+        {
+            let mut var = new_anon_gvar(ty.clone());
+            var.is_static = true;
+            var.is_definition = true;
+            if equal(src, &tok, "=") {
+                tok = gvar_initializer(
+                    filename,
+                    src,
+                    tok.next.as_ref().unwrap(),
+                    &mut var,
+                    globals,
+                    tag_scope_stack,
+                    scope_stack,
+                )?;
+            }
+            globals.push(var.clone());
+            scope_stack.last_mut().unwrap().push(VarScope {
+                name,
+                var: Some(var),
+                type_def: None,
+                enum_ty: None,
+                enum_val: 0,
+            });
+            continue;
+        }
+
         new_lvar(name.clone(), ty, locals, scope_stack);
 
         if let Some(a) = attr
