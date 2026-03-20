@@ -854,7 +854,11 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         if var.is_function || !var.is_definition {
             continue;
         }
-        result.push_str(&format!("  .globl {}\n", var.name));
+        if var.is_static {
+            result.push_str(&format!("  .local {}\n", var.name));
+        } else {
+            result.push_str(&format!("  .globl {}\n", var.name));
+        }
 
         if let Some(init_data) = &var.init_data {
             result.push_str("  .data\n");
