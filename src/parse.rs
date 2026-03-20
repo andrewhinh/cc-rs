@@ -361,6 +361,7 @@ pub fn new_lvar(
 pub fn new_gvar(name: String, ty: Type) -> Obj {
     let mut var = new_var(name, ty);
     var.is_local = false;
+    var.is_definition = true;
     var
 }
 
@@ -1440,19 +1441,21 @@ pub fn declspec(
     let mut tok = tok.clone();
 
     while is_typename(src, &tok, scope_stack) {
-        if equal(src, &tok, "typedef") || equal(src, &tok, "static") {
+        if equal(src, &tok, "typedef") || equal(src, &tok, "static") || equal(src, &tok, "extern") {
             if let Some(a) = attr.as_mut() {
                 if equal(src, &tok, "typedef") {
                     a.is_typedef = true;
-                } else {
+                } else if equal(src, &tok, "static") {
                     a.is_static = true;
+                } else {
+                    a.is_extern = true;
                 }
-                if a.is_typedef as i32 + a.is_static as i32 > 1 {
+                if a.is_typedef && a.is_static as i32 + a.is_extern as i32 > 1 {
                     return Err(error_tok(
                         filename,
                         src,
                         &tok,
-                        "typedef and static may not be used together",
+                        "typedef may not be used together with static or extern",
                     ));
                 }
             } else {
@@ -1549,6 +1552,7 @@ pub fn is_typename(src: &str, tok: &Token, scope_stack: &[Vec<VarScope>]) -> boo
         || equal(src, tok, "typedef")
         || equal(src, tok, "enum")
         || equal(src, tok, "static")
+        || equal(src, tok, "extern")
         || find_typedef(scope_stack, tok, src).is_some()
 }
 
@@ -1711,6 +1715,7 @@ fn gvar_initializer(
     Ok(tok)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn global_variable(
     filename: &str,
     src: &str,
@@ -1719,6 +1724,7 @@ pub fn global_variable(
     globals: &mut Vec<Obj>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
     scope_stack: &mut [Vec<VarScope>],
+    attr: &VarAttr,
 ) -> Result<Token, String> {
     let mut tok = tok.clone();
     let mut first = true;
@@ -1748,6 +1754,7 @@ pub fn global_variable(
         }
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
         let mut var = new_gvar(name, ty);
+        var.is_definition = !attr.is_extern;
         if equal(src, &tok, "=") {
             tok = gvar_initializer(
                 filename,
@@ -2417,6 +2424,35 @@ pub fn compound_stmt(
 
             if attr.is_typedef {
                 tok = parse_typedef(filename, src, &tok, basety, scope_stack)?;
+                continue;
+            }
+
+            if is_function(src, &tok)? {
+                let (_, new_tok) = function(
+                    filename,
+                    src,
+                    &tok,
+                    basety,
+                    globals,
+                    tag_scope_stack,
+                    scope_stack,
+                    &attr,
+                )?;
+                tok = new_tok;
+                continue;
+            }
+
+            if attr.is_extern {
+                tok = global_variable(
+                    filename,
+                    src,
+                    &tok,
+                    basety,
+                    globals,
+                    tag_scope_stack,
+                    scope_stack,
+                    &attr,
+                )?;
                 continue;
             }
 
