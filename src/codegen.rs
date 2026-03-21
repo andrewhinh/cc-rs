@@ -513,6 +513,7 @@ fn gen_expr(
         | NodeKind::If
         | NodeKind::For
         | NodeKind::While
+        | NodeKind::Do
         | NodeKind::Comma
         | NodeKind::Cast
         | NodeKind::Cond
@@ -620,6 +621,28 @@ fn gen_stmt(
                 current_fn,
             )?;
             result.push_str(&format!("  jmp .L.begin.{}\n", c));
+            result.push_str(&format!("{}:\n", node.brk_label.as_ref().unwrap()));
+        }
+        NodeKind::Do => {
+            let c = count();
+            result.push_str(&format!(".L.begin.{}:\n", c));
+            gen_stmt(
+                node.then.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            result.push_str(&format!("{}:\n", node.cont_label.as_ref().unwrap()));
+            gen_expr(
+                node.cond.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+            )?;
+            result.push_str("  cmp $0, %rax\n");
+            result.push_str(&format!("  jne .L.begin.{}\n", c));
             result.push_str(&format!("{}:\n", node.brk_label.as_ref().unwrap()));
         }
         NodeKind::Block => {

@@ -133,6 +133,7 @@ fn is_keyword(name: &str) -> bool {
             | "extern"
             | "_Alignof"
             | "_Alignas"
+            | "do"
     )
 }
 

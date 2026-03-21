@@ -2829,6 +2829,51 @@ pub fn stmt(
         cont_label_set(cont);
         return Ok((node, tok));
     }
+    if equal(src, tok, "do") {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let mut node = new_node(NodeKind::Do, tok_loc, line_no);
+
+        let brk = brk_label_get();
+        let cont = cont_label_get();
+        let brk_name = new_unique_name();
+        let cont_name = new_unique_name();
+        brk_label_set(Some(brk_name.clone()));
+        cont_label_set(Some(cont_name.clone()));
+        node.brk_label = Some(brk_name);
+        node.cont_label = Some(cont_name);
+
+        let (then, tok) = stmt(
+            filename,
+            src,
+            tok.next.as_ref().unwrap(),
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+            return_ty,
+        )?;
+        node.then = Some(Box::new(then));
+
+        brk_label_set(brk);
+        cont_label_set(cont);
+
+        let tok = skip(filename, src, &tok, "while")?;
+        let tok = skip(filename, src, &tok, "(")?;
+        let (cond, tok) = expr(
+            filename,
+            src,
+            &tok,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        node.cond = Some(Box::new(cond));
+        let tok = skip(filename, src, &tok, ")")?;
+        let tok = skip(filename, src, &tok, ";")?;
+        return Ok((node, tok));
+    }
     if equal(src, tok, "goto") {
         let tok_loc = tok.loc;
         let line_no = tok.line_no;
@@ -5028,6 +5073,7 @@ pub fn add_type(node: &mut Node) {
         | NodeKind::If
         | NodeKind::For
         | NodeKind::While
+        | NodeKind::Do
         | NodeKind::Block
         | NodeKind::ExprStmt
         | NodeKind::Cast
