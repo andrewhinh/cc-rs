@@ -92,7 +92,7 @@ cargo run
 - [x] Handle return type conversion
 - [x] Handle function argument type conversion
 - [x] Support file-scope functions
-- [ ] Align stack frame to 16 byte boundaries
+- [x] Align stack frame to 16 byte boundaries
 - [ ] Handle a function returning bool, char or short
 - [ ] Allow to call a variadic function
 - [ ] Add va_start to support variadic functions
