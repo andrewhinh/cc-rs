@@ -65,6 +65,7 @@ pub enum NodeKind {
     If,
     For,
     While,
+    Do,
     Block,
     FuncCall,
     ExprStmt,
