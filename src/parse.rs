@@ -1833,7 +1833,6 @@ pub fn func_params(
 ) -> Result<(Type, Token), String> {
     let mut tok = tok.clone();
 
-    // Handle "void" as an empty parameter list: foo(void)
     if equal(src, &tok, "void") && tok.next.as_ref().is_some_and(|next| equal(src, next, ")")) {
         let func_ty = func_type(ty);
         let rest = tok
@@ -1861,9 +1860,11 @@ pub fn func_params(
         members: None,
         origin: None,
         is_flexible: false,
+        is_variadic: false,
     };
     let mut cur = &mut head;
     let mut first = true;
+    let mut is_variadic = false;
 
     while !equal(src, &tok, ")") {
         if !first {
@@ -1871,13 +1872,22 @@ pub fn func_params(
         }
         first = false;
 
+        if equal(src, &tok, "...") {
+            is_variadic = true;
+            tok = tok.next.as_ref().unwrap().as_ref().clone();
+            tok = skip(filename, src, &tok, ")")?;
+            let mut func_ty = func_type(ty);
+            func_ty.params = head.next;
+            func_ty.is_variadic = is_variadic;
+            return Ok((func_ty, tok));
+        }
+
         let (basety, new_tok) = declspec(filename, src, &tok, tag_scope_stack, scope_stack, None)?;
         tok = new_tok;
         let (param_ty, new_tok) =
             declarator(filename, src, &tok, basety, tag_scope_stack, scope_stack)?;
         tok = new_tok;
 
-        // "array of T" is converted to "pointer to T" in parameter context
         let param_ty = if param_ty.kind == TypeKind::Array {
             let name = param_ty.name.clone();
             let mut ptr_ty = Type::new_ptr(param_ty.base.unwrap().borrow().clone());
@@ -1894,6 +1904,7 @@ pub fn func_params(
 
     let mut func_ty = func_type(ty);
     func_ty.params = head.next;
+    func_ty.is_variadic = is_variadic;
     let rest = tok.next.as_ref().unwrap().as_ref().clone();
     Ok((func_ty, rest))
 }
@@ -4879,6 +4890,7 @@ pub fn func_type(return_ty: Type) -> Type {
         members: None,
         origin: None,
         is_flexible: false,
+        is_variadic: false,
     }
 }
 

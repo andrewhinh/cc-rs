@@ -94,7 +94,7 @@ cargo run
 - [x] Support file-scope functions
 - [x] Align stack frame to 16 byte boundaries
 - [x] Handle a function returning bool, char or short
-- [ ] Allow to call a variadic function
+- [x] Allow to call a variadic function
 - [ ] Add va_start to support variadic functions
 - [ ] Check the number of function arguments
 - [ ] Allow to call a function that takes/returns flonums
