@@ -371,6 +371,20 @@ fn gen_expr(
                 result.push_str(&format!("  call {}\n", node.funcname.as_ref().unwrap()));
                 result.push_str("  add $8, %rsp\n");
             }
+
+            let ty = node.ty.as_ref().unwrap();
+            match ty.kind {
+                TypeKind::Bool => {
+                    result.push_str("  movzx %al, %eax\n");
+                }
+                TypeKind::Char => {
+                    result.push_str("  movsbl %al, %eax\n");
+                }
+                TypeKind::Short => {
+                    result.push_str("  movswl %ax, %eax\n");
+                }
+                _ => {}
+            }
             return Ok(());
         }
         NodeKind::StmtExpr => {
