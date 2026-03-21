@@ -10,6 +10,7 @@ fn gen_addr(
     filename: &str,
     src: &str,
     current_fn: &str,
+    depth: &mut i32,
 ) -> Result<(), String> {
     match node.kind {
         NodeKind::Var => {
@@ -27,6 +28,7 @@ fn gen_addr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
         }
         NodeKind::Member => {
@@ -36,6 +38,7 @@ fn gen_addr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             let offset = node.member.as_ref().unwrap().offset;
             result.push_str(&format!("  add ${}, %rax\n", offset));
@@ -47,6 +50,7 @@ fn gen_addr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             gen_addr(
                 node.rhs.as_ref().unwrap(),
@@ -54,6 +58,7 @@ fn gen_addr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
         }
         _ => return Err(error_at(filename, src, node.tok_loc, "not an lvalue")),
@@ -76,8 +81,9 @@ fn load(ty: &Type, result: &mut String) {
     }
 }
 
-fn store(ty: &Type, result: &mut String) {
+fn store(ty: &Type, result: &mut String, depth: &mut i32) {
     result.push_str("  pop %rdi\n");
+    *depth -= 1;
 
     if ty.kind == TypeKind::Struct || ty.kind == TypeKind::Union {
         for i in 0..ty.size {
@@ -177,6 +183,7 @@ fn gen_expr(
     filename: &str,
     src: &str,
     current_fn: &str,
+    depth: &mut i32,
 ) -> Result<(), String> {
     result.push_str(&format!("  .loc 1 {}\n", node.line_no));
 
@@ -195,17 +202,18 @@ fn gen_expr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str("  neg %rax\n");
             return Ok(());
         }
         NodeKind::Var => {
-            gen_addr(node, result, filename, src, current_fn)?;
+            gen_addr(node, result, filename, src, current_fn, depth)?;
             load(node.ty.as_ref().unwrap(), result);
             return Ok(());
         }
         NodeKind::Member => {
-            gen_addr(node, result, filename, src, current_fn)?;
+            gen_addr(node, result, filename, src, current_fn, depth)?;
             load(node.ty.as_ref().unwrap(), result);
             return Ok(());
         }
@@ -216,6 +224,7 @@ fn gen_expr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             return Ok(());
         }
@@ -226,6 +235,7 @@ fn gen_expr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             load(node.ty.as_ref().unwrap(), result);
             return Ok(());
@@ -237,6 +247,7 @@ fn gen_expr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str("  cmp $0, %rax\n");
             result.push_str("  sete %al\n");
@@ -250,6 +261,7 @@ fn gen_expr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str("  not %rax\n");
             return Ok(());
@@ -262,6 +274,7 @@ fn gen_expr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str("  cmp $0, %rax\n");
             result.push_str(&format!("  je .L.false.{}\n", c));
@@ -271,6 +284,7 @@ fn gen_expr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str("  cmp $0, %rax\n");
             result.push_str(&format!("  je .L.false.{}\n", c));
@@ -289,6 +303,7 @@ fn gen_expr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str("  cmp $0, %rax\n");
             result.push_str(&format!("  jne .L.true.{}\n", c));
@@ -298,6 +313,7 @@ fn gen_expr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str("  cmp $0, %rax\n");
             result.push_str(&format!("  jne .L.true.{}\n", c));
@@ -315,16 +331,19 @@ fn gen_expr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str("  push %rax\n");
+            *depth += 1;
             gen_expr(
                 node.rhs.as_ref().unwrap(),
                 result,
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
-            store(node.ty.as_ref().unwrap(), result);
+            store(node.ty.as_ref().unwrap(), result, depth);
             return Ok(());
         }
         NodeKind::FuncCall => {
@@ -332,24 +351,32 @@ fn gen_expr(
             let mut nargs = 0;
             let mut arg = node.args.as_ref();
             while let Some(arg_node) = arg {
-                gen_expr(arg_node, result, filename, src, current_fn)?;
+                gen_expr(arg_node, result, filename, src, current_fn, depth)?;
                 result.push_str("  push %rax\n");
+                *depth += 1;
                 nargs += 1;
                 arg = arg_node.next.as_ref();
             }
 
             for i in (0..nargs).rev() {
                 result.push_str(&format!("  pop {}\n", argreg[i]));
+                *depth -= 1;
             }
 
             result.push_str("  mov $0, %rax\n");
-            result.push_str(&format!("  call {}\n", node.funcname.as_ref().unwrap()));
+            if *depth % 2 == 0 {
+                result.push_str(&format!("  call {}\n", node.funcname.as_ref().unwrap()));
+            } else {
+                result.push_str("  sub $8, %rsp\n");
+                result.push_str(&format!("  call {}\n", node.funcname.as_ref().unwrap()));
+                result.push_str("  add $8, %rsp\n");
+            }
             return Ok(());
         }
         NodeKind::StmtExpr => {
             let mut n = node.body.as_ref();
             while let Some(stmt_node) = n {
-                gen_stmt(stmt_node, result, filename, src, current_fn)?;
+                gen_stmt(stmt_node, result, filename, src, current_fn, depth)?;
                 n = stmt_node.next.as_ref();
             }
             return Ok(());
@@ -361,6 +388,7 @@ fn gen_expr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             gen_expr(
                 node.rhs.as_ref().unwrap(),
@@ -368,6 +396,7 @@ fn gen_expr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             return Ok(());
         }
@@ -378,6 +407,7 @@ fn gen_expr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             cast_type(
                 node.lhs.as_ref().unwrap().ty.as_ref().unwrap(),
@@ -402,6 +432,7 @@ fn gen_expr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str("  cmp $0, %rax\n");
             result.push_str(&format!("  je .L.else.{}\n", c));
@@ -411,6 +442,7 @@ fn gen_expr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str(&format!("  jmp .L.end.{}\n", c));
             result.push_str(&format!(".L.else.{}:\n", c));
@@ -420,6 +452,7 @@ fn gen_expr(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str(&format!(".L.end.{}:\n", c));
             return Ok(());
@@ -433,16 +466,20 @@ fn gen_expr(
         filename,
         src,
         current_fn,
+        depth,
     )?;
     result.push_str("  push %rax\n");
+    *depth += 1;
     gen_expr(
         node.lhs.as_ref().unwrap(),
         result,
         filename,
         src,
         current_fn,
+        depth,
     )?;
     result.push_str("  pop %rdi\n");
+    *depth -= 1;
 
     let lhs_ty = node.lhs.as_ref().unwrap().ty.as_ref().unwrap();
     let (ax, di) = if lhs_ty.kind == TypeKind::Long || lhs_ty.base.is_some() {
@@ -542,6 +579,7 @@ fn gen_stmt(
     filename: &str,
     src: &str,
     current_fn: &str,
+    depth: &mut i32,
 ) -> Result<(), String> {
     result.push_str(&format!("  .loc 1 {}\n", node.line_no));
 
@@ -554,6 +592,7 @@ fn gen_stmt(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str("  cmp $0, %rax\n");
             result.push_str(&format!("  je .L.else.{}\n", c));
@@ -563,11 +602,12 @@ fn gen_stmt(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str(&format!("  jmp .L.end.{}\n", c));
             result.push_str(&format!(".L.else.{}:\n", c));
             if let Some(els) = node.els.as_ref() {
-                gen_stmt(els, result, filename, src, current_fn)?;
+                gen_stmt(els, result, filename, src, current_fn, depth)?;
             }
             result.push_str(&format!(".L.end.{}:\n", c));
         }
@@ -579,10 +619,11 @@ fn gen_stmt(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str(&format!(".L.begin.{}:\n", c));
             if let Some(cond) = node.cond.as_ref() {
-                gen_expr(cond, result, filename, src, current_fn)?;
+                gen_expr(cond, result, filename, src, current_fn, depth)?;
                 result.push_str("  cmp $0, %rax\n");
                 result.push_str(&format!("  je {}\n", node.brk_label.as_ref().unwrap()));
             }
@@ -592,10 +633,11 @@ fn gen_stmt(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str(&format!("{}:\n", node.cont_label.as_ref().unwrap()));
             if let Some(inc) = node.inc.as_ref() {
-                gen_expr(inc, result, filename, src, current_fn)?;
+                gen_expr(inc, result, filename, src, current_fn, depth)?;
             }
             result.push_str(&format!("  jmp .L.begin.{}\n", c));
             result.push_str(&format!("{}:\n", node.brk_label.as_ref().unwrap()));
@@ -610,6 +652,7 @@ fn gen_stmt(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str("  cmp $0, %rax\n");
             result.push_str(&format!("  je {}\n", node.brk_label.as_ref().unwrap()));
@@ -619,6 +662,7 @@ fn gen_stmt(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str(&format!("  jmp .L.begin.{}\n", c));
             result.push_str(&format!("{}:\n", node.brk_label.as_ref().unwrap()));
@@ -632,6 +676,7 @@ fn gen_stmt(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str(&format!("{}:\n", node.cont_label.as_ref().unwrap()));
             gen_expr(
@@ -640,6 +685,7 @@ fn gen_stmt(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str("  cmp $0, %rax\n");
             result.push_str(&format!("  jne .L.begin.{}\n", c));
@@ -648,13 +694,13 @@ fn gen_stmt(
         NodeKind::Block => {
             let mut n = node.body.as_ref();
             while let Some(stmt_node) = n {
-                gen_stmt(stmt_node, result, filename, src, current_fn)?;
+                gen_stmt(stmt_node, result, filename, src, current_fn, depth)?;
                 n = stmt_node.next.as_ref();
             }
         }
         NodeKind::Return => {
             if let Some(lhs) = node.lhs.as_ref() {
-                gen_expr(lhs, result, filename, src, current_fn)?;
+                gen_expr(lhs, result, filename, src, current_fn, depth)?;
             }
             result.push_str(&format!("  jmp .L.return.{}\n", current_fn));
         }
@@ -665,6 +711,7 @@ fn gen_stmt(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
         }
         NodeKind::Goto => {
@@ -678,6 +725,7 @@ fn gen_stmt(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
         }
         NodeKind::Switch => {
@@ -687,6 +735,7 @@ fn gen_stmt(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
 
             let mut case_node = node.case_next.as_ref();
@@ -712,6 +761,7 @@ fn gen_stmt(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
             result.push_str(&format!("{}:\n", node.brk_label.as_ref().unwrap()));
         }
@@ -723,6 +773,7 @@ fn gen_stmt(
                 filename,
                 src,
                 current_fn,
+                depth,
             )?;
         }
         _ => return Err(error_at(filename, src, node.tok_loc, "invalid statement")),
@@ -945,13 +996,16 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
             store_gp(i, var.offset, var.ty.size, &mut result);
         }
 
+        let mut depth: i32 = 0;
         gen_stmt(
             func.body.as_ref().unwrap(),
             &mut result,
             filename,
             src,
             &func.name,
+            &mut depth,
         )?;
+        assert!(depth == 0, "depth should be 0 after function body");
 
         result.push_str(&format!(".L.return.{}:\n", func.name));
         result.push_str("  mov %rbp, %rsp\n");
