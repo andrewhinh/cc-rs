@@ -73,7 +73,8 @@ fn read_escaped_char(chars: &[char], pos: usize) -> Result<(char, usize), String
 
 fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
     let remaining: String = chars[pos..].iter().collect();
-    if remaining.starts_with("<<=") || remaining.starts_with(">>=") {
+    if remaining.starts_with("<<=") || remaining.starts_with(">>=") || remaining.starts_with("...")
+    {
         return Some(3);
     }
     if remaining.starts_with("==")

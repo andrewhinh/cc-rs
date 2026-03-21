@@ -124,6 +124,7 @@ pub struct Type {
     pub members: Option<Box<Member>>,
     pub origin: Option<Rc<RefCell<Type>>>,
     pub is_flexible: bool,
+    pub is_variadic: bool,
 }
 
 impl Type {
@@ -141,6 +142,7 @@ impl Type {
             members: None,
             origin: None,
             is_flexible: false,
+            is_variadic: false,
         }
     }
 
@@ -158,6 +160,7 @@ impl Type {
             members: None,
             origin: None,
             is_flexible: false,
+            is_variadic: false,
         }
     }
 
@@ -175,6 +178,7 @@ impl Type {
             members: None,
             origin: None,
             is_flexible: false,
+            is_variadic: false,
         }
     }
 
@@ -192,6 +196,7 @@ impl Type {
             members: None,
             origin: None,
             is_flexible: false,
+            is_variadic: false,
         }
     }
 
@@ -209,6 +214,7 @@ impl Type {
             members: None,
             origin: None,
             is_flexible: false,
+            is_variadic: false,
         }
     }
 
@@ -226,6 +232,7 @@ impl Type {
             members: None,
             origin: None,
             is_flexible: false,
+            is_variadic: false,
         }
     }
 
@@ -243,6 +250,7 @@ impl Type {
             members: None,
             origin: None,
             is_flexible: false,
+            is_variadic: false,
         }
     }
 
@@ -260,6 +268,7 @@ impl Type {
             members: None,
             origin: None,
             is_flexible: false,
+            is_variadic: false,
         }
     }
 
@@ -278,6 +287,7 @@ impl Type {
             members: None,
             origin: None,
             is_flexible: false,
+            is_variadic: false,
         }
     }
 
@@ -295,6 +305,7 @@ impl Type {
             members: None,
             origin: None,
             is_flexible: false,
+            is_variadic: false,
         }
     }
 
@@ -312,6 +323,7 @@ impl Type {
             members: None,
             origin: None,
             is_flexible: false,
+            is_variadic: false,
         }
     }
 }
