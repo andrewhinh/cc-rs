@@ -1929,6 +1929,10 @@ pub fn func_params(
         cur = cur.next.as_mut().unwrap();
     }
 
+    if head.next.is_none() {
+        is_variadic = true;
+    }
+
     let mut func_ty = func_type(ty);
     func_ty.params = head.next;
     func_ty.is_variadic = is_variadic;
@@ -4708,6 +4712,10 @@ pub fn funcall(
         tok = new_tok;
         add_type(&mut arg);
 
+        if param_ty.is_none() && !ty.is_variadic {
+            return Err(error_tok(filename, src, &tok, "too many arguments"));
+        }
+
         if let Some(pt) = param_ty {
             if pt.kind == TypeKind::Struct || pt.kind == TypeKind::Union {
                 return Err(error_tok(
@@ -4723,6 +4731,10 @@ pub fn funcall(
 
         cur.next = Some(Box::new(arg));
         cur = cur.next.as_mut().unwrap();
+    }
+
+    if param_ty.is_some() {
+        return Err(error_tok(filename, src, &tok, "too few arguments"));
     }
 
     let tok = skip(filename, src, &tok, ")")?;

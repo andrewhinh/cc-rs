@@ -98,7 +98,7 @@ cargo run
 - [x] Handle a function returning bool, char or short
 - [x] Allow to call a variadic function
 - [x] Add va_start to support variadic functions
-- [ ] Check the number of function arguments
+- [x] Check the number of function arguments
 - [ ] Allow to call a function that takes/returns flonums
 - [ ] Allow to define a function that takes/returns flonums
 - [ ] Implement default argument promotion for float
