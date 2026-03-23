@@ -135,6 +135,7 @@ fn is_keyword(name: &str) -> bool {
             | "_Alignof"
             | "_Alignas"
             | "do"
+            | "signed"
     )
 }
 
