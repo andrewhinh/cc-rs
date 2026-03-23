@@ -70,10 +70,11 @@ fn load(ty: &Type, result: &mut String) {
     if ty.kind == TypeKind::Array || ty.kind == TypeKind::Struct || ty.kind == TypeKind::Union {
         return;
     }
+    let insn = if ty.is_unsigned { "movz" } else { "movs" };
     if ty.size == 1 {
-        result.push_str("  movsbl (%rax), %eax\n");
+        result.push_str(&format!("  {}bl (%rax), %eax\n", insn));
     } else if ty.size == 2 {
-        result.push_str("  movswl (%rax), %eax\n");
+        result.push_str(&format!("  {}wl (%rax), %eax\n", insn));
     } else if ty.size == 4 {
         result.push_str("  movsxd (%rax), %rax\n");
     } else {
@@ -124,14 +125,42 @@ const I8: usize = 0;
 const I16: usize = 1;
 const I32: usize = 2;
 const I64: usize = 3;
+const U8: usize = 4;
+const U16: usize = 5;
+const U32: usize = 6;
+const U64: usize = 7;
 
 fn get_type_id(ty: &Type) -> usize {
     match ty.kind {
-        TypeKind::Bool => I8,
-        TypeKind::Char => I8,
-        TypeKind::Short => I16,
-        TypeKind::Int => I32,
-        _ => I64,
+        TypeKind::Bool => U8,
+        TypeKind::Char => {
+            if ty.is_unsigned {
+                U8
+            } else {
+                I8
+            }
+        }
+        TypeKind::Short => {
+            if ty.is_unsigned {
+                U16
+            } else {
+                I16
+            }
+        }
+        TypeKind::Int => {
+            if ty.is_unsigned {
+                U32
+            } else {
+                I32
+            }
+        }
+        _ => {
+            if ty.is_unsigned {
+                U64
+            } else {
+                I64
+            }
+        }
     }
 }
 
@@ -150,23 +179,91 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
     let t1 = get_type_id(from);
     let t2 = get_type_id(to);
 
-    let cast_table: [[Option<&str>; 4]; 4] = [
-        [None, None, None, Some("movsbl %al, %eax")],
+    let i32i8: &str = "movsbl %al, %eax";
+    let i32u8: &str = "movzbl %al, %eax";
+    let i32i16: &str = "movswl %ax, %eax";
+    let i32u16: &str = "movzwl %ax, %eax";
+    let i32i64: &str = "movsxd %eax, %rax";
+    let u32i64: &str = "mov %eax, %eax";
+
+    let cast_table: [[Option<&str>; 8]; 8] = [
         [
-            Some("movsbl %al, %eax"),
             None,
             None,
-            Some("movswl %ax, %eax"),
+            None,
+            Some(i32i64),
+            Some(i32u8),
+            Some(i32u16),
+            None,
+            Some(i32i64),
         ],
         [
-            Some("movsbl %al, %eax"),
-            Some("movswl %ax, %eax"),
+            Some(i32i8),
             None,
-            Some("movsxd %eax, %rax"),
+            None,
+            Some(i32i64),
+            Some(i32u8),
+            Some(i32u16),
+            None,
+            Some(i32i64),
         ],
         [
-            Some("movsbl %al, %eax"),
-            Some("movswl %ax, %eax"),
+            Some(i32i8),
+            Some(i32i16),
+            None,
+            Some(i32i64),
+            Some(i32u8),
+            Some(i32u16),
+            None,
+            Some(i32i64),
+        ],
+        [
+            Some(i32i8),
+            Some(i32i16),
+            None,
+            None,
+            Some(i32u8),
+            Some(i32u16),
+            None,
+            None,
+        ],
+        [
+            Some(i32i8),
+            None,
+            None,
+            Some(i32i64),
+            None,
+            None,
+            None,
+            Some(i32i64),
+        ],
+        [
+            Some(i32i8),
+            Some(i32i16),
+            None,
+            Some(i32i64),
+            Some(i32u8),
+            None,
+            None,
+            Some(i32i64),
+        ],
+        [
+            Some(i32i8),
+            Some(i32i16),
+            None,
+            Some(u32i64),
+            Some(i32u8),
+            Some(i32u16),
+            None,
+            Some(u32i64),
+        ],
+        [
+            Some(i32i8),
+            Some(i32i16),
+            None,
+            None,
+            Some(i32u8),
+            Some(i32u16),
             None,
             None,
         ],
@@ -378,10 +475,18 @@ fn gen_expr(
                     result.push_str("  movzx %al, %eax\n");
                 }
                 TypeKind::Char => {
-                    result.push_str("  movsbl %al, %eax\n");
+                    if ty.is_unsigned {
+                        result.push_str("  movzbl %al, %eax\n");
+                    } else {
+                        result.push_str("  movsbl %al, %eax\n");
+                    }
                 }
                 TypeKind::Short => {
-                    result.push_str("  movswl %ax, %eax\n");
+                    if ty.is_unsigned {
+                        result.push_str("  movzwl %ax, %eax\n");
+                    } else {
+                        result.push_str("  movswl %ax, %eax\n");
+                    }
                 }
                 _ => {}
             }
@@ -496,32 +601,31 @@ fn gen_expr(
     *depth -= 1;
 
     let lhs_ty = node.lhs.as_ref().unwrap().ty.as_ref().unwrap();
-    let (ax, di) = if lhs_ty.kind == TypeKind::Long || lhs_ty.base.is_some() {
-        ("%rax", "%rdi")
+    let (ax, di, dx) = if lhs_ty.kind == TypeKind::Long || lhs_ty.base.is_some() {
+        ("%rax", "%rdi", "%rdx")
     } else {
-        ("%eax", "%edi")
+        ("%eax", "%edi", "%edx")
     };
 
     match node.kind {
         NodeKind::Add => result.push_str(&format!("  add {}, {}\n", di, ax)),
         NodeKind::Sub => result.push_str(&format!("  sub {}, {}\n", di, ax)),
         NodeKind::Mul => result.push_str(&format!("  imul {}, {}\n", di, ax)),
-        NodeKind::Div => {
-            if lhs_ty.size == 8 {
-                result.push_str("  cqo\n");
+        NodeKind::Div | NodeKind::Mod => {
+            if lhs_ty.is_unsigned {
+                result.push_str(&format!("  mov $0, {}\n", dx));
+                result.push_str(&format!("  div {}\n", di));
             } else {
-                result.push_str("  cdq\n");
+                if lhs_ty.size == 8 {
+                    result.push_str("  cqo\n");
+                } else {
+                    result.push_str("  cdq\n");
+                }
+                result.push_str(&format!("  idiv {}\n", di));
             }
-            result.push_str(&format!("  idiv {}\n", di));
-        }
-        NodeKind::Mod => {
-            if lhs_ty.size == 8 {
-                result.push_str("  cqo\n");
-            } else {
-                result.push_str("  cdq\n");
+            if node.kind == NodeKind::Mod {
+                result.push_str("  mov %rdx, %rax\n");
             }
-            result.push_str(&format!("  idiv {}\n", di));
-            result.push_str("  mov %rdx, %rax\n");
         }
         NodeKind::BitAnd => result.push_str(&format!("  and {}, {}\n", di, ax)),
         NodeKind::BitOr => result.push_str(&format!("  or {}, {}\n", di, ax)),
@@ -532,15 +636,31 @@ fn gen_expr(
         }
         NodeKind::Shr => {
             result.push_str("  mov %rdi, %rcx\n");
-            result.push_str(&format!("  sar %cl, {}\n", ax));
+            if lhs_ty.is_unsigned {
+                result.push_str(&format!("  shr %cl, {}\n", ax));
+            } else {
+                result.push_str(&format!("  sar %cl, {}\n", ax));
+            }
         }
         NodeKind::Eq | NodeKind::Ne | NodeKind::Lt | NodeKind::Le => {
             result.push_str(&format!("  cmp {}, {}\n", di, ax));
             match node.kind {
                 NodeKind::Eq => result.push_str("  sete %al\n"),
                 NodeKind::Ne => result.push_str("  setne %al\n"),
-                NodeKind::Lt => result.push_str("  setl %al\n"),
-                NodeKind::Le => result.push_str("  setle %al\n"),
+                NodeKind::Lt => {
+                    if lhs_ty.is_unsigned {
+                        result.push_str("  setb %al\n");
+                    } else {
+                        result.push_str("  setl %al\n");
+                    }
+                }
+                NodeKind::Le => {
+                    if lhs_ty.is_unsigned {
+                        result.push_str("  setbe %al\n");
+                    } else {
+                        result.push_str("  setle %al\n");
+                    }
+                }
                 _ => unreachable!(),
             }
             result.push_str("  movzb %al, %rax\n");

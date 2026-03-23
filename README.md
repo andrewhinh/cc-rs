@@ -159,7 +159,7 @@ cargo run
 - [x] Add static local variables
 - [x] Add static global variables
 - [x] Add signed keyword
-- [ ] Add unsigned integral types
+- [x] Add unsigned integral types
 - [ ] Add U, L and LL suffixes
 - [ ] Use long or ulong instead of int for some expressions
 - [ ] When comparing two pointers, treat them as unsigned
