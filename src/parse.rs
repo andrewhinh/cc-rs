@@ -316,6 +316,7 @@ pub fn new_var(name: String, ty: Type) -> Obj {
         params: Vec::new(),
         body: None,
         locals: Vec::new(),
+        va_area: None,
         stack_size: 0,
         unique_id: new_var_unique_id(),
     }
@@ -2435,6 +2436,16 @@ pub fn function(
     }
 
     fn_obj.params = locals.clone();
+
+    if ty.is_variadic {
+        let va_area = new_lvar(
+            "__va_area__".to_string(),
+            Type::new_array(Type::new_char(), 136),
+            &mut locals,
+            &mut local_scope_stack,
+        );
+        fn_obj.va_area = Some(Box::new(va_area));
+    }
 
     let tok = skip(filename, src, &tok, "{")?;
     let return_ty = ty.return_ty.as_ref().map(|b| b.as_ref());
