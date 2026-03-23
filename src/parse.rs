@@ -1449,10 +1449,19 @@ pub fn declspec(
     const INT: i32 = 1 << 8;
     const LONG: i32 = 1 << 10;
     const OTHER: i32 = 1 << 12;
+    const SIGNED: i32 = 1 << 13;
     const SHORT_INT: i32 = SHORT + INT;
     const LONG_INT: i32 = LONG + INT;
     const LONG_LONG: i32 = LONG + LONG;
     const LONG_LONG_INT: i32 = LONG_LONG + INT;
+    const SIGNED_CHAR: i32 = SIGNED + CHAR;
+    const SIGNED_SHORT: i32 = SIGNED + SHORT;
+    const SIGNED_SHORT_INT: i32 = SIGNED + SHORT_INT;
+    const SIGNED_INT: i32 = SIGNED + INT;
+    const SIGNED_LONG: i32 = SIGNED + LONG;
+    const SIGNED_LONG_INT: i32 = SIGNED + LONG_INT;
+    const SIGNED_LONG_LONG: i32 = SIGNED + LONG_LONG;
+    const SIGNED_LONG_LONG_INT: i32 = SIGNED + LONG_LONG_INT;
 
     let mut ty = Type::new_int();
     let mut counter = 0;
@@ -1567,6 +1576,8 @@ pub fn declspec(
             counter += INT;
         } else if equal(src, &tok, "long") {
             counter += LONG;
+        } else if equal(src, &tok, "signed") {
+            counter |= SIGNED;
         } else {
             unreachable!();
         }
@@ -1574,10 +1585,11 @@ pub fn declspec(
         match counter {
             VOID => ty = Type::new_void(),
             BOOL => ty = Type::new_bool(),
-            CHAR => ty = Type::new_char(),
-            SHORT | SHORT_INT => ty = Type::new_short(),
-            INT => ty = Type::new_int(),
-            LONG | LONG_INT | LONG_LONG | LONG_LONG_INT => ty = Type::new_long(),
+            CHAR | SIGNED_CHAR => ty = Type::new_char(),
+            SHORT | SHORT_INT | SIGNED_SHORT | SIGNED_SHORT_INT => ty = Type::new_short(),
+            INT | SIGNED | SIGNED_INT => ty = Type::new_int(),
+            LONG | LONG_INT | LONG_LONG | LONG_LONG_INT | SIGNED_LONG | SIGNED_LONG_INT
+            | SIGNED_LONG_LONG | SIGNED_LONG_LONG_INT => ty = Type::new_long(),
             _ => return Err(error_tok(filename, src, &tok, "invalid type")),
         }
 
@@ -1601,6 +1613,7 @@ pub fn is_typename(src: &str, tok: &Token, scope_stack: &[Vec<VarScope>]) -> boo
         || equal(src, tok, "static")
         || equal(src, tok, "extern")
         || equal(src, tok, "_Alignas")
+        || equal(src, tok, "signed")
         || find_typedef(scope_stack, tok, src).is_some()
 }
 
