@@ -159,7 +159,7 @@ cargo run
 - [x] Add signed keyword
 - [x] Add unsigned integral types
 - [x] Add U, L and LL suffixes
-- [ ] Use long or ulong instead of int for some expressions
+- [x] Use long or ulong instead of int for some expressions
 - [ ] When comparing two pointers, treat them as unsigned
 - [ ] Handle unsigned types in the constant expression
 - [ ] Ignore const, volatile, auto, register, restrict or _Noreturn.
