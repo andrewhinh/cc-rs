@@ -176,20 +176,20 @@ fn add_line_numbers(src: &str, tok: &mut Token) {
     }
 }
 
-fn read_int_literal(chars: &[char], pos: usize) -> Result<(i64, usize), String> {
+fn read_int_literal(chars: &[char], pos: usize) -> Result<(i64, usize, Type), String> {
     let mut p = pos;
 
     let base = if p + 2 < chars.len()
         && chars[p] == '0'
         && (chars[p + 1] == 'x' || chars[p + 1] == 'X')
-        && chars[p + 2].is_ascii_alphanumeric()
+        && chars[p + 2].is_ascii_hexdigit()
     {
         p += 2;
         16
     } else if p + 2 < chars.len()
         && chars[p] == '0'
         && (chars[p + 1] == 'b' || chars[p + 1] == 'B')
-        && chars[p + 2].is_ascii_alphanumeric()
+        && (chars[p + 2] == '0' || chars[p + 2] == '1')
     {
         p += 2;
         2
@@ -200,14 +200,106 @@ fn read_int_literal(chars: &[char], pos: usize) -> Result<(i64, usize), String> 
     };
 
     let mut num_str = String::new();
-    while p < chars.len() && chars[p].is_ascii_alphanumeric() {
-        num_str.push(chars[p]);
-        p += 1;
+    match base {
+        16 => {
+            while p < chars.len() && chars[p].is_ascii_hexdigit() {
+                num_str.push(chars[p]);
+                p += 1;
+            }
+        }
+        10 => {
+            while p < chars.len() && chars[p].is_ascii_digit() {
+                num_str.push(chars[p]);
+                p += 1;
+            }
+        }
+        8 => {
+            while p < chars.len() && chars[p] >= '0' && chars[p] <= '7' {
+                num_str.push(chars[p]);
+                p += 1;
+            }
+        }
+        2 => {
+            while p < chars.len() && (chars[p] == '0' || chars[p] == '1') {
+                num_str.push(chars[p]);
+                p += 1;
+            }
+        }
+        _ => unreachable!(),
     }
 
     let val = i64::from_str_radix(&num_str, base).map_err(|_| "invalid digit".to_string())?;
 
-    Ok((val, p))
+    let mut l = false;
+    let mut u = false;
+
+    let suffix: String = chars[p..]
+        .iter()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .collect();
+    let suffix_upper = suffix.to_uppercase();
+
+    if suffix_upper == "LLU"
+        || suffix_upper == "ULL"
+        || suffix_upper == "UL"
+        || suffix_upper == "LU"
+    {
+        p += suffix.len();
+        l = true;
+        u = true;
+    } else if suffix_upper == "LL" || suffix_upper == "L" {
+        p += suffix.len();
+        l = true;
+    } else if suffix_upper == "U" {
+        p += suffix.len();
+        u = true;
+    }
+
+    if p < chars.len() && chars[p].is_ascii_alphanumeric() {
+        return Err("invalid digit".to_string());
+    }
+
+    let ty = if base == 10 {
+        if l && u {
+            Type::new_ulong()
+        } else if l {
+            Type::new_long()
+        } else if u {
+            if (val as u64) >> 32 != 0 {
+                Type::new_ulong()
+            } else {
+                Type::new_uint()
+            }
+        } else if (val as u64) >> 31 != 0 {
+            Type::new_long()
+        } else {
+            Type::new_int()
+        }
+    } else if l && u {
+        Type::new_ulong()
+    } else if l {
+        if (val as u64) >> 63 != 0 {
+            Type::new_ulong()
+        } else {
+            Type::new_long()
+        }
+    } else if u {
+        if (val as u64) >> 32 != 0 {
+            Type::new_ulong()
+        } else {
+            Type::new_uint()
+        }
+    } else if (val as u64) >> 63 != 0 {
+        Type::new_ulong()
+    } else if (val as u64) >> 32 != 0 {
+        Type::new_long()
+    } else if (val as u64) >> 31 != 0 {
+        Type::new_uint()
+    } else {
+        Type::new_int()
+    };
+
+    Ok((val, p, ty))
 }
 
 pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
@@ -319,6 +411,7 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
             pos += 1;
             let mut tok = new_token(TokenKind::Num, start, pos);
             tok.val = c;
+            tok.ty = Some(Type::new_int());
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
             continue;
@@ -326,11 +419,12 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
 
         if chars[pos].is_ascii_digit() {
             let start = pos;
-            let (val, end) =
+            let (val, end, ty) =
                 read_int_literal(&chars, pos).map_err(|e| error_at(filename, src, pos, &e))?;
             pos = end;
             let mut tok = new_token(TokenKind::Num, start, pos);
             tok.val = val;
+            tok.ty = Some(ty);
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
             continue;

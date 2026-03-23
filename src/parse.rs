@@ -4943,7 +4943,8 @@ pub fn primary(
     if tok.kind == TokenKind::Num {
         let tok_loc = tok.loc;
         let line_no = tok.line_no;
-        let node = new_num(tok.val, tok_loc, line_no);
+        let mut node = new_num(tok.val, tok_loc, line_no);
+        node.ty = tok.ty.clone();
         return Ok((node, *tok.next.as_ref().unwrap().clone()));
     }
 
