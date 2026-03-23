@@ -986,6 +986,11 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         let stack_size = align_to(offset, 16);
 
         let locals = func.locals.clone();
+        if let Some(va_area) = &mut func.va_area
+            && let Some(lv) = locals.iter().find(|l| l.unique_id == va_area.unique_id)
+        {
+            va_area.offset = lv.offset;
+        }
         if let Some(body) = &mut func.body {
             fix_var_offsets(body, &locals);
         }
@@ -1001,6 +1006,46 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         result.push_str("  push %rbp\n");
         result.push_str("  mov %rsp, %rbp\n");
         result.push_str(&format!("  sub ${}, %rsp\n", stack_size));
+
+        if let Some(va_area) = &func.va_area {
+            let off = va_area.offset;
+            let gp = func.params.len() as i64;
+
+            // va_elem at va_area offset 0:
+            //   0-3: gp_offset
+            //   4-7: fp_offset
+            //   8-15: overflow_arg_area
+            //   16-23: reg_save_area
+            // Saved registers start at va_area offset 24
+
+            // gp_offset at va_area offset 0
+            result.push_str(&format!("  movl ${}, {}(%rbp)\n", gp * 8, off));
+            // fp_offset at va_area offset 4
+            result.push_str(&format!("  movl $0, {}(%rbp)\n", off + 4));
+            // overflow_arg_area at va_area offset 8 = rbp + 16
+            result.push_str("  lea 16(%rbp), %rax\n");
+            result.push_str(&format!("  movq %rax, {}(%rbp)\n", off + 8));
+            // reg_save_area at va_area offset 16
+            result.push_str(&format!("  lea {}(%rbp), %rax\n", off + 24));
+            result.push_str(&format!("  movq %rax, {}(%rbp)\n", off + 16));
+
+            // Save GP registers at va_area + 24 onwards
+            result.push_str(&format!("  movq %rdi, {}(%rbp)\n", off + 24));
+            result.push_str(&format!("  movq %rsi, {}(%rbp)\n", off + 32));
+            result.push_str(&format!("  movq %rdx, {}(%rbp)\n", off + 40));
+            result.push_str(&format!("  movq %rcx, {}(%rbp)\n", off + 48));
+            result.push_str(&format!("  movq %r8, {}(%rbp)\n", off + 56));
+            result.push_str(&format!("  movq %r9, {}(%rbp)\n", off + 64));
+            // Save FP registers
+            result.push_str(&format!("  movsd %xmm0, {}(%rbp)\n", off + 72));
+            result.push_str(&format!("  movsd %xmm1, {}(%rbp)\n", off + 80));
+            result.push_str(&format!("  movsd %xmm2, {}(%rbp)\n", off + 88));
+            result.push_str(&format!("  movsd %xmm3, {}(%rbp)\n", off + 96));
+            result.push_str(&format!("  movsd %xmm4, {}(%rbp)\n", off + 104));
+            result.push_str(&format!("  movsd %xmm5, {}(%rbp)\n", off + 112));
+            result.push_str(&format!("  movsd %xmm6, {}(%rbp)\n", off + 120));
+            result.push_str(&format!("  movsd %xmm7, {}(%rbp)\n", off + 128));
+        }
 
         for (i, var) in func.params.iter_mut().enumerate() {
             let local_var = func.locals.iter().find(|l| l.name == var.name);
