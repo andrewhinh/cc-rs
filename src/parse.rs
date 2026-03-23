@@ -246,6 +246,13 @@ pub fn new_long(val: i64, tok_loc: usize, line_no: usize) -> Node {
     node
 }
 
+pub fn new_ulong(val: i64, tok_loc: usize, line_no: usize) -> Node {
+    let mut node = new_node(NodeKind::Num, tok_loc, line_no);
+    node.val = val;
+    node.ty = Some(Type::new_ulong());
+    node
+}
+
 pub fn new_var_node(var: Obj, tok_loc: usize, line_no: usize) -> Node {
     let mut node = new_node(NodeKind::Var, tok_loc, line_no);
     node.var = Some(Box::new(var.clone()));
@@ -4839,7 +4846,7 @@ pub fn primary(
             scope_stack,
         )?;
         let tok = skip(filename, src, &tok, ")")?;
-        return Ok((new_num(ty.size, tok_loc, line_no), tok));
+        return Ok((new_ulong(ty.size, tok_loc, line_no), tok));
     }
 
     if equal(src, tok, "sizeof") {
@@ -4856,7 +4863,7 @@ pub fn primary(
         )?;
         add_type(&mut node);
         let size = node.ty.as_ref().unwrap().size;
-        return Ok((new_num(size, tok_loc, line_no), tok));
+        return Ok((new_ulong(size, tok_loc, line_no), tok));
     }
 
     if equal(src, tok, "_Alignof")
@@ -4877,7 +4884,7 @@ pub fn primary(
             scope_stack,
         )?;
         let tok = skip(filename, src, &tok, ")")?;
-        return Ok((new_num(ty.align, tok_loc, line_no), tok));
+        return Ok((new_ulong(ty.align, tok_loc, line_no), tok));
     }
 
     if equal(src, tok, "_Alignof") {
@@ -4894,7 +4901,7 @@ pub fn primary(
         )?;
         add_type(&mut node);
         let align = node.ty.as_ref().unwrap().align;
-        return Ok((new_num(align, tok_loc, line_no), tok));
+        return Ok((new_ulong(align, tok_loc, line_no), tok));
     }
 
     if tok.kind == TokenKind::Ident {
@@ -5335,7 +5342,7 @@ pub fn new_sub(
             .borrow()
             .size;
         let mut node = new_binary(NodeKind::Sub, lhs, rhs, tok_loc, line_no);
-        node.ty = Some(Type::new_int());
+        node.ty = Some(Type::new_long());
         let mut result = new_binary(
             NodeKind::Div,
             node,
@@ -5343,7 +5350,7 @@ pub fn new_sub(
             tok_loc,
             line_no,
         );
-        result.ty = Some(Type::new_int());
+        result.ty = Some(Type::new_long());
         return Ok(result);
     }
 
