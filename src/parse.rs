@@ -1450,6 +1450,7 @@ pub fn declspec(
     const LONG: i32 = 1 << 10;
     const OTHER: i32 = 1 << 12;
     const SIGNED: i32 = 1 << 13;
+    const UNSIGNED: i32 = 1 << 14;
     const SHORT_INT: i32 = SHORT + INT;
     const LONG_INT: i32 = LONG + INT;
     const LONG_LONG: i32 = LONG + LONG;
@@ -1462,6 +1463,14 @@ pub fn declspec(
     const SIGNED_LONG_INT: i32 = SIGNED + LONG_INT;
     const SIGNED_LONG_LONG: i32 = SIGNED + LONG_LONG;
     const SIGNED_LONG_LONG_INT: i32 = SIGNED + LONG_LONG_INT;
+    const UNSIGNED_CHAR: i32 = UNSIGNED + CHAR;
+    const UNSIGNED_SHORT: i32 = UNSIGNED + SHORT;
+    const UNSIGNED_SHORT_INT: i32 = UNSIGNED + SHORT_INT;
+    const UNSIGNED_INT: i32 = UNSIGNED + INT;
+    const UNSIGNED_LONG: i32 = UNSIGNED + LONG;
+    const UNSIGNED_LONG_INT: i32 = UNSIGNED + LONG_INT;
+    const UNSIGNED_LONG_LONG: i32 = UNSIGNED + LONG_LONG;
+    const UNSIGNED_LONG_LONG_INT: i32 = UNSIGNED + LONG_LONG_INT;
 
     let mut ty = Type::new_int();
     let mut counter = 0;
@@ -1578,6 +1587,8 @@ pub fn declspec(
             counter += LONG;
         } else if equal(src, &tok, "signed") {
             counter |= SIGNED;
+        } else if equal(src, &tok, "unsigned") {
+            counter |= UNSIGNED;
         } else {
             unreachable!();
         }
@@ -1586,10 +1597,16 @@ pub fn declspec(
             VOID => ty = Type::new_void(),
             BOOL => ty = Type::new_bool(),
             CHAR | SIGNED_CHAR => ty = Type::new_char(),
+            UNSIGNED_CHAR => ty = Type::new_uchar(),
             SHORT | SHORT_INT | SIGNED_SHORT | SIGNED_SHORT_INT => ty = Type::new_short(),
+            UNSIGNED_SHORT | UNSIGNED_SHORT_INT => ty = Type::new_ushort(),
             INT | SIGNED | SIGNED_INT => ty = Type::new_int(),
+            UNSIGNED | UNSIGNED_INT => ty = Type::new_uint(),
             LONG | LONG_INT | LONG_LONG | LONG_LONG_INT | SIGNED_LONG | SIGNED_LONG_INT
             | SIGNED_LONG_LONG | SIGNED_LONG_LONG_INT => ty = Type::new_long(),
+            UNSIGNED_LONG | UNSIGNED_LONG_INT | UNSIGNED_LONG_LONG | UNSIGNED_LONG_LONG_INT => {
+                ty = Type::new_ulong()
+            }
             _ => return Err(error_tok(filename, src, &tok, "invalid type")),
         }
 
@@ -1614,6 +1631,7 @@ pub fn is_typename(src: &str, tok: &Token, scope_stack: &[Vec<VarScope>]) -> boo
         || equal(src, tok, "extern")
         || equal(src, tok, "_Alignas")
         || equal(src, tok, "signed")
+        || equal(src, tok, "unsigned")
         || find_typedef(scope_stack, tok, src).is_some()
 }
 
@@ -1865,6 +1883,7 @@ pub fn func_params(
         kind: TypeKind::Int,
         size: 0,
         align: 0,
+        is_unsigned: false,
         base: None,
         name: None,
         return_ty: None,
@@ -4917,6 +4936,7 @@ pub fn func_type(return_ty: Type) -> Type {
         kind: TypeKind::Func,
         size: 0,
         align: 0,
+        is_unsigned: false,
         base: None,
         name: None,
         return_ty: Some(Box::new(return_ty)),
@@ -4968,10 +4988,22 @@ pub fn get_common_type(ty1: &Type, ty2: &Type) -> Type {
     if let Some(base) = &ty1.base {
         return Type::new_ptr(base.borrow().clone());
     }
-    if ty1.size == 8 || ty2.size == 8 {
-        return Type::new_long();
+
+    let mut ty1 = ty1.clone();
+    let mut ty2 = ty2.clone();
+
+    if ty1.size < 4 {
+        ty1 = Type::new_int();
     }
-    Type::new_int()
+    if ty2.size < 4 {
+        ty2 = Type::new_int();
+    }
+
+    if ty1.size != ty2.size {
+        return if ty1.size < ty2.size { ty2 } else { ty1 };
+    }
+
+    if ty2.is_unsigned { ty2 } else { ty1 }
 }
 
 pub fn usual_arith_conv(lhs: &mut Node, rhs: &mut Node) {
