@@ -1982,7 +1982,16 @@ pub fn array_dimensions(
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
     scope_stack: &mut [Vec<VarScope>],
 ) -> Result<(Type, Token), String> {
-    if equal(src, tok, "]") {
+    let mut tok = tok.clone();
+    while equal(src, &tok, "static")
+        || equal(src, &tok, "restrict")
+        || equal(src, &tok, "__restrict")
+        || equal(src, &tok, "__restrict__")
+    {
+        tok = *tok.next.as_ref().unwrap().clone();
+    }
+
+    if equal(src, &tok, "]") {
         let (ty, rest) = type_suffix(
             filename,
             src,
@@ -1994,7 +2003,7 @@ pub fn array_dimensions(
         return Ok((Type::new_array(ty, -1), rest));
     }
 
-    let (sz, tok) = const_expr(filename, src, tok, tag_scope_stack, scope_stack)?;
+    let (sz, tok) = const_expr(filename, src, &tok, tag_scope_stack, scope_stack)?;
     let tok = skip(filename, src, &tok, "]")?;
     let (ty, rest) = type_suffix(filename, src, &tok, ty, tag_scope_stack, scope_stack)?;
     Ok((Type::new_array(ty, sz), rest))
