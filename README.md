@@ -162,7 +162,7 @@ cargo run
 - [x] Add unsigned integral types
 - [x] Add U, L and LL suffixes
 - [x] Use long or ulong instead of int for some expressions
-- [ ] When comparing two pointers, treat them as unsigned
+- [x] When comparing two pointers, treat them as unsigned
 - [ ] Handle unsigned types in the constant expression
 - [ ] Ignore const, volatile, auto, register, restrict or _Noreturn.
 - [ ] Ignore "static" and "restrict" in array-dimensions
