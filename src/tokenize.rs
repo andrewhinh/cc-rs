@@ -137,6 +137,14 @@ fn is_keyword(name: &str) -> bool {
             | "do"
             | "signed"
             | "unsigned"
+            | "const"
+            | "volatile"
+            | "auto"
+            | "register"
+            | "restrict"
+            | "__restrict"
+            | "__restrict__"
+            | "_Noreturn"
     )
 }
 
