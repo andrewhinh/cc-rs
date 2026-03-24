@@ -3170,7 +3170,11 @@ pub fn eval2(
         NodeKind::Div => {
             let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
             let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
-            Ok(lhs.wrapping_div(rhs))
+            if node.ty.as_ref().unwrap().is_unsigned {
+                Ok((lhs as u64 / rhs as u64) as i64)
+            } else {
+                Ok(lhs.wrapping_div(rhs))
+            }
         }
         NodeKind::Neg => {
             let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
@@ -3179,7 +3183,11 @@ pub fn eval2(
         NodeKind::Mod => {
             let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
             let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
-            Ok(lhs % rhs)
+            if node.ty.as_ref().unwrap().is_unsigned {
+                Ok((lhs as u64 % rhs as u64) as i64)
+            } else {
+                Ok(lhs % rhs)
+            }
         }
         NodeKind::BitAnd => {
             let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
@@ -3204,7 +3212,12 @@ pub fn eval2(
         NodeKind::Shr => {
             let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
             let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
-            Ok(lhs >> rhs)
+            let ty = node.ty.as_ref().unwrap();
+            if ty.is_unsigned && ty.size == 8 {
+                Ok((lhs as u64 >> rhs as u64) as i64)
+            } else {
+                Ok(lhs >> rhs)
+            }
         }
         NodeKind::Eq => {
             let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
@@ -3219,12 +3232,20 @@ pub fn eval2(
         NodeKind::Lt => {
             let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
             let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
-            Ok((lhs < rhs) as i64)
+            if node.lhs.as_ref().unwrap().ty.as_ref().unwrap().is_unsigned {
+                Ok(((lhs as u64) < (rhs as u64)) as i64)
+            } else {
+                Ok((lhs < rhs) as i64)
+            }
         }
         NodeKind::Le => {
             let lhs = eval(filename, src, node.lhs.as_mut().unwrap())?;
             let rhs = eval(filename, src, node.rhs.as_mut().unwrap())?;
-            Ok((lhs <= rhs) as i64)
+            if node.lhs.as_ref().unwrap().ty.as_ref().unwrap().is_unsigned {
+                Ok(((lhs as u64) <= (rhs as u64)) as i64)
+            } else {
+                Ok((lhs <= rhs) as i64)
+            }
         }
         NodeKind::Cond => {
             let cond = eval(filename, src, node.cond.as_mut().unwrap())?;
@@ -3258,9 +3279,27 @@ pub fn eval2(
             let ty = node.ty.as_ref().unwrap();
             if is_integer(ty) {
                 match ty.size {
-                    1 => Ok((val as u8) as i64),
-                    2 => Ok((val as u16) as i64),
-                    4 => Ok((val as u32) as i64),
+                    1 => {
+                        if ty.is_unsigned {
+                            Ok((val as u8) as i64)
+                        } else {
+                            Ok((val as i8) as i64)
+                        }
+                    }
+                    2 => {
+                        if ty.is_unsigned {
+                            Ok((val as u16) as i64)
+                        } else {
+                            Ok((val as i16) as i64)
+                        }
+                    }
+                    4 => {
+                        if ty.is_unsigned {
+                            Ok((val as u32) as i64)
+                        } else {
+                            Ok((val as i32) as i64)
+                        }
+                    }
                     _ => Ok(val),
                 }
             } else if ty.kind == TypeKind::Ptr {
