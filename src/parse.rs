@@ -1836,7 +1836,7 @@ pub fn global_variable(
     let mut tok = tok.clone();
     let mut first = true;
 
-    while !equal(src, &tok, ";") {
+    loop {
         if !first {
             tok = skip(filename, src, &tok, ",")?;
         }
@@ -1859,6 +1859,14 @@ pub fn global_variable(
                 "variable has incomplete type",
             ));
         }
+        if ty.name.is_none() {
+            return Err(error_tok(
+                filename,
+                src,
+                ty.name_pos.as_ref().unwrap(),
+                "variable name omitted",
+            ));
+        }
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
         let mut var = new_gvar(name, ty);
         var.is_definition = !attr.is_extern;
@@ -1878,9 +1886,11 @@ pub fn global_variable(
             )?;
         }
         globals.push(var);
-    }
 
-    Ok(*tok.next.as_ref().unwrap().clone())
+        if equal(src, &tok, ";") {
+            return Ok(*tok.next.as_ref().unwrap().clone());
+        }
+    }
 }
 
 pub fn func_params(
@@ -1914,6 +1924,7 @@ pub fn func_params(
         is_unsigned: false,
         base: None,
         name: None,
+        name_pos: None,
         return_ty: None,
         params: None,
         next: None,
@@ -2096,21 +2107,20 @@ pub fn declarator(
         return Ok((ty, rest));
     }
 
-    if tok.kind != TokenKind::Ident {
-        return Err(error_tok(filename, src, &tok, "expected a variable name"));
-    }
+    let name_pos = tok.clone();
+    let (name, tok) = if tok.kind == TokenKind::Ident {
+        let name_tok = tok.clone();
+        let tok = tok.next.as_ref().unwrap().as_ref().clone();
+        (Some(name_tok), tok)
+    } else {
+        (None, tok)
+    };
 
-    let name_tok = tok.clone();
-    let (ty, tok) = type_suffix(
-        filename,
-        src,
-        tok.next.as_ref().unwrap(),
-        ty,
-        tag_scope_stack,
-        scope_stack,
-    )?;
+    let (ty, tok) = type_suffix(filename, src, &tok, ty, tag_scope_stack, scope_stack)?;
+
     let mut ty = ty;
-    ty.name = Some(Box::new(name_tok));
+    ty.name = name.map(Box::new);
+    ty.name_pos = Some(Box::new(name_pos));
     Ok((ty, tok))
 }
 
@@ -2205,13 +2215,13 @@ pub fn declaration(
         default_case: None,
     };
     let mut cur = &mut head;
-    let mut i = 0;
+    let mut first = true;
 
-    while !equal(src, &tok, ";") {
-        if i > 0 {
+    loop {
+        if !first {
             tok = skip(filename, src, &tok, ",")?;
         }
-        i += 1;
+        first = false;
 
         let (ty, new_tok) = declarator(
             filename,
@@ -2226,8 +2236,16 @@ pub fn declaration(
             return Err(error_tok(
                 filename,
                 src,
-                ty.name.as_ref().unwrap(),
+                ty.name_pos.as_ref().unwrap(),
                 "variable declared void",
+            ));
+        }
+        if ty.name.is_none() {
+            return Err(error_tok(
+                filename,
+                src,
+                ty.name_pos.as_ref().unwrap(),
+                "variable name omitted",
             ));
         }
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
@@ -2257,6 +2275,13 @@ pub fn declaration(
                 enum_ty: None,
                 enum_val: 0,
             });
+            if equal(src, &tok, ";") {
+                let tok_loc = tok.loc;
+                let line_no = tok.line_no;
+                let mut node = new_node(NodeKind::Block, tok_loc, line_no);
+                node.body = head.next;
+                return Ok((node, *tok.next.as_ref().unwrap().clone()));
+            }
             continue;
         }
 
@@ -2310,13 +2335,15 @@ pub fn declaration(
                 "variable declared void",
             ));
         }
-    }
 
-    let tok_loc = tok.loc;
-    let line_no = tok.line_no;
-    let mut node = new_node(NodeKind::Block, tok_loc, line_no);
-    node.body = head.next;
-    Ok((node, *tok.next.as_ref().unwrap().clone()))
+        if equal(src, &tok, ";") {
+            let tok_loc = tok.loc;
+            let line_no = tok.line_no;
+            let mut node = new_node(NodeKind::Block, tok_loc, line_no);
+            node.body = head.next;
+            return Ok((node, *tok.next.as_ref().unwrap().clone()));
+        }
+    }
 }
 
 pub fn parse_typedef(
@@ -2329,7 +2356,7 @@ pub fn parse_typedef(
     let mut tok = tok.clone();
     let mut first = true;
 
-    while !equal(src, &tok, ";") {
+    loop {
         if !first {
             tok = skip(filename, src, &tok, ",")?;
         }
@@ -2344,6 +2371,14 @@ pub fn parse_typedef(
             scope_stack,
         )?;
         tok = new_tok;
+        if ty.name.is_none() {
+            return Err(error_tok(
+                filename,
+                src,
+                ty.name_pos.as_ref().unwrap(),
+                "typedef name omitted",
+            ));
+        }
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
         let type_def = if let Some(origin) = &ty.origin {
             origin.clone()
@@ -2357,26 +2392,36 @@ pub fn parse_typedef(
             enum_ty: None,
             enum_val: 0,
         });
-    }
 
-    Ok(*tok.next.as_ref().unwrap().clone())
+        if equal(src, &tok, ";") {
+            return Ok(*tok.next.as_ref().unwrap().clone());
+        }
+    }
 }
 
 pub fn create_param_lvars(
+    filename: &str,
     src: &str,
     param: &Type,
     locals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
-) {
+) -> Result<(), String> {
     let mut current = Some(param);
 
     while let Some(p) = current {
-        if let Some(name_tok) = &p.name {
-            let name = get_ident(src, name_tok).unwrap();
-            new_lvar(name, p.clone(), locals, scope_stack);
+        if p.name.is_none() {
+            return Err(error_tok(
+                filename,
+                src,
+                p.name_pos.as_ref().unwrap(),
+                "parameter name omitted",
+            ));
         }
+        let name = get_ident(src, p.name.as_ref().unwrap())?;
+        new_lvar(name, p.clone(), locals, scope_stack);
         current = p.next.as_ref().map(|b| b.as_ref());
     }
+    Ok(())
 }
 
 fn resolve_goto_labels(filename: &str, src: &str, body: &mut Node) -> Result<(), String> {
@@ -2490,6 +2535,14 @@ pub fn function(
     attr: &VarAttr,
 ) -> Result<(Obj, Token), String> {
     let (ty, tok) = declarator(filename, src, tok, basety, tag_scope_stack, scope_stack)?;
+    if ty.name.is_none() {
+        return Err(error_tok(
+            filename,
+            src,
+            ty.name_pos.as_ref().unwrap(),
+            "function name omitted",
+        ));
+    }
     let name = get_ident(src, ty.name.as_ref().unwrap())?;
 
     let mut fn_obj = new_gvar(name, ty.clone());
@@ -2509,7 +2562,7 @@ pub fn function(
     tag_scope_stack.push(Vec::new());
 
     if let Some(params) = &ty.params {
-        create_param_lvars(src, params, &mut locals, &mut local_scope_stack);
+        create_param_lvars(filename, src, params, &mut locals, &mut local_scope_stack)?;
     }
 
     fn_obj.params = locals.clone();
@@ -5020,6 +5073,7 @@ pub fn func_type(return_ty: Type) -> Type {
         is_unsigned: false,
         base: None,
         name: None,
+        name_pos: None,
         return_ty: Some(Box::new(return_ty)),
         params: None,
         next: None,
