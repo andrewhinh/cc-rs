@@ -1539,6 +1539,19 @@ pub fn declspec(
             continue;
         }
 
+        if equal(src, &tok, "const")
+            || equal(src, &tok, "volatile")
+            || equal(src, &tok, "auto")
+            || equal(src, &tok, "register")
+            || equal(src, &tok, "restrict")
+            || equal(src, &tok, "__restrict")
+            || equal(src, &tok, "__restrict__")
+            || equal(src, &tok, "_Noreturn")
+        {
+            tok = *tok.next.as_ref().unwrap().clone();
+            continue;
+        }
+
         if equal(src, &tok, "_Alignas") {
             if attr.is_none() {
                 return Err(error_tok(
@@ -1665,6 +1678,14 @@ pub fn is_typename(src: &str, tok: &Token, scope_stack: &[Vec<VarScope>]) -> boo
         || equal(src, tok, "_Alignas")
         || equal(src, tok, "signed")
         || equal(src, tok, "unsigned")
+        || equal(src, tok, "const")
+        || equal(src, tok, "volatile")
+        || equal(src, tok, "auto")
+        || equal(src, tok, "register")
+        || equal(src, tok, "restrict")
+        || equal(src, tok, "__restrict")
+        || equal(src, tok, "__restrict__")
+        || equal(src, tok, "_Noreturn")
         || find_typedef(scope_stack, tok, src).is_some()
 }
 
@@ -2038,15 +2059,7 @@ pub fn type_suffix(
     Ok((ty, tok.clone()))
 }
 
-pub fn declarator(
-    filename: &str,
-    src: &str,
-    tok: &Token,
-    mut ty: Type,
-    tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &mut [Vec<VarScope>],
-) -> Result<(Type, Token), String> {
-    let mut tok = tok.clone();
+fn pointers(src: &str, mut tok: Token, mut ty: Type) -> (Token, Type) {
     loop {
         let (consumed, new_tok) = consume(src, &tok, "*");
         if !consumed {
@@ -2054,7 +2067,27 @@ pub fn declarator(
         }
         tok = new_tok;
         ty = pointer_to(ty);
+        while equal(src, &tok, "const")
+            || equal(src, &tok, "volatile")
+            || equal(src, &tok, "restrict")
+            || equal(src, &tok, "__restrict")
+            || equal(src, &tok, "__restrict__")
+        {
+            tok = *tok.next.as_ref().unwrap().clone();
+        }
     }
+    (tok, ty)
+}
+
+pub fn declarator(
+    filename: &str,
+    src: &str,
+    tok: &Token,
+    ty: Type,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+    scope_stack: &mut [Vec<VarScope>],
+) -> Result<(Type, Token), String> {
+    let (tok, ty) = pointers(src, tok.clone(), ty);
 
     if equal(src, &tok, "(") {
         let start = tok.clone();
@@ -2102,19 +2135,11 @@ pub fn abstract_declarator(
     filename: &str,
     src: &str,
     tok: &Token,
-    mut ty: Type,
+    ty: Type,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
     scope_stack: &mut [Vec<VarScope>],
 ) -> Result<(Type, Token), String> {
-    let mut tok = tok.clone();
-    loop {
-        let (consumed, new_tok) = consume(src, &tok, "*");
-        if !consumed {
-            break;
-        }
-        tok = new_tok;
-        ty = pointer_to(ty);
-    }
+    let (tok, ty) = pointers(src, tok.clone(), ty);
 
     if equal(src, &tok, "(") {
         let start = tok.clone();
