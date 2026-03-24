@@ -165,7 +165,7 @@ cargo run
 - [x] Ignore const, volatile, auto, register, restrict or _Noreturn.
 - [x] Ignore "static" and "restrict" in array-dimensions
 - [x] Allow to omit parameter name in function declaration
-- [ ] Add floating-point constant
+- [x] Add floating-point constant
 - [ ] Add "float" and "double" local variables and casts
 - [ ] Add flonum ==, !=, < and <=
 - [ ] Add flonum +, -, * and /

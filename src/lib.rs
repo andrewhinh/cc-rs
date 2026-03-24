@@ -27,6 +27,7 @@ pub struct Token {
     pub kind: TokenKind,
     pub next: Option<Box<Token>>,
     pub val: i64,
+    pub fval: f64,
     pub loc: usize,
     pub len: usize,
     pub ty: Option<Type>,
@@ -95,6 +96,8 @@ pub enum TypeKind {
     Array,
     Struct,
     Union,
+    Float,
+    Double,
 }
 
 #[derive(Debug, Clone)]
@@ -430,6 +433,46 @@ impl Type {
             is_variadic: false,
         }
     }
+
+    pub fn new_float() -> Type {
+        Type {
+            kind: TypeKind::Float,
+            size: 4,
+            align: 4,
+            is_unsigned: false,
+            base: None,
+            name: None,
+            name_pos: None,
+            return_ty: None,
+            params: None,
+            next: None,
+            array_len: 0,
+            members: None,
+            origin: None,
+            is_flexible: false,
+            is_variadic: false,
+        }
+    }
+
+    pub fn new_double() -> Type {
+        Type {
+            kind: TypeKind::Double,
+            size: 8,
+            align: 8,
+            is_unsigned: false,
+            base: None,
+            name: None,
+            name_pos: None,
+            return_ty: None,
+            params: None,
+            next: None,
+            array_len: 0,
+            members: None,
+            origin: None,
+            is_flexible: false,
+            is_variadic: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -481,6 +524,7 @@ pub struct Node {
     pub args: Option<Box<Node>>,
     pub var: Option<Box<Obj>>,
     pub val: i64,
+    pub fval: f64,
     pub member: Option<Box<Member>>,
     pub label: Option<String>,
     pub unique_label: Option<String>,
@@ -544,6 +588,10 @@ pub fn error_tok(filename: &str, src: &str, tok: &Token, msg: &str) -> String {
 
 pub fn align_to(n: i64, align: i64) -> i64 {
     (n + align - 1) / align * align
+}
+
+pub fn is_flonum(ty: &Type) -> bool {
+    ty.kind == TypeKind::Float || ty.kind == TypeKind::Double
 }
 
 static UNIQUE_ID: AtomicI32 = AtomicI32::new(0);

@@ -289,7 +289,29 @@ fn gen_expr(
             return Ok(());
         }
         NodeKind::Num => {
-            result.push_str(&format!("  mov ${}, %rax\n", node.val));
+            let ty = node.ty.as_ref().unwrap();
+            match ty.kind {
+                TypeKind::Float => {
+                    let bits = node.fval as f32;
+                    let bits_u32 = bits.to_bits();
+                    result.push_str(&format!(
+                        "  mov ${}, %eax # float {}\n",
+                        bits_u32, node.fval
+                    ));
+                    result.push_str("  movq %rax, %xmm0\n");
+                }
+                TypeKind::Double => {
+                    let bits_u64 = node.fval.to_bits();
+                    result.push_str(&format!(
+                        "  mov ${}, %rax # double {}\n",
+                        bits_u64, node.fval
+                    ));
+                    result.push_str("  movq %rax, %xmm0\n");
+                }
+                _ => {
+                    result.push_str(&format!("  mov ${}, %rax\n", node.val));
+                }
+            }
             return Ok(());
         }
         NodeKind::Neg => {

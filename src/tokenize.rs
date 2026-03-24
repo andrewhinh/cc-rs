@@ -5,6 +5,7 @@ pub fn new_token(kind: TokenKind, start: usize, end: usize) -> Token {
         kind,
         next: None,
         val: 0,
+        fval: 0.0,
         loc: start,
         len: end - start,
         ty: None,
@@ -263,10 +264,6 @@ fn read_int_literal(chars: &[char], pos: usize) -> Result<(i64, usize, Type), St
         u = true;
     }
 
-    if p < chars.len() && chars[p].is_ascii_alphanumeric() {
-        return Err("invalid digit".to_string());
-    }
-
     let ty = if base == 10 {
         if l && u {
             Type::new_ulong()
@@ -310,11 +307,149 @@ fn read_int_literal(chars: &[char], pos: usize) -> Result<(i64, usize, Type), St
     Ok((val, p, ty))
 }
 
+fn read_number(chars: &[char], pos: usize) -> Result<(Token, usize), String> {
+    let start = pos;
+
+    if chars[pos] == '.' {
+        let num_str: String = chars[start..]
+            .iter()
+            .take_while(|c| {
+                c.is_ascii_digit()
+                    || **c == '.'
+                    || **c == 'e'
+                    || **c == 'E'
+                    || **c == 'p'
+                    || **c == 'P'
+                    || **c == '+'
+                    || **c == '-'
+            })
+            .collect();
+
+        let mut p = start + num_str.len();
+        let fval = parse_float(&num_str)?;
+
+        let ty = if p < chars.len() && (chars[p] == 'f' || chars[p] == 'F') {
+            p += 1;
+            Type::new_float()
+        } else if p < chars.len() && (chars[p] == 'l' || chars[p] == 'L') {
+            p += 1;
+            Type::new_double()
+        } else {
+            Type::new_double()
+        };
+
+        let mut tok = new_token(TokenKind::Num, start, p);
+        tok.fval = fval;
+        tok.ty = Some(ty);
+        return Ok((tok, p));
+    }
+
+    let (val, end, ty) = read_int_literal(chars, pos)?;
+
+    if end < chars.len() && ['.', 'e', 'E', 'f', 'F', 'p', 'P'].contains(&chars[end]) {
+        let num_str: String = chars[start..]
+            .iter()
+            .take_while(|c| {
+                c.is_ascii_digit()
+                    || **c == '.'
+                    || **c == 'e'
+                    || **c == 'E'
+                    || **c == 'p'
+                    || **c == 'P'
+                    || **c == '+'
+                    || **c == '-'
+                    || **c == 'x'
+                    || **c == 'X'
+            })
+            .collect();
+
+        let mut p = start + num_str.len();
+        let fval = parse_float(&num_str)?;
+
+        let ty = if p < chars.len() && (chars[p] == 'f' || chars[p] == 'F') {
+            p += 1;
+            Type::new_float()
+        } else if p < chars.len() && (chars[p] == 'l' || chars[p] == 'L') {
+            p += 1;
+            Type::new_double()
+        } else {
+            Type::new_double()
+        };
+
+        let mut tok = new_token(TokenKind::Num, start, p);
+        tok.fval = fval;
+        tok.ty = Some(ty);
+        return Ok((tok, p));
+    }
+
+    let mut tok = new_token(TokenKind::Num, start, end);
+    tok.val = val;
+    tok.ty = Some(ty);
+    Ok((tok, end))
+}
+
+fn parse_float(s: &str) -> Result<f64, String> {
+    if s.starts_with("0x") || s.starts_with("0X") {
+        parse_hex_float(s)
+    } else {
+        s.parse::<f64>()
+            .map_err(|_| "invalid floating point number".to_string())
+    }
+}
+
+fn parse_hex_float(s: &str) -> Result<f64, String> {
+    let s = &s[2..];
+    let mut result: f64 = 0.0;
+    let mut pos = 0;
+    let mut has_dot = false;
+    let mut frac_divisor: f64 = 1.0;
+
+    while pos < s.len() {
+        let c = s.chars().nth(pos).unwrap();
+        if c == '.' {
+            has_dot = true;
+            pos += 1;
+            continue;
+        }
+        if c == 'p' || c == 'P' {
+            break;
+        }
+        if let Some(digit) = c.to_digit(16) {
+            result = result * 16.0 + digit as f64;
+            if has_dot {
+                frac_divisor *= 16.0;
+            }
+            pos += 1;
+        } else {
+            break;
+        }
+    }
+
+    result /= frac_divisor;
+
+    if pos < s.len() {
+        let c = s.chars().nth(pos).unwrap();
+        if c == 'p' || c == 'P' {
+            pos += 1;
+            let exp_str: String = s
+                .chars()
+                .skip(pos)
+                .take_while(|c| c.is_ascii_digit() || *c == '+' || *c == '-')
+                .collect();
+            let exp: i32 = exp_str.parse().map_err(|_| "invalid exponent")?;
+            result *= 2_f64.powi(exp);
+        }
+    }
+
+    Ok(result)
+}
+
 pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
     let mut head = Token {
         kind: TokenKind::Eof,
         next: None,
         val: 0,
+        fval: 0.0,
         loc: 0,
         len: 0,
         ty: None,
@@ -425,16 +560,14 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
             continue;
         }
 
-        if chars[pos].is_ascii_digit() {
-            let start = pos;
-            let (val, end, ty) =
-                read_int_literal(&chars, pos).map_err(|e| error_at(filename, src, pos, &e))?;
-            pos = end;
-            let mut tok = new_token(TokenKind::Num, start, pos);
-            tok.val = val;
-            tok.ty = Some(ty);
+        if chars[pos].is_ascii_digit()
+            || (chars[pos] == '.' && pos + 1 < chars.len() && chars[pos + 1].is_ascii_digit())
+        {
+            let (tok, end) =
+                read_number(&chars, pos).map_err(|e| error_at(filename, src, pos, &e))?;
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
+            pos = end;
             continue;
         }
 
