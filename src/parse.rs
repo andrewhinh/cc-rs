@@ -189,6 +189,7 @@ pub fn new_node(kind: NodeKind, tok_loc: usize, line_no: usize) -> Node {
         args: None,
         var: None,
         val: 0,
+        fval: 0.0,
         member: None,
         label: None,
         unique_label: None,
@@ -2231,6 +2232,7 @@ pub fn declaration(
         args: None,
         var: None,
         val: 0,
+        fval: 0.0,
         member: None,
         label: None,
         unique_label: None,
@@ -2484,6 +2486,7 @@ fn resolve_goto_labels(filename: &str, src: &str, body: &mut Node) -> Result<(),
                 kind: TokenKind::Ident,
                 next: None,
                 val: 0,
+                fval: 0.0,
                 loc: goto.tok_loc,
                 len: label_name.len(),
                 ty: None,
@@ -2663,6 +2666,7 @@ pub fn compound_stmt(
         args: None,
         var: None,
         val: 0,
+        fval: 0.0,
         member: None,
         label: None,
         unique_label: None,
@@ -4850,6 +4854,7 @@ pub fn funcall(
         args: None,
         var: None,
         val: 0,
+        fval: 0.0,
         member: None,
         label: None,
         unique_label: None,
@@ -5076,7 +5081,14 @@ pub fn primary(
     if tok.kind == TokenKind::Num {
         let tok_loc = tok.loc;
         let line_no = tok.line_no;
-        let mut node = new_num(tok.val, tok_loc, line_no);
+        let ty = tok.ty.as_ref().unwrap();
+        let mut node = if crate::is_flonum(ty) {
+            let mut n = new_node(NodeKind::Num, tok_loc, line_no);
+            n.fval = tok.fval;
+            n
+        } else {
+            new_num(tok.val, tok_loc, line_no)
+        };
         node.ty = tok.ty.clone();
         return Ok((node, *tok.next.as_ref().unwrap().clone()));
     }
