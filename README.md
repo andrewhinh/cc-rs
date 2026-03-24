@@ -165,7 +165,7 @@ cargo run
 - [x] When comparing two pointers, treat them as unsigned
 - [x] Handle unsigned types in the constant expression
 - [x] Ignore const, volatile, auto, register, restrict or _Noreturn.
-- [ ] Ignore "static" and "restrict" in array-dimensions
+- [x] Ignore "static" and "restrict" in array-dimensions
 - [ ] Allow to omit parameter name in function declaration
 - [ ] Add floating-point constant
 - [ ] Add "float" and "double" local variables and casts
