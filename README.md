@@ -163,7 +163,7 @@ cargo run
 - [x] Add U, L and LL suffixes
 - [x] Use long or ulong instead of int for some expressions
 - [x] When comparing two pointers, treat them as unsigned
-- [ ] Handle unsigned types in the constant expression
+- [x] Handle unsigned types in the constant expression
 - [ ] Ignore const, volatile, auto, register, restrict or _Noreturn.
 - [ ] Ignore "static" and "restrict" in array-dimensions
 - [ ] Allow to omit parameter name in function declaration
