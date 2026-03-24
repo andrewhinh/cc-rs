@@ -169,7 +169,7 @@ cargo run
 - [x] Allow to omit parameter name in function declaration
 - [x] Add floating-point constant
 - [x] Add "float" and "double" local variables and casts
-- [ ] Add flonum ==, !=, < and <=
+- [x] Add flonum ==, !=, < and <=
 - [ ] Add flonum +, -, * and /
 - [ ] Handle flonum for if, while, do, !, ?:, || and &&
 - [ ] Add flonum constant expression

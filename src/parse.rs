@@ -5173,6 +5173,13 @@ pub fn get_common_type(ty1: &Type, ty2: &Type) -> Type {
         return Type::new_ptr(base.borrow().clone());
     }
 
+    if ty1.kind == TypeKind::Double || ty2.kind == TypeKind::Double {
+        return Type::new_double();
+    }
+    if ty1.kind == TypeKind::Float || ty2.kind == TypeKind::Float {
+        return Type::new_float();
+    }
+
     let mut ty1 = ty1.clone();
     let mut ty2 = ty2.clone();
 

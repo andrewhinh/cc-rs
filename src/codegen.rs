@@ -133,6 +133,18 @@ fn cmp_zero(ty: &Type, result: &mut String) {
     }
 }
 
+fn pushf(result: &mut String, depth: &mut i32) {
+    result.push_str("  sub $8, %rsp\n");
+    result.push_str("  movsd %xmm0, (%rsp)\n");
+    *depth += 1;
+}
+
+fn popf(result: &mut String, depth: &mut i32) {
+    result.push_str("  movsd (%rsp), %xmm1\n");
+    result.push_str("  add $8, %rsp\n");
+    *depth -= 1;
+}
+
 fn is_integer(ty: &Type) -> bool {
     ty.kind == TypeKind::Bool
         || ty.kind == TypeKind::Char
@@ -725,6 +737,67 @@ fn gen_expr(
             return Ok(());
         }
         _ => {}
+    }
+
+    let lhs_ty = node.lhs.as_ref().unwrap().ty.as_ref().unwrap();
+    if crate::is_flonum(lhs_ty) {
+        gen_expr(
+            node.rhs.as_ref().unwrap(),
+            result,
+            filename,
+            src,
+            current_fn,
+            depth,
+        )?;
+        pushf(result, depth);
+        gen_expr(
+            node.lhs.as_ref().unwrap(),
+            result,
+            filename,
+            src,
+            current_fn,
+            depth,
+        )?;
+        popf(result, depth);
+
+        let sz = if lhs_ty.kind == TypeKind::Float {
+            "ss"
+        } else {
+            "sd"
+        };
+
+        match node.kind {
+            NodeKind::Eq | NodeKind::Ne | NodeKind::Lt | NodeKind::Le => {
+                result.push_str(&format!("  ucomi{} %xmm0, %xmm1\n", sz));
+
+                match node.kind {
+                    NodeKind::Eq => {
+                        result.push_str("  sete %al\n");
+                        result.push_str("  setnp %dl\n");
+                        result.push_str("  and %dl, %al\n");
+                    }
+                    NodeKind::Ne => {
+                        result.push_str("  setne %al\n");
+                        result.push_str("  setp %dl\n");
+                        result.push_str("  or %dl, %al\n");
+                    }
+                    NodeKind::Lt => {
+                        result.push_str("  seta %al\n");
+                    }
+                    NodeKind::Le => {
+                        result.push_str("  setae %al\n");
+                    }
+                    _ => unreachable!(),
+                }
+
+                result.push_str("  and $1, %al\n");
+                result.push_str("  movzb %al, %rax\n");
+                return Ok(());
+            }
+            _ => {
+                return Err(error_at(filename, src, node.tok_loc, "invalid expression"));
+            }
+        }
     }
 
     gen_expr(
