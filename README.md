@@ -168,7 +168,7 @@ cargo run
 - [x] Ignore "static" and "restrict" in array-dimensions
 - [x] Allow to omit parameter name in function declaration
 - [x] Add floating-point constant
-- [ ] Add "float" and "double" local variables and casts
+- [x] Add "float" and "double" local variables and casts
 - [ ] Add flonum ==, !=, < and <=
 - [ ] Add flonum +, -, * and /
 - [ ] Handle flonum for if, while, do, !, ?:, || and &&

@@ -1482,9 +1482,11 @@ pub fn declspec(
     const SHORT: i32 = 1 << 6;
     const INT: i32 = 1 << 8;
     const LONG: i32 = 1 << 10;
-    const OTHER: i32 = 1 << 12;
-    const SIGNED: i32 = 1 << 13;
-    const UNSIGNED: i32 = 1 << 14;
+    const FLOAT: i32 = 1 << 12;
+    const DOUBLE: i32 = 1 << 14;
+    const OTHER: i32 = 1 << 16;
+    const SIGNED: i32 = 1 << 17;
+    const UNSIGNED: i32 = 1 << 18;
     const SHORT_INT: i32 = SHORT + INT;
     const LONG_INT: i32 = LONG + INT;
     const LONG_LONG: i32 = LONG + LONG;
@@ -1632,6 +1634,10 @@ pub fn declspec(
             counter += INT;
         } else if equal(src, &tok, "long") {
             counter += LONG;
+        } else if equal(src, &tok, "float") {
+            counter += FLOAT;
+        } else if equal(src, &tok, "double") {
+            counter += DOUBLE;
         } else if equal(src, &tok, "signed") {
             counter |= SIGNED;
         } else if equal(src, &tok, "unsigned") {
@@ -1654,6 +1660,8 @@ pub fn declspec(
             UNSIGNED_LONG | UNSIGNED_LONG_INT | UNSIGNED_LONG_LONG | UNSIGNED_LONG_LONG_INT => {
                 ty = Type::new_ulong()
             }
+            FLOAT => ty = Type::new_float(),
+            DOUBLE => ty = Type::new_double(),
             _ => return Err(error_tok(filename, src, &tok, "invalid type")),
         }
 
@@ -1687,6 +1695,8 @@ pub fn is_typename(src: &str, tok: &Token, scope_stack: &[Vec<VarScope>]) -> boo
         || equal(src, tok, "__restrict")
         || equal(src, tok, "__restrict__")
         || equal(src, tok, "_Noreturn")
+        || equal(src, tok, "float")
+        || equal(src, tok, "double")
         || find_typedef(scope_stack, tok, src).is_some()
 }
 

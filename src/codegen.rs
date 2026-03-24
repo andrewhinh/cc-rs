@@ -67,8 +67,17 @@ fn gen_addr(
 }
 
 fn load(ty: &Type, result: &mut String) {
-    if ty.kind == TypeKind::Array || ty.kind == TypeKind::Struct || ty.kind == TypeKind::Union {
-        return;
+    match ty.kind {
+        TypeKind::Array | TypeKind::Struct | TypeKind::Union => return,
+        TypeKind::Float => {
+            result.push_str("  movss (%rax), %xmm0\n");
+            return;
+        }
+        TypeKind::Double => {
+            result.push_str("  movsd (%rax), %xmm0\n");
+            return;
+        }
+        _ => {}
     }
     let insn = if ty.is_unsigned { "movz" } else { "movs" };
     if ty.size == 1 {
@@ -86,12 +95,23 @@ fn store(ty: &Type, result: &mut String, depth: &mut i32) {
     result.push_str("  pop %rdi\n");
     *depth -= 1;
 
-    if ty.kind == TypeKind::Struct || ty.kind == TypeKind::Union {
-        for i in 0..ty.size {
-            result.push_str(&format!("  mov {}(%rax), %r8b\n", i));
-            result.push_str(&format!("  mov %r8b, {}(%rdi)\n", i));
+    match ty.kind {
+        TypeKind::Struct | TypeKind::Union => {
+            for i in 0..ty.size {
+                result.push_str(&format!("  mov {}(%rax), %r8b\n", i));
+                result.push_str(&format!("  mov %r8b, {}(%rdi)\n", i));
+            }
+            return;
         }
-        return;
+        TypeKind::Float => {
+            result.push_str("  movss %xmm0, (%rdi)\n");
+            return;
+        }
+        TypeKind::Double => {
+            result.push_str("  movsd %xmm0, (%rdi)\n");
+            return;
+        }
+        _ => {}
     }
 
     if ty.size == 1 {
@@ -129,6 +149,8 @@ const U8: usize = 4;
 const U16: usize = 5;
 const U32: usize = 6;
 const U64: usize = 7;
+const F32: usize = 8;
+const F64: usize = 9;
 
 fn get_type_id(ty: &Type) -> usize {
     match ty.kind {
@@ -154,6 +176,15 @@ fn get_type_id(ty: &Type) -> usize {
                 I32
             }
         }
+        TypeKind::Long => {
+            if ty.is_unsigned {
+                U64
+            } else {
+                I64
+            }
+        }
+        TypeKind::Float => F32,
+        TypeKind::Double => F64,
         _ => {
             if ty.is_unsigned {
                 U64
@@ -170,10 +201,32 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
     }
 
     if to.kind == TypeKind::Bool {
-        cmp_zero(from, result);
-        result.push_str("  setne %al\n");
-        result.push_str("  movzb %al, %rax\n");
-        return;
+        match from.kind {
+            TypeKind::Float => {
+                result.push_str("  xorps %xmm1, %xmm1\n");
+                result.push_str("  ucomiss %xmm0, %xmm1\n");
+                result.push_str("  setp %al\n");
+                result.push_str("  setne %dl\n");
+                result.push_str("  or %dl, %al\n");
+                result.push_str("  movzb %al, %rax\n");
+                return;
+            }
+            TypeKind::Double => {
+                result.push_str("  xorpd %xmm1, %xmm1\n");
+                result.push_str("  ucomisd %xmm0, %xmm1\n");
+                result.push_str("  setp %al\n");
+                result.push_str("  setne %dl\n");
+                result.push_str("  or %dl, %al\n");
+                result.push_str("  movzb %al, %rax\n");
+                return;
+            }
+            _ => {
+                cmp_zero(from, result);
+                result.push_str("  setne %al\n");
+                result.push_str("  movzb %al, %rax\n");
+                return;
+            }
+        }
     }
 
     let t1 = get_type_id(from);
@@ -184,9 +237,42 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
     let i32i16: &str = "movswl %ax, %eax";
     let i32u16: &str = "movzwl %ax, %eax";
     let i32i64: &str = "movsxd %eax, %rax";
-    let u32i64: &str = "mov %eax, %eax";
+    let i32f32: &str = "cvtsi2ssl %eax, %xmm0";
+    let i32f64: &str = "cvtsi2sdl %eax, %xmm0";
 
-    let cast_table: [[Option<&str>; 8]; 8] = [
+    let u32i64: &str = "mov %eax, %eax";
+    let u32f32: &str = "mov %eax, %eax; cvtsi2ssq %rax, %xmm0";
+    let u32f64: &str = "mov %eax, %eax; cvtsi2sdq %rax, %xmm0";
+
+    let i64f32: &str = "cvtsi2ssq %rax, %xmm0";
+    let i64f64: &str = "cvtsi2sdq %rax, %xmm0";
+
+    let u64f32: &str = "cvtsi2ssq %rax, %xmm0";
+    let u64f64: &str = "test %rax,%rax; js 1f; pxor %xmm0,%xmm0; cvtsi2sd %rax,%xmm0; jmp 2f; 1: \
+                        mov %rax,%rdi; and $1,%eax; pxor %xmm0,%xmm0; shr %rdi; or %rax,%rdi; \
+                        cvtsi2sd %rdi,%xmm0; addsd %xmm0,%xmm0; 2:";
+
+    let f32i8: &str = "cvttss2sil %xmm0, %eax; movsbl %al, %eax";
+    let f32u8: &str = "cvttss2sil %xmm0, %eax; movzbl %al, %eax";
+    let f32i16: &str = "cvttss2sil %xmm0, %eax; movswl %ax, %eax";
+    let f32u16: &str = "cvttss2sil %xmm0, %eax; movzwl %ax, %eax";
+    let f32i32: &str = "cvttss2sil %xmm0, %eax";
+    let f32u32: &str = "cvttss2siq %xmm0, %rax";
+    let f32i64: &str = "cvttss2siq %xmm0, %rax";
+    let f32u64: &str = "cvttss2siq %xmm0, %rax";
+    let f32f64: &str = "cvtss2sd %xmm0, %xmm0";
+
+    let f64i8: &str = "cvttsd2sil %xmm0, %eax; movsbl %al, %eax";
+    let f64u8: &str = "cvttsd2sil %xmm0, %eax; movzbl %al, %eax";
+    let f64i16: &str = "cvttsd2sil %xmm0, %eax; movswl %ax, %eax";
+    let f64u16: &str = "cvttsd2sil %xmm0, %eax; movzwl %ax, %eax";
+    let f64i32: &str = "cvttsd2sil %xmm0, %eax";
+    let f64u32: &str = "cvttsd2siq %xmm0, %rax";
+    let f64f32: &str = "cvtsd2ss %xmm0, %xmm0";
+    let f64i64: &str = "cvttsd2siq %xmm0, %rax";
+    let f64u64: &str = "cvttsd2siq %xmm0, %rax";
+
+    let cast_table: [[Option<&str>; 10]; 10] = [
         [
             None,
             None,
@@ -196,6 +282,8 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             Some(i32u16),
             None,
             Some(i32i64),
+            Some(i32f32),
+            Some(i32f64),
         ],
         [
             Some(i32i8),
@@ -206,6 +294,8 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             Some(i32u16),
             None,
             Some(i32i64),
+            Some(i32f32),
+            Some(i32f64),
         ],
         [
             Some(i32i8),
@@ -216,6 +306,8 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             Some(i32u16),
             None,
             Some(i32i64),
+            Some(i32f32),
+            Some(i32f64),
         ],
         [
             Some(i32i8),
@@ -226,6 +318,8 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             Some(i32u16),
             None,
             None,
+            Some(i64f32),
+            Some(i64f64),
         ],
         [
             Some(i32i8),
@@ -236,6 +330,8 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             None,
             None,
             Some(i32i64),
+            Some(i32f32),
+            Some(i32f64),
         ],
         [
             Some(i32i8),
@@ -246,6 +342,8 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             None,
             None,
             Some(i32i64),
+            Some(i32f32),
+            Some(i32f64),
         ],
         [
             Some(i32i8),
@@ -256,6 +354,8 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             Some(i32u16),
             None,
             Some(u32i64),
+            Some(u32f32),
+            Some(u32f64),
         ],
         [
             Some(i32i8),
@@ -265,6 +365,32 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             Some(i32u8),
             Some(i32u16),
             None,
+            None,
+            Some(u64f32),
+            Some(u64f64),
+        ],
+        [
+            Some(f32i8),
+            Some(f32i16),
+            Some(f32i32),
+            Some(f32i64),
+            Some(f32u8),
+            Some(f32u16),
+            Some(f32u32),
+            Some(f32u64),
+            None,
+            Some(f32f64),
+        ],
+        [
+            Some(f64i8),
+            Some(f64i16),
+            Some(f64i32),
+            Some(f64i64),
+            Some(f64u8),
+            Some(f64u16),
+            Some(f64u32),
+            Some(f64u64),
+            Some(f64f32),
             None,
         ],
     ];

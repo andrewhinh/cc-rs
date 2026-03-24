@@ -146,6 +146,8 @@ fn is_keyword(name: &str) -> bool {
             | "__restrict"
             | "__restrict__"
             | "_Noreturn"
+            | "float"
+            | "double"
     )
 }
 
