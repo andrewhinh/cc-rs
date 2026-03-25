@@ -99,7 +99,7 @@ cargo run
 - [x] Allow to call a variadic function
 - [x] Add va_start to support variadic functions
 - [x] Check the number of function arguments
-- [ ] Allow to call a function that takes/returns flonums
+- [x] Allow to call a function that takes/returns flonums
 - [ ] Allow to define a function that takes/returns flonums
 - [ ] Implement default argument promotion for float
 - [ ] Support variadic function with floating-point parameters
