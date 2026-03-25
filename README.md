@@ -170,7 +170,7 @@ cargo run
 - [x] Add floating-point constant
 - [x] Add "float" and "double" local variables and casts
 - [x] Add flonum ==, !=, < and <=
-- [ ] Add flonum +, -, * and /
+- [x] Add flonum +, -, * and /
 - [ ] Handle flonum for if, while, do, !, ?:, || and &&
 - [ ] Add flonum constant expression
 - [ ] Add "long double" as an alias for "double"

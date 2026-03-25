@@ -313,21 +313,20 @@ fn read_number(chars: &[char], pos: usize) -> Result<(Token, usize), String> {
     let start = pos;
 
     if chars[pos] == '.' {
-        let num_str: String = chars[start..]
-            .iter()
-            .take_while(|c| {
-                c.is_ascii_digit()
-                    || **c == '.'
-                    || **c == 'e'
-                    || **c == 'E'
-                    || **c == 'p'
-                    || **c == 'P'
-                    || **c == '+'
-                    || **c == '-'
-            })
-            .collect();
-
-        let mut p = start + num_str.len();
+        let mut p = start + 1;
+        while p < chars.len() && chars[p].is_ascii_digit() {
+            p += 1;
+        }
+        if p < chars.len() && (chars[p] == 'e' || chars[p] == 'E') {
+            p += 1;
+            if p < chars.len() && (chars[p] == '+' || chars[p] == '-') {
+                p += 1;
+            }
+            while p < chars.len() && chars[p].is_ascii_digit() {
+                p += 1;
+            }
+        }
+        let num_str: String = chars[start..p].iter().collect();
         let fval = parse_float(&num_str)?;
 
         let ty = if p < chars.len() && (chars[p] == 'f' || chars[p] == 'F') {
@@ -349,23 +348,23 @@ fn read_number(chars: &[char], pos: usize) -> Result<(Token, usize), String> {
     let (val, end, ty) = read_int_literal(chars, pos)?;
 
     if end < chars.len() && ['.', 'e', 'E', 'f', 'F', 'p', 'P'].contains(&chars[end]) {
-        let num_str: String = chars[start..]
-            .iter()
-            .take_while(|c| {
-                c.is_ascii_digit()
-                    || **c == '.'
-                    || **c == 'e'
-                    || **c == 'E'
-                    || **c == 'p'
-                    || **c == 'P'
-                    || **c == '+'
-                    || **c == '-'
-                    || **c == 'x'
-                    || **c == 'X'
-            })
-            .collect();
-
-        let mut p = start + num_str.len();
+        let mut p = end;
+        if p < chars.len() && chars[p] == '.' {
+            p += 1;
+            while p < chars.len() && chars[p].is_ascii_digit() {
+                p += 1;
+            }
+        }
+        if p < chars.len() && (chars[p] == 'e' || chars[p] == 'E') {
+            p += 1;
+            if p < chars.len() && (chars[p] == '+' || chars[p] == '-') {
+                p += 1;
+            }
+            while p < chars.len() && chars[p].is_ascii_digit() {
+                p += 1;
+            }
+        }
+        let num_str: String = chars[start..p].iter().collect();
         let fval = parse_float(&num_str)?;
 
         let ty = if p < chars.len() && (chars[p] == 'f' || chars[p] == 'F') {

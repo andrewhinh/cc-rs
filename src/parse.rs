@@ -3405,7 +3405,7 @@ pub fn eval2(
         NodeKind::Cast => {
             let val = eval2(filename, src, node.lhs.as_mut().unwrap(), label)?;
             let ty = node.ty.as_ref().unwrap();
-            if is_integer(ty) {
+            if crate::is_integer(ty) {
                 match ty.size {
                     1 => {
                         if ty.is_unsigned {
@@ -5134,15 +5134,6 @@ pub fn func_type(return_ty: Type) -> Type {
     }
 }
 
-pub fn is_integer(ty: &Type) -> bool {
-    ty.kind == TypeKind::Bool
-        || ty.kind == TypeKind::Char
-        || ty.kind == TypeKind::Short
-        || ty.kind == TypeKind::Int
-        || ty.kind == TypeKind::Long
-        || ty.kind == TypeKind::Enum
-}
-
 pub fn copy_type(ty: &Type) -> Type {
     ty.clone()
 }
@@ -5394,7 +5385,7 @@ pub fn new_add(
     let lhs_ty = lhs.ty.as_ref().unwrap();
     let rhs_ty = rhs.ty.as_ref().unwrap();
 
-    if is_integer(lhs_ty) && is_integer(rhs_ty) {
+    if crate::is_numeric(lhs_ty) && crate::is_numeric(rhs_ty) {
         return Ok(new_binary(NodeKind::Add, lhs, rhs, tok_loc, line_no));
     }
 
@@ -5406,11 +5397,12 @@ pub fn new_add(
         return Err(error_at(filename, src, tok_loc, "invalid operands"));
     }
 
-    if !is_integer(lhs_ty) && !is_integer(rhs_ty) {
+    if !crate::is_integer(lhs_ty) && !crate::is_integer(rhs_ty) {
         return Err(error_at(filename, src, tok_loc, "invalid operands"));
     }
 
-    if is_integer(lhs_ty) && (rhs_ty.kind == TypeKind::Ptr || rhs_ty.kind == TypeKind::Array) {
+    if crate::is_integer(lhs_ty) && (rhs_ty.kind == TypeKind::Ptr || rhs_ty.kind == TypeKind::Array)
+    {
         std::mem::swap(&mut lhs, &mut rhs);
     }
 
@@ -5449,11 +5441,12 @@ pub fn new_sub(
     let lhs_ty = lhs.ty.as_ref().unwrap();
     let rhs_ty = rhs.ty.as_ref().unwrap();
 
-    if is_integer(lhs_ty) && is_integer(rhs_ty) {
+    if crate::is_numeric(lhs_ty) && crate::is_numeric(rhs_ty) {
         return Ok(new_binary(NodeKind::Sub, lhs, rhs, tok_loc, line_no));
     }
 
-    if (lhs_ty.kind == TypeKind::Ptr || lhs_ty.kind == TypeKind::Array) && is_integer(rhs_ty) {
+    if (lhs_ty.kind == TypeKind::Ptr || lhs_ty.kind == TypeKind::Array) && crate::is_integer(rhs_ty)
+    {
         let lhs_ty_clone = lhs.ty.clone();
         let base_size = lhs
             .ty

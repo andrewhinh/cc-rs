@@ -126,7 +126,7 @@ fn store(ty: &Type, result: &mut String, depth: &mut i32) {
 }
 
 fn cmp_zero(ty: &Type, result: &mut String) {
-    if is_integer(ty) && ty.size <= 4 {
+    if crate::is_integer(ty) && ty.size <= 4 {
         result.push_str("  cmp $0, %eax\n");
     } else {
         result.push_str("  cmp $0, %rax\n");
@@ -143,14 +143,6 @@ fn popf(result: &mut String, depth: &mut i32) {
     result.push_str("  movsd (%rsp), %xmm1\n");
     result.push_str("  add $8, %rsp\n");
     *depth -= 1;
-}
-
-fn is_integer(ty: &Type) -> bool {
-    ty.kind == TypeKind::Bool
-        || ty.kind == TypeKind::Char
-        || ty.kind == TypeKind::Short
-        || ty.kind == TypeKind::Int
-        || ty.kind == TypeKind::Long
 }
 
 const I8: usize = 0;
@@ -461,6 +453,26 @@ fn gen_expr(
                 current_fn,
                 depth,
             )?;
+
+            let ty = node.ty.as_ref().unwrap();
+            match ty.kind {
+                TypeKind::Float => {
+                    result.push_str("  mov $1, %rax\n");
+                    result.push_str("  shl $31, %rax\n");
+                    result.push_str("  movq %rax, %xmm1\n");
+                    result.push_str("  xorps %xmm1, %xmm0\n");
+                    return Ok(());
+                }
+                TypeKind::Double => {
+                    result.push_str("  mov $1, %rax\n");
+                    result.push_str("  shl $63, %rax\n");
+                    result.push_str("  movq %rax, %xmm1\n");
+                    result.push_str("  xorpd %xmm1, %xmm0\n");
+                    return Ok(());
+                }
+                _ => {}
+            }
+
             result.push_str("  neg %rax\n");
             return Ok(());
         }
@@ -767,6 +779,22 @@ fn gen_expr(
         };
 
         match node.kind {
+            NodeKind::Add => {
+                result.push_str(&format!("  add{} %xmm1, %xmm0\n", sz));
+                return Ok(());
+            }
+            NodeKind::Sub => {
+                result.push_str(&format!("  sub{} %xmm1, %xmm0\n", sz));
+                return Ok(());
+            }
+            NodeKind::Mul => {
+                result.push_str(&format!("  mul{} %xmm1, %xmm0\n", sz));
+                return Ok(());
+            }
+            NodeKind::Div => {
+                result.push_str(&format!("  div{} %xmm1, %xmm0\n", sz));
+                return Ok(());
+            }
             NodeKind::Eq | NodeKind::Ne | NodeKind::Lt | NodeKind::Le => {
                 result.push_str(&format!("  ucomi{} %xmm0, %xmm1\n", sz));
 
