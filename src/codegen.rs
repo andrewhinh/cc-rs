@@ -152,10 +152,31 @@ fn pushf(result: &mut String, depth: &mut i32) {
     *depth += 1;
 }
 
-fn popf(result: &mut String, depth: &mut i32) {
-    result.push_str("  movsd (%rsp), %xmm1\n");
+fn popf(result: &mut String, depth: &mut i32, reg: i32) {
+    result.push_str(&format!("  movsd (%rsp), %xmm{}\n", reg));
     result.push_str("  add $8, %rsp\n");
     *depth -= 1;
+}
+
+fn push_args(
+    node: &Node,
+    result: &mut String,
+    filename: &str,
+    src: &str,
+    current_fn: &str,
+    depth: &mut i32,
+) -> Result<(), String> {
+    if let Some(next) = node.next.as_ref() {
+        push_args(next, result, filename, src, current_fn, depth)?;
+    }
+    gen_expr(node, result, filename, src, current_fn, depth)?;
+    if crate::is_flonum(node.ty.as_ref().unwrap()) {
+        pushf(result, depth);
+    } else {
+        result.push_str("  push %rax\n");
+        *depth += 1;
+    }
+    Ok(())
 }
 
 const I8: usize = 0;
@@ -630,22 +651,26 @@ fn gen_expr(
         }
         NodeKind::FuncCall => {
             let argreg = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
-            let mut nargs = 0;
+
+            if let Some(args) = node.args.as_ref() {
+                push_args(args, result, filename, src, current_fn, depth)?;
+            }
+
+            let mut gp = 0;
+            let mut fp = 0;
             let mut arg = node.args.as_ref();
             while let Some(arg_node) = arg {
-                gen_expr(arg_node, result, filename, src, current_fn, depth)?;
-                result.push_str("  push %rax\n");
-                *depth += 1;
-                nargs += 1;
+                if crate::is_flonum(arg_node.ty.as_ref().unwrap()) {
+                    popf(result, depth, fp);
+                    fp += 1;
+                } else {
+                    result.push_str(&format!("  pop {}\n", argreg[gp]));
+                    *depth -= 1;
+                    gp += 1;
+                }
                 arg = arg_node.next.as_ref();
             }
 
-            for i in (0..nargs).rev() {
-                result.push_str(&format!("  pop {}\n", argreg[i]));
-                *depth -= 1;
-            }
-
-            result.push_str("  mov $0, %rax\n");
             if *depth % 2 == 0 {
                 result.push_str(&format!("  call {}\n", node.funcname.as_ref().unwrap()));
             } else {
@@ -783,7 +808,7 @@ fn gen_expr(
             current_fn,
             depth,
         )?;
-        popf(result, depth);
+        popf(result, depth, 1);
 
         let sz = if lhs_ty.kind == TypeKind::Float {
             "ss"
