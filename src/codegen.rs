@@ -1216,6 +1216,14 @@ fn store_gp(r: usize, offset: i64, sz: i64, result: &mut String) {
     }
 }
 
+fn store_fp(r: usize, offset: i64, sz: i64, result: &mut String) {
+    match sz {
+        4 => result.push_str(&format!("  movss %xmm{}, -{}(%rbp)\n", r, offset)),
+        8 => result.push_str(&format!("  movsd %xmm{}, -{}(%rbp)\n", r, offset)),
+        _ => unreachable!(),
+    }
+}
+
 fn align_to(n: i64, align: i64) -> i64 {
     (n + align - 1) / align * align
 }
@@ -1449,12 +1457,20 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
             result.push_str(&format!("  movsd %xmm7, -{}(%rbp)\n", off - 128));
         }
 
-        for (i, var) in func.params.iter_mut().enumerate() {
+        let mut gp = 0;
+        let mut fp = 0;
+        for var in func.params.iter_mut() {
             let local_var = func.locals.iter().find(|l| l.name == var.name);
             if let Some(lv) = local_var {
                 var.offset = lv.offset;
             }
-            store_gp(i, var.offset, var.ty.size, &mut result);
+            if crate::is_flonum(&var.ty) {
+                store_fp(fp, var.offset, var.ty.size, &mut result);
+                fp += 1;
+            } else {
+                store_gp(gp, var.offset, var.ty.size, &mut result);
+                gp += 1;
+            }
         }
 
         let mut depth: i32 = 0;
