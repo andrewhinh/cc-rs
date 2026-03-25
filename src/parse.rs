@@ -4880,6 +4880,8 @@ pub fn funcall(
             }
             arg = new_cast(arg, pt.as_ref().clone());
             param_ty = pt.next.clone();
+        } else if arg.ty.as_ref().unwrap().kind == TypeKind::Float {
+            arg = new_cast(arg, Type::new_double());
         }
 
         cur.next = Some(Box::new(arg));
