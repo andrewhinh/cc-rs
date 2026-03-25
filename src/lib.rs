@@ -594,6 +594,19 @@ pub fn is_flonum(ty: &Type) -> bool {
     ty.kind == TypeKind::Float || ty.kind == TypeKind::Double
 }
 
+pub fn is_integer(ty: &Type) -> bool {
+    ty.kind == TypeKind::Bool
+        || ty.kind == TypeKind::Char
+        || ty.kind == TypeKind::Short
+        || ty.kind == TypeKind::Int
+        || ty.kind == TypeKind::Long
+        || ty.kind == TypeKind::Enum
+}
+
+pub fn is_numeric(ty: &Type) -> bool {
+    is_integer(ty) || is_flonum(ty)
+}
+
 static UNIQUE_ID: AtomicI32 = AtomicI32::new(0);
 static VAR_UNIQUE_ID: AtomicU64 = AtomicU64::new(0);
 
