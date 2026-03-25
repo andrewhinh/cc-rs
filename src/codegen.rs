@@ -1424,7 +1424,15 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
 
         if let Some(va_area) = &func.va_area {
             let off = va_area.offset;
-            let gp = func.params.len() as i64;
+            let mut gp = 0;
+            let mut fp = 0;
+            for var in func.params.iter() {
+                if crate::is_flonum(&var.ty) {
+                    fp += 1;
+                } else {
+                    gp += 1;
+                }
+            }
 
             // va_elem at va_area offset 0:
             //   0-3: gp_offset
@@ -1436,7 +1444,7 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
             // gp_offset at va_area offset 0
             result.push_str(&format!("  movl ${}, {}(%rbp)\n", gp * 8, off));
             // fp_offset at va_area offset 4
-            result.push_str(&format!("  movl $0, {}(%rbp)\n", off + 4));
+            result.push_str(&format!("  movl ${}, {}(%rbp)\n", fp * 8 + 48, off + 4));
             // overflow_arg_area at va_area offset 8 = rbp + 16
             result.push_str("  lea 16(%rbp), %rax\n");
             result.push_str(&format!("  movq %rax, {}(%rbp)\n", off + 8));
