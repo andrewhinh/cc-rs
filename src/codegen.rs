@@ -126,6 +126,19 @@ fn store(ty: &Type, result: &mut String, depth: &mut i32) {
 }
 
 fn cmp_zero(ty: &Type, result: &mut String) {
+    match ty.kind {
+        TypeKind::Float => {
+            result.push_str("  xorps %xmm1, %xmm1\n");
+            result.push_str("  ucomiss %xmm1, %xmm0\n");
+            return;
+        }
+        TypeKind::Double => {
+            result.push_str("  xorpd %xmm1, %xmm1\n");
+            result.push_str("  ucomisd %xmm1, %xmm0\n");
+            return;
+        }
+        _ => {}
+    }
     if crate::is_integer(ty) && ty.size <= 4 {
         result.push_str("  cmp $0, %eax\n");
     } else {
@@ -518,7 +531,7 @@ fn gen_expr(
                 current_fn,
                 depth,
             )?;
-            result.push_str("  cmp $0, %rax\n");
+            cmp_zero(node.lhs.as_ref().unwrap().ty.as_ref().unwrap(), result);
             result.push_str("  sete %al\n");
             result.push_str("  movzb %al, %rax\n");
             return Ok(());
@@ -545,7 +558,7 @@ fn gen_expr(
                 current_fn,
                 depth,
             )?;
-            result.push_str("  cmp $0, %rax\n");
+            cmp_zero(node.lhs.as_ref().unwrap().ty.as_ref().unwrap(), result);
             result.push_str(&format!("  je .L.false.{}\n", c));
             gen_expr(
                 node.rhs.as_ref().unwrap(),
@@ -555,7 +568,7 @@ fn gen_expr(
                 current_fn,
                 depth,
             )?;
-            result.push_str("  cmp $0, %rax\n");
+            cmp_zero(node.rhs.as_ref().unwrap().ty.as_ref().unwrap(), result);
             result.push_str(&format!("  je .L.false.{}\n", c));
             result.push_str("  mov $1, %rax\n");
             result.push_str(&format!("  jmp .L.end.{}\n", c));
@@ -574,7 +587,7 @@ fn gen_expr(
                 current_fn,
                 depth,
             )?;
-            result.push_str("  cmp $0, %rax\n");
+            cmp_zero(node.lhs.as_ref().unwrap().ty.as_ref().unwrap(), result);
             result.push_str(&format!("  jne .L.true.{}\n", c));
             gen_expr(
                 node.rhs.as_ref().unwrap(),
@@ -584,7 +597,7 @@ fn gen_expr(
                 current_fn,
                 depth,
             )?;
-            result.push_str("  cmp $0, %rax\n");
+            cmp_zero(node.rhs.as_ref().unwrap().ty.as_ref().unwrap(), result);
             result.push_str(&format!("  jne .L.true.{}\n", c));
             result.push_str("  mov $0, %rax\n");
             result.push_str(&format!("  jmp .L.end.{}\n", c));
@@ -725,7 +738,7 @@ fn gen_expr(
                 current_fn,
                 depth,
             )?;
-            result.push_str("  cmp $0, %rax\n");
+            cmp_zero(node.cond.as_ref().unwrap().ty.as_ref().unwrap(), result);
             result.push_str(&format!("  je .L.else.{}\n", c));
             gen_expr(
                 node.then.as_ref().unwrap(),
@@ -977,7 +990,7 @@ fn gen_stmt(
                 current_fn,
                 depth,
             )?;
-            result.push_str("  cmp $0, %rax\n");
+            cmp_zero(node.cond.as_ref().unwrap().ty.as_ref().unwrap(), result);
             result.push_str(&format!("  je .L.else.{}\n", c));
             gen_stmt(
                 node.then.as_ref().unwrap(),
@@ -1007,7 +1020,7 @@ fn gen_stmt(
             result.push_str(&format!(".L.begin.{}:\n", c));
             if let Some(cond) = node.cond.as_ref() {
                 gen_expr(cond, result, filename, src, current_fn, depth)?;
-                result.push_str("  cmp $0, %rax\n");
+                cmp_zero(cond.ty.as_ref().unwrap(), result);
                 result.push_str(&format!("  je {}\n", node.brk_label.as_ref().unwrap()));
             }
             gen_stmt(
@@ -1037,7 +1050,7 @@ fn gen_stmt(
                 current_fn,
                 depth,
             )?;
-            result.push_str("  cmp $0, %rax\n");
+            cmp_zero(node.cond.as_ref().unwrap().ty.as_ref().unwrap(), result);
             result.push_str(&format!("  je {}\n", node.brk_label.as_ref().unwrap()));
             gen_stmt(
                 node.then.as_ref().unwrap(),
@@ -1070,7 +1083,7 @@ fn gen_stmt(
                 current_fn,
                 depth,
             )?;
-            result.push_str("  cmp $0, %rax\n");
+            cmp_zero(node.cond.as_ref().unwrap().ty.as_ref().unwrap(), result);
             result.push_str(&format!("  jne .L.begin.{}\n", c));
             result.push_str(&format!("{}:\n", node.brk_label.as_ref().unwrap()));
         }
