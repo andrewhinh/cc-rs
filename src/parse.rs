@@ -1484,6 +1484,7 @@ pub fn declspec(
     const LONG: i32 = 1 << 10;
     const FLOAT: i32 = 1 << 12;
     const DOUBLE: i32 = 1 << 14;
+    const LONG_DOUBLE: i32 = LONG + DOUBLE;
     const OTHER: i32 = 1 << 16;
     const SIGNED: i32 = 1 << 17;
     const UNSIGNED: i32 = 1 << 18;
@@ -1661,7 +1662,7 @@ pub fn declspec(
                 ty = Type::new_ulong()
             }
             FLOAT => ty = Type::new_float(),
-            DOUBLE => ty = Type::new_double(),
+            DOUBLE | LONG_DOUBLE => ty = Type::new_double(),
             _ => return Err(error_tok(filename, src, &tok, "invalid type")),
         }
 
