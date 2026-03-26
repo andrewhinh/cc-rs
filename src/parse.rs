@@ -1798,6 +1798,20 @@ fn write_gvar_data(
         return Ok(());
     }
 
+    if ty.kind == TypeKind::Float {
+        let fval = eval_double(filename, src, &mut init.expr.as_ref().unwrap().clone())?;
+        let bytes = (fval as f32).to_le_bytes();
+        buf[offset..offset + 4].copy_from_slice(&bytes);
+        return Ok(());
+    }
+
+    if ty.kind == TypeKind::Double {
+        let fval = eval_double(filename, src, &mut init.expr.as_ref().unwrap().clone())?;
+        let bytes = fval.to_le_bytes();
+        buf[offset..offset + 8].copy_from_slice(&bytes);
+        return Ok(());
+    }
+
     let mut expr = init.expr.as_ref().unwrap().clone();
     let mut label: Option<String> = None;
     let val = eval2(filename, src, &mut expr, Some(&mut label))?;
@@ -3267,6 +3281,67 @@ pub fn expr_stmt(
     Ok((node, tok))
 }
 
+fn eval_double(filename: &str, src: &str, node: &mut Node) -> Result<f64, String> {
+    add_type(node);
+
+    if crate::is_integer(node.ty.as_ref().unwrap()) {
+        if node.ty.as_ref().unwrap().is_unsigned {
+            return Ok(eval(filename, src, node)? as u64 as f64);
+        }
+        return Ok(eval(filename, src, node)? as f64);
+    }
+
+    match node.kind {
+        NodeKind::Add => {
+            let lhs = eval_double(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval_double(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok(lhs + rhs)
+        }
+        NodeKind::Sub => {
+            let lhs = eval_double(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval_double(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok(lhs - rhs)
+        }
+        NodeKind::Mul => {
+            let lhs = eval_double(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval_double(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok(lhs * rhs)
+        }
+        NodeKind::Div => {
+            let lhs = eval_double(filename, src, node.lhs.as_mut().unwrap())?;
+            let rhs = eval_double(filename, src, node.rhs.as_mut().unwrap())?;
+            Ok(lhs / rhs)
+        }
+        NodeKind::Neg => {
+            let lhs = eval_double(filename, src, node.lhs.as_mut().unwrap())?;
+            Ok(-lhs)
+        }
+        NodeKind::Cond => {
+            let cond = eval_double(filename, src, node.cond.as_mut().unwrap())?;
+            if cond != 0.0 {
+                eval_double(filename, src, node.then.as_mut().unwrap())
+            } else {
+                eval_double(filename, src, node.els.as_mut().unwrap())
+            }
+        }
+        NodeKind::Comma => eval_double(filename, src, node.rhs.as_mut().unwrap()),
+        NodeKind::Cast => {
+            if crate::is_flonum(node.lhs.as_ref().unwrap().ty.as_ref().unwrap()) {
+                eval_double(filename, src, node.lhs.as_mut().unwrap())
+            } else {
+                Ok(eval(filename, src, node.lhs.as_mut().unwrap())? as f64)
+            }
+        }
+        NodeKind::Num => Ok(node.fval),
+        _ => Err(error_at(
+            filename,
+            src,
+            node.tok_loc,
+            "not a compile-time constant",
+        )),
+    }
+}
+
 pub fn eval(filename: &str, src: &str, node: &mut Node) -> Result<i64, String> {
     eval2(filename, src, node, None)
 }
@@ -3278,6 +3353,10 @@ pub fn eval2(
     label: Option<&mut Option<String>>,
 ) -> Result<i64, String> {
     add_type(node);
+
+    if crate::is_flonum(node.ty.as_ref().unwrap()) {
+        return Ok(eval_double(filename, src, node)?.to_bits() as i64);
+    }
 
     match node.kind {
         NodeKind::Add => {
@@ -3403,9 +3482,13 @@ pub fn eval2(
             Ok((lhs != 0 || rhs != 0) as i64)
         }
         NodeKind::Cast => {
-            let val = eval2(filename, src, node.lhs.as_mut().unwrap(), label)?;
             let ty = node.ty.as_ref().unwrap();
             if crate::is_integer(ty) {
+                let val = if crate::is_flonum(node.lhs.as_ref().unwrap().ty.as_ref().unwrap()) {
+                    eval_double(filename, src, node.lhs.as_mut().unwrap())? as i64
+                } else {
+                    eval2(filename, src, node.lhs.as_mut().unwrap(), label)?
+                };
                 match ty.size {
                     1 => {
                         if ty.is_unsigned {
@@ -3431,6 +3514,7 @@ pub fn eval2(
                     _ => Ok(val),
                 }
             } else if ty.kind == TypeKind::Ptr {
+                let val = eval2(filename, src, node.lhs.as_mut().unwrap(), label)?;
                 Ok(val)
             } else {
                 Err(error_at(
