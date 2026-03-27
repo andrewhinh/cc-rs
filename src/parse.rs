@@ -2033,6 +2033,11 @@ pub fn func_params(
             let mut ptr_ty = Type::new_ptr(param_ty.base.unwrap().borrow().clone());
             ptr_ty.name = name;
             ptr_ty
+        } else if param_ty.kind == TypeKind::Func {
+            let name = param_ty.name.clone();
+            let mut ptr_ty = Type::new_ptr(param_ty);
+            ptr_ty.name = name;
+            ptr_ty
         } else {
             param_ty
         };
