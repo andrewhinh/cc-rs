@@ -103,7 +103,7 @@ cargo run
 - [x] Allow to define a function that takes/returns flonums
 - [x] Implement default argument promotion for float
 - [x] Support variadic function with floating-point parameters
-- [ ] Add function pointer
+- [x] Add function pointer
 - [ ] Decay a function to a pointer in the func param context
 - [ ] Add usual arithmetic conversion for function pointer
 - [ ] Add va_arg()

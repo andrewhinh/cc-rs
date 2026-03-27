@@ -17,9 +17,19 @@ fn gen_addr(
             let var = node.var.as_ref().unwrap();
             if var.is_local {
                 result.push_str(&format!("  lea -{}(%rbp), %rax\n", var.offset));
-            } else {
-                result.push_str(&format!("  lea {}(%rip), %rax\n", var.name));
+                return Ok(());
             }
+
+            if node.ty.as_ref().unwrap().kind == TypeKind::Func {
+                if var.is_definition {
+                    result.push_str(&format!("  lea {}(%rip), %rax\n", var.name));
+                } else {
+                    result.push_str(&format!("  mov {}@GOTPCREL(%rip), %rax\n", var.name));
+                }
+                return Ok(());
+            }
+
+            result.push_str(&format!("  lea {}(%rip), %rax\n", var.name));
         }
         NodeKind::Deref => {
             gen_expr(
@@ -68,7 +78,7 @@ fn gen_addr(
 
 fn load(ty: &Type, result: &mut String) {
     match ty.kind {
-        TypeKind::Array | TypeKind::Struct | TypeKind::Union => return,
+        TypeKind::Array | TypeKind::Struct | TypeKind::Union | TypeKind::Func => return,
         TypeKind::Float => {
             result.push_str("  movss (%rax), %xmm0\n");
             return;
@@ -656,6 +666,15 @@ fn gen_expr(
                 push_args(args, result, filename, src, current_fn, depth)?;
             }
 
+            gen_expr(
+                node.lhs.as_ref().unwrap(),
+                result,
+                filename,
+                src,
+                current_fn,
+                depth,
+            )?;
+
             let mut gp = 0;
             let mut fp = 0;
             let mut arg = node.args.as_ref();
@@ -672,10 +691,10 @@ fn gen_expr(
             }
 
             if *depth % 2 == 0 {
-                result.push_str(&format!("  call {}\n", node.funcname.as_ref().unwrap()));
+                result.push_str("  call *%rax\n");
             } else {
                 result.push_str("  sub $8, %rsp\n");
-                result.push_str(&format!("  call {}\n", node.funcname.as_ref().unwrap()));
+                result.push_str("  call *%rax\n");
                 result.push_str("  add $8, %rsp\n");
             }
 

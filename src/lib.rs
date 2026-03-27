@@ -519,7 +519,6 @@ pub struct Node {
     pub init: Option<Box<Node>>,
     pub inc: Option<Box<Node>>,
     pub body: Option<Box<Node>>,
-    pub funcname: Option<String>,
     pub func_ty: Option<Type>,
     pub args: Option<Box<Node>>,
     pub var: Option<Box<Obj>>,
