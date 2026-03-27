@@ -1,7 +1,6 @@
 use std::{
     env, fs,
     io::{self, Read, Write},
-    path::Path,
     process,
 };
 
@@ -13,7 +12,9 @@ struct Args {
     opt_s: bool,
     opt_hash_hash_hash: bool,
     opt_o: Option<String>,
-    input_path: String,
+    base_file: Option<String>,
+    output_file: Option<String>,
+    input_paths: Vec<String>,
 }
 
 fn usage(status: i32) {
@@ -27,7 +28,9 @@ fn parse_args() -> Args {
     let mut opt_s = false;
     let mut opt_hash_hash_hash = false;
     let mut opt_o: Option<String> = None;
-    let mut input_path: Option<String> = None;
+    let mut base_file: Option<String> = None;
+    let mut output_file: Option<String> = None;
+    let mut input_paths: Vec<String> = Vec::new();
     let mut i = 1;
 
     while i < args.len() {
@@ -69,26 +72,48 @@ fn parse_args() -> Args {
             continue;
         }
 
+        if args[i] == "-cc1-input" {
+            i += 1;
+            if i >= args.len() {
+                usage(1);
+            }
+            base_file = Some(args[i].clone());
+            i += 1;
+            continue;
+        }
+
+        if args[i] == "-cc1-output" {
+            i += 1;
+            if i >= args.len() {
+                usage(1);
+            }
+            output_file = Some(args[i].clone());
+            i += 1;
+            continue;
+        }
+
         if args[i].starts_with('-') && args[i].len() > 1 {
             eprintln!("unknown argument: {}", args[i]);
             process::exit(1);
         }
 
-        input_path = Some(args[i].clone());
+        input_paths.push(args[i].clone());
         i += 1;
     }
 
-    let input_path = input_path.unwrap_or_else(|| {
+    if input_paths.is_empty() && base_file.is_none() {
         eprintln!("no input files");
         process::exit(1);
-    });
+    }
 
     Args {
         opt_cc1,
         opt_s,
         opt_hash_hash_hash,
         opt_o,
-        input_path,
+        base_file,
+        output_file,
+        input_paths,
     }
 }
 
@@ -153,11 +178,12 @@ fn run_cc1(
     new_args.push("-cc1".to_string());
 
     if let Some(inp) = input {
+        new_args.push("-cc1-input".to_string());
         new_args.push(inp.to_string());
     }
 
     if let Some(out) = output {
-        new_args.push("-o".to_string());
+        new_args.push("-cc1-output".to_string());
         new_args.push(out.to_string());
     }
 
@@ -165,22 +191,24 @@ fn run_cc1(
 }
 
 fn cc1(args: &Args) -> Result<(), String> {
-    let (filename, src) = read_file(&args.input_path)?;
+    let input = args.base_file.as_ref().ok_or("no input file for cc1")?;
+    let (filename, src) = read_file(input)?;
     let asm = emit_assembly(&filename, &src)?;
 
-    let mut out = open_output_file(args.opt_o.as_ref());
+    let out_path = args.output_file.as_ref();
+    let mut out = open_output_file(out_path);
     out.write_all(asm.as_bytes())
         .map_err(|e| format!("write error: {e}"))?;
     Ok(())
 }
 
 fn replace_extn(path: &str, extn: &str) -> String {
-    let path = Path::new(path);
-    let stem = path
-        .file_stem()
-        .map(|s| s.to_string_lossy())
-        .unwrap_or_default();
-    format!("{}{}", stem, extn)
+    let dot_pos = path.rfind('.');
+    let base = match dot_pos {
+        Some(pos) => &path[..pos],
+        None => path,
+    };
+    format!("{}{}", base, extn)
 }
 
 fn create_tmpfile() -> Result<(NamedTempFile, String), String> {
@@ -209,32 +237,38 @@ fn run() -> Result<(), String> {
 
     let orig_args: Vec<String> = env::args().collect();
 
-    let output = if let Some(ref o) = args.opt_o {
-        o.clone()
-    } else if args.opt_s {
-        replace_extn(&args.input_path, ".s")
-    } else {
-        replace_extn(&args.input_path, ".o")
-    };
+    if args.input_paths.len() > 1 && args.opt_o.is_some() {
+        return Err("cannot specify '-o' with multiple files".to_string());
+    }
 
-    if args.opt_s {
+    for input in &args.input_paths {
+        let output = if let Some(ref o) = args.opt_o {
+            o.clone()
+        } else if args.opt_s {
+            replace_extn(input, ".s")
+        } else {
+            replace_extn(input, ".o")
+        };
+
+        if args.opt_s {
+            run_cc1(
+                args.opt_hash_hash_hash,
+                &orig_args,
+                Some(input),
+                Some(&output),
+            )?;
+            continue;
+        }
+
+        let (_tmpfile, tmpfile_path) = create_tmpfile()?;
         run_cc1(
             args.opt_hash_hash_hash,
             &orig_args,
-            Some(&args.input_path),
-            Some(&output),
+            Some(input),
+            Some(&tmpfile_path),
         )?;
-        return Ok(());
+        assemble(&tmpfile_path, &output, args.opt_hash_hash_hash)?;
     }
-
-    let (_tmpfile, tmpfile_path) = create_tmpfile()?;
-    run_cc1(
-        args.opt_hash_hash_hash,
-        &orig_args,
-        Some(&args.input_path),
-        Some(&tmpfile_path),
-    )?;
-    assemble(&tmpfile_path, &output, args.opt_hash_hash_hash)?;
 
     Ok(())
 }

@@ -338,7 +338,7 @@ cargo run
 - [ ] Self-host: including preprocessor, chibicc can compile itself
 - [x] Split cc1 from compiler driver
 - [x] Run "as" command unless -S is given
-- [ ] Accept multiple input files
+- [x] Accept multiple input files
 - [ ] Run "ld" unless -c is given
 - [ ] Add stdarg.h, stdbool.h, stddef.h, stdalign.h and float.h
 - [ ] Add -D option
