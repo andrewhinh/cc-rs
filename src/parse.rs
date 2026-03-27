@@ -5266,6 +5266,13 @@ pub fn get_common_type(ty1: &Type, ty2: &Type) -> Type {
         return Type::new_ptr(base.borrow().clone());
     }
 
+    if ty1.kind == TypeKind::Func {
+        return pointer_to(ty1.clone());
+    }
+    if ty2.kind == TypeKind::Func {
+        return pointer_to(ty2.clone());
+    }
+
     if ty1.kind == TypeKind::Double || ty2.kind == TypeKind::Double {
         return Type::new_double();
     }
