@@ -7,6 +7,8 @@ use std::{
 use cc_rs::codegen::emit_assembly;
 
 struct Args {
+    opt_cc1: bool,
+    opt_hash_hash_hash: bool,
     opt_o: Option<String>,
     input_path: String,
 }
@@ -18,6 +20,8 @@ fn usage(status: i32) {
 
 fn parse_args() -> Args {
     let args: Vec<String> = env::args().collect();
+    let mut opt_cc1 = false;
+    let mut opt_hash_hash_hash = false;
     let mut opt_o: Option<String> = None;
     let mut input_path: Option<String> = None;
     let mut i = 1;
@@ -25,6 +29,18 @@ fn parse_args() -> Args {
     while i < args.len() {
         if args[i] == "--help" {
             usage(0);
+        }
+
+        if args[i] == "-###" {
+            opt_hash_hash_hash = true;
+            i += 1;
+            continue;
+        }
+
+        if args[i] == "-cc1" {
+            opt_cc1 = true;
+            i += 1;
+            continue;
         }
 
         if args[i] == "-o" {
@@ -57,7 +73,12 @@ fn parse_args() -> Args {
         process::exit(1);
     });
 
-    Args { opt_o, input_path }
+    Args {
+        opt_cc1,
+        opt_hash_hash_hash,
+        opt_o,
+        input_path,
+    }
 }
 
 fn open_output_file(path: Option<&String>) -> Box<dyn Write> {
@@ -94,9 +115,29 @@ fn read_file(path: &str) -> Result<(String, String), String> {
     Ok((filename, contents))
 }
 
-fn run() -> Result<(), String> {
-    let args = parse_args();
+fn run_subprocess(opt_hash_hash_hash: bool, args: &[String]) -> Result<(), String> {
+    if opt_hash_hash_hash {
+        eprintln!("{}", args.join(" "));
+    }
 
+    let status = process::Command::new(&args[0])
+        .args(&args[1..])
+        .status()
+        .map_err(|e| format!("exec failed: {}: {}", args[0], e))?;
+
+    if !status.success() {
+        process::exit(1);
+    }
+    Ok(())
+}
+
+fn run_cc1(args: &Args, orig_args: &[String]) -> Result<(), String> {
+    let mut new_args = orig_args.to_vec();
+    new_args.push("-cc1".to_string());
+    run_subprocess(args.opt_hash_hash_hash, &new_args)
+}
+
+fn cc1(args: &Args) -> Result<(), String> {
     let (filename, src) = read_file(&args.input_path)?;
     let asm = emit_assembly(&filename, &src)?;
 
@@ -104,6 +145,17 @@ fn run() -> Result<(), String> {
     out.write_all(asm.as_bytes())
         .map_err(|e| format!("write error: {e}"))?;
     Ok(())
+}
+
+fn run() -> Result<(), String> {
+    let args = parse_args();
+
+    if args.opt_cc1 {
+        return cc1(&args);
+    }
+
+    let orig_args: Vec<String> = env::args().collect();
+    run_cc1(&args, &orig_args)
 }
 
 fn main() {
