@@ -1,7 +1,7 @@
 use std::{
     env, fs,
     io::{self, Read, Write},
-    process,
+    process, thread,
 };
 
 use cc_rs::codegen::emit_assembly;
@@ -107,8 +107,23 @@ fn run() -> Result<(), String> {
 }
 
 fn main() {
-    if let Err(msg) = run() {
-        eprintln!("{msg}");
-        process::exit(1);
+    let handle = thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(run)
+        .unwrap_or_else(|e| {
+            eprintln!("failed to start compiler thread: {e}");
+            process::exit(1);
+        });
+
+    match handle.join() {
+        Ok(Ok(())) => {}
+        Ok(Err(msg)) => {
+            eprintln!("{msg}");
+            process::exit(1);
+        }
+        Err(_) => {
+            eprintln!("compiler thread panicked");
+            process::exit(1);
+        }
     }
 }

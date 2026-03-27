@@ -1107,6 +1107,7 @@ pub fn struct_members(
     src: &str,
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
+    scope_stack: &mut [Vec<VarScope>],
 ) -> Result<(Option<Box<crate::Member>>, bool, Token), String> {
     let mut tok = tok.clone();
     let mut members: Vec<crate::Member> = Vec::new();
@@ -1114,13 +1115,12 @@ pub fn struct_members(
 
     while !equal(src, &tok, "}") {
         let mut attr = VarAttr::default();
-        let mut empty_scope: Vec<Vec<VarScope>> = vec![];
         let (basety, new_tok) = declspec(
             filename,
             src,
             &tok,
             tag_scope_stack,
-            &mut empty_scope,
+            scope_stack,
             Some(&mut attr),
         )?;
         tok = new_tok;
@@ -1132,17 +1132,14 @@ pub fn struct_members(
             }
             first = false;
 
-            let (mem_ty, new_tok) = {
-                let mut empty_scope: Vec<Vec<VarScope>> = vec![];
-                declarator(
-                    filename,
-                    src,
-                    &tok,
-                    basety.clone(),
-                    tag_scope_stack,
-                    &mut empty_scope,
-                )?
-            };
+            let (mem_ty, new_tok) = declarator(
+                filename,
+                src,
+                &tok,
+                basety.clone(),
+                tag_scope_stack,
+                scope_stack,
+            )?;
             tok = new_tok;
             let mem_align = if attr.align > 0 {
                 attr.align
@@ -1194,6 +1191,7 @@ pub fn struct_union_decl(
     src: &str,
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
+    scope_stack: &mut [Vec<VarScope>],
 ) -> Result<(Rc<RefCell<Type>>, Token), String> {
     let mut tok = tok.clone();
 
@@ -1234,7 +1232,8 @@ pub fn struct_union_decl(
         Rc::new(RefCell::new(Type::new_struct()))
     };
 
-    let (members, is_flexible, rest) = struct_members(filename, src, &tok, tag_scope_stack)?;
+    let (members, is_flexible, rest) =
+        struct_members(filename, src, &tok, tag_scope_stack, scope_stack)?;
 
     {
         let mut ty = ty_rc.borrow_mut();
@@ -1253,8 +1252,9 @@ pub fn struct_decl(
     src: &str,
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
+    scope_stack: &mut [Vec<VarScope>],
 ) -> Result<(Type, Token), String> {
-    let (ty_rc, rest) = struct_union_decl(filename, src, tok, tag_scope_stack)?;
+    let (ty_rc, rest) = struct_union_decl(filename, src, tok, tag_scope_stack, scope_stack)?;
     ty_rc.borrow_mut().kind = TypeKind::Struct;
 
     if ty_rc.borrow().size < 0 {
@@ -1307,8 +1307,9 @@ pub fn union_decl(
     src: &str,
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
+    scope_stack: &mut [Vec<VarScope>],
 ) -> Result<(Type, Token), String> {
-    let (ty_rc, rest) = struct_union_decl(filename, src, tok, tag_scope_stack)?;
+    let (ty_rc, rest) = struct_union_decl(filename, src, tok, tag_scope_stack, scope_stack)?;
     ty_rc.borrow_mut().kind = TypeKind::Union;
 
     if ty_rc.borrow().size < 0 {
@@ -1596,13 +1597,23 @@ pub fn declspec(
             }
 
             if equal(src, &tok, "struct") {
-                let (new_ty, new_tok) =
-                    struct_decl(filename, src, tok.next.as_ref().unwrap(), tag_scope_stack)?;
+                let (new_ty, new_tok) = struct_decl(
+                    filename,
+                    src,
+                    tok.next.as_ref().unwrap(),
+                    tag_scope_stack,
+                    scope_stack,
+                )?;
                 ty = new_ty;
                 tok = new_tok;
             } else if equal(src, &tok, "union") {
-                let (new_ty, new_tok) =
-                    union_decl(filename, src, tok.next.as_ref().unwrap(), tag_scope_stack)?;
+                let (new_ty, new_tok) = union_decl(
+                    filename,
+                    src,
+                    tok.next.as_ref().unwrap(),
+                    tag_scope_stack,
+                    scope_stack,
+                )?;
                 ty = new_ty;
                 tok = new_tok;
             } else if equal(src, &tok, "enum") {
@@ -1708,15 +1719,21 @@ pub fn get_number(tok: &Token) -> Result<i64, String> {
     Ok(tok.val)
 }
 
-pub fn is_function(src: &str, tok: &Token) -> Result<bool, String> {
+pub fn is_function(src: &str, tok: &Token, scope_stack: &[Vec<VarScope>]) -> Result<bool, String> {
     if equal(src, tok, ";") {
         return Ok(false);
     }
 
     let dummy = Type::new_int();
     let mut tag_scope_stack: Vec<Vec<TagScope>> = vec![Vec::new()];
-    let mut empty_scope: Vec<Vec<VarScope>> = vec![];
-    let (ty, _) = declarator("", src, tok, dummy, &mut tag_scope_stack, &mut empty_scope)?;
+    let (ty, _) = declarator(
+        "",
+        src,
+        tok,
+        dummy,
+        &mut tag_scope_stack,
+        &mut scope_stack.to_vec(),
+    )?;
     Ok(ty.kind == TypeKind::Func)
 }
 
@@ -2425,11 +2442,14 @@ pub fn parse_typedef(
         )?;
         tok = new_tok;
         if ty.name.is_none() {
+            if equal(src, &tok, ";") {
+                return Ok(*tok.next.as_ref().unwrap().clone());
+            }
             return Err(error_tok(
                 filename,
                 src,
                 ty.name_pos.as_ref().unwrap(),
-                "typedef name omitted",
+                "variable name omitted",
             ));
         }
         let name = get_ident(src, ty.name.as_ref().unwrap())?;
@@ -2722,7 +2742,7 @@ pub fn compound_stmt(
                 continue;
             }
 
-            if is_function(src, &tok)? {
+            if is_function(src, &tok, scope_stack)? {
                 let (_, new_tok) = function(
                     filename,
                     src,

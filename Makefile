@@ -4,6 +4,13 @@ ARG := $(word 2,$(MAKECMDGOALS))
 CMD ?=
 HOST ?=
 SYNC ?= 1
+SRCS := $(wildcard src/cpp/*.c)
+TEST_SRCS := $(wildcard src/cpp/test/*.c)
+RUST_SRCS := Cargo.toml Cargo.lock $(wildcard src/*.rs)
+TEST_TIMEOUT ?= 120
+CC_RS := ./target/release/cc-rs
+STAGE2_CC_RS := ./target/release/cc-rs
+TESTS := $(TEST_SRCS:.c=.exe)
 
 help:
 	@echo "conn        sync and connect to instance [instance-id] [CMD=...] [SYNC=0]"
@@ -56,4 +63,45 @@ stop:
 	bash scripts/stop.sh $(ARG)
 
 $(ARG):
-	@:
+
+# Stage 2 build
+
+stage2/cpp: $(SRCS:src/cpp/%.c=stage2/%.s)
+	@mkdir -p stage2
+	gcc -no-pie -o $@ $^
+
+stage2/%.s: src/cpp/%.c self.py target/debug/cc-rs
+	@mkdir -p stage2
+	./self.py src/cpp/chibicc.h $< > stage2/$*.c
+	./target/debug/cc-rs -o $@ stage2/$*.c
+
+target/debug/cc-rs: $(RUST_SRCS)
+	cargo build
+
+target/release/cc-rs: $(RUST_SRCS)
+	cargo build --release
+
+test-stage2: stage2/cpp
+	@for i in $(TEST_SRCS); do \
+		echo $$i; \
+		./stage2/cpp -o stage2/test/$$(basename $${i%.c}).s $$i; \
+		gcc -no-pie -o stage2/test/$$(basename $${i%.c}).exe stage2/test/$$(basename $${i%.c}).s -xc src/cpp/test/common; \
+		./stage2/test/$$(basename $${i%.c}).exe || exit 1; \
+		echo; \
+	done
+	bash src/cpp/test/driver.sh ./stage2/cpp
+
+test-all: test test-stage2
+
+test: target/release/cc-rs
+	@echo "Running basic tests..."
+	@for i in $(TEST_SRCS); do \
+		echo $$i; \
+		./target/debug/cc-rs -o /tmp/$$(basename $${i%.c}).s $$i; \
+		gcc -no-pie -o /tmp/$$(basename $${i%.c}) /tmp/$$(basename $${i%.c}).s -xc src/cpp/test/common; \
+		/tmp/$$(basename $${i%.c}) || exit 1; \
+		echo; \
+	done
+
+clean:
+	rm -rf stage2
