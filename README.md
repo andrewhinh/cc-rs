@@ -339,7 +339,7 @@ cargo run
 - [x] Add stage2 build
 - [ ] Self-host: including preprocessor, the C compiler can compile itself
 - [x] Split cc1 from compiler driver
-- [ ] Run "as" command unless -S is given
+- [x] Run "as" command unless -S is given
 - [ ] Accept multiple input files
 - [ ] Run "ld" unless -c is given
 - [ ] Add stdarg.h, stdbool.h, stddef.h, stdalign.h and float.h

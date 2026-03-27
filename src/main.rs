@@ -1,13 +1,16 @@
 use std::{
     env, fs,
     io::{self, Read, Write},
+    path::Path,
     process, thread,
 };
 
 use cc_rs::codegen::emit_assembly;
+use tempfile::NamedTempFile;
 
 struct Args {
     opt_cc1: bool,
+    opt_s: bool,
     opt_hash_hash_hash: bool,
     opt_o: Option<String>,
     input_path: String,
@@ -21,6 +24,7 @@ fn usage(status: i32) {
 fn parse_args() -> Args {
     let args: Vec<String> = env::args().collect();
     let mut opt_cc1 = false;
+    let mut opt_s = false;
     let mut opt_hash_hash_hash = false;
     let mut opt_o: Option<String> = None;
     let mut input_path: Option<String> = None;
@@ -39,6 +43,12 @@ fn parse_args() -> Args {
 
         if args[i] == "-cc1" {
             opt_cc1 = true;
+            i += 1;
+            continue;
+        }
+
+        if args[i] == "-S" {
+            opt_s = true;
             i += 1;
             continue;
         }
@@ -75,6 +85,7 @@ fn parse_args() -> Args {
 
     Args {
         opt_cc1,
+        opt_s,
         opt_hash_hash_hash,
         opt_o,
         input_path,
@@ -122,6 +133,7 @@ fn run_subprocess(opt_hash_hash_hash: bool, args: &[String]) -> Result<(), Strin
 
     let status = process::Command::new(&args[0])
         .args(&args[1..])
+        .stdin(process::Stdio::inherit())
         .status()
         .map_err(|e| format!("exec failed: {}: {}", args[0], e))?;
 
@@ -131,10 +143,25 @@ fn run_subprocess(opt_hash_hash_hash: bool, args: &[String]) -> Result<(), Strin
     Ok(())
 }
 
-fn run_cc1(args: &Args, orig_args: &[String]) -> Result<(), String> {
+fn run_cc1(
+    opt_hash_hash_hash: bool,
+    orig_args: &[String],
+    input: Option<&str>,
+    output: Option<&str>,
+) -> Result<(), String> {
     let mut new_args = orig_args.to_vec();
     new_args.push("-cc1".to_string());
-    run_subprocess(args.opt_hash_hash_hash, &new_args)
+
+    if let Some(inp) = input {
+        new_args.push(inp.to_string());
+    }
+
+    if let Some(out) = output {
+        new_args.push("-o".to_string());
+        new_args.push(out.to_string());
+    }
+
+    run_subprocess(opt_hash_hash_hash, &new_args)
 }
 
 fn cc1(args: &Args) -> Result<(), String> {
@@ -147,6 +174,32 @@ fn cc1(args: &Args) -> Result<(), String> {
     Ok(())
 }
 
+fn replace_extn(path: &str, extn: &str) -> String {
+    let path = Path::new(path);
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy())
+        .unwrap_or_default();
+    format!("{}{}", stem, extn)
+}
+
+fn create_tmpfile() -> Result<(NamedTempFile, String), String> {
+    let tmpfile = NamedTempFile::new().map_err(|e| format!("mkstemp failed: {e}"))?;
+    let path = tmpfile.path().to_string_lossy().into_owned();
+    Ok((tmpfile, path))
+}
+
+fn assemble(input: &str, output: &str, opt_hash_hash_hash: bool) -> Result<(), String> {
+    let args = vec![
+        "as".to_string(),
+        "-c".to_string(),
+        input.to_string(),
+        "-o".to_string(),
+        output.to_string(),
+    ];
+    run_subprocess(opt_hash_hash_hash, &args)
+}
+
 fn run() -> Result<(), String> {
     let args = parse_args();
 
@@ -155,7 +208,35 @@ fn run() -> Result<(), String> {
     }
 
     let orig_args: Vec<String> = env::args().collect();
-    run_cc1(&args, &orig_args)
+
+    let output = if let Some(ref o) = args.opt_o {
+        o.clone()
+    } else if args.opt_s {
+        replace_extn(&args.input_path, ".s")
+    } else {
+        replace_extn(&args.input_path, ".o")
+    };
+
+    if args.opt_s {
+        run_cc1(
+            args.opt_hash_hash_hash,
+            &orig_args,
+            Some(&args.input_path),
+            Some(&output),
+        )?;
+        return Ok(());
+    }
+
+    let (_tmpfile, tmpfile_path) = create_tmpfile()?;
+    run_cc1(
+        args.opt_hash_hash_hash,
+        &orig_args,
+        Some(&args.input_path),
+        Some(&tmpfile_path),
+    )?;
+    assemble(&tmpfile_path, &output, args.opt_hash_hash_hash)?;
+
+    Ok(())
 }
 
 fn main() {
