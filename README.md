@@ -102,7 +102,7 @@ cargo run
 - [x] Implement default argument promotion for float
 - [x] Support variadic function with floating-point parameters
 - [x] Add function pointer
-- [ ] Decay a function to a pointer in the func param context
+- [x] Decay a function to a pointer in the func param context
 - [ ] Add usual arithmetic conversion for function pointer
 - [ ] Add va_arg()
 - [ ] Support passed-on-stack arguments
