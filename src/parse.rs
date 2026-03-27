@@ -184,7 +184,6 @@ pub fn new_node(kind: NodeKind, tok_loc: usize, line_no: usize) -> Node {
         init: None,
         inc: None,
         body: None,
-        funcname: None,
         func_ty: None,
         args: None,
         var: None,
@@ -2243,7 +2242,6 @@ pub fn declaration(
         init: None,
         inc: None,
         body: None,
-        funcname: None,
         func_ty: None,
         args: None,
         var: None,
@@ -2680,7 +2678,6 @@ pub fn compound_stmt(
         init: None,
         inc: None,
         body: None,
-        funcname: None,
         func_ty: None,
         args: None,
         var: None,
@@ -2869,7 +2866,7 @@ pub fn stmt(
         let tok_loc = tok.loc;
         let line_no = tok.line_no;
         let mut node = new_node(NodeKind::For, tok_loc, line_no);
-        let mut tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
+        let mut tok = skip(filename, src, tok, "(")?;
 
         scope_stack.push(Vec::new());
         tag_scope_stack.push(Vec::new());
@@ -4818,6 +4815,22 @@ pub fn postfix(
     )?;
 
     loop {
+        if equal(src, &tok, "(") {
+            let (new_node, new_tok) = funcall(
+                filename,
+                src,
+                &tok,
+                node,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+            node = new_node;
+            tok = new_tok;
+            continue;
+        }
+
         if equal(src, &tok, "[") {
             let tok_loc = tok.loc;
             let line_no = tok.line_no;
@@ -4893,35 +4906,40 @@ pub fn postfix(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn funcall(
     filename: &str,
     src: &str,
     tok: &Token,
+    mut fn_node: Node,
     locals: &mut Vec<Obj>,
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<(Node, Token), String> {
-    let tok_loc = tok.loc;
-    let line_no = tok.line_no;
-    let funcname: String = src.chars().skip(tok.loc).take(tok.len).collect();
+    add_type(&mut fn_node);
 
-    let sc = find_var(scope_stack, globals, &funcname)
-        .ok_or_else(|| error_tok(filename, src, tok, "implicit declaration of a function"))?;
-
-    let var = sc
-        .var
-        .ok_or_else(|| error_tok(filename, src, tok, "implicit declaration of a function"))?;
-
-    if var.ty.kind != TypeKind::Func {
+    let fn_ty = fn_node.ty.as_ref().unwrap();
+    if fn_ty.kind != TypeKind::Func
+        && (fn_ty.kind != TypeKind::Ptr
+            || fn_ty.base.as_ref().unwrap().borrow().kind != TypeKind::Func)
+    {
         return Err(error_tok(filename, src, tok, "not a function"));
     }
 
-    let ty = var.ty.clone();
-    let return_ty = var.ty.return_ty.as_ref().unwrap().as_ref().clone();
-    let mut param_ty = var.ty.params.clone();
+    let tok_loc = fn_node.tok_loc;
+    let line_no = fn_node.line_no;
 
-    let mut tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
+    let ty = if fn_ty.kind == TypeKind::Func {
+        fn_ty.clone()
+    } else {
+        fn_ty.base.as_ref().unwrap().borrow().clone()
+    };
+
+    let return_ty = ty.return_ty.as_ref().unwrap().as_ref().clone();
+    let mut param_ty = ty.params.clone();
+
+    let mut tok = skip(filename, src, tok, "(")?;
 
     let mut head = Node {
         kind: NodeKind::Num,
@@ -4937,7 +4955,6 @@ pub fn funcall(
         init: None,
         inc: None,
         body: None,
-        funcname: None,
         func_ty: None,
         args: None,
         var: None,
@@ -4999,8 +5016,7 @@ pub fn funcall(
 
     let tok = skip(filename, src, &tok, ")")?;
 
-    let mut node = new_node(NodeKind::FuncCall, tok_loc, line_no);
-    node.funcname = Some(funcname);
+    let mut node = new_unary(NodeKind::FuncCall, fn_node, tok_loc, line_no);
     node.func_ty = Some(ty);
     node.ty = Some(return_ty);
     node.args = head.next;
@@ -5126,35 +5142,36 @@ pub fn primary(
     }
 
     if tok.kind == TokenKind::Ident {
+        let tok_loc = tok.loc;
+        let line_no = tok.line_no;
+        let name: String = src.chars().skip(tok.loc).take(tok.len).collect();
+
+        let sc = find_var(scope_stack, globals, &name);
+
+        if let Some(sc) = sc {
+            if let Some(var) = sc.var {
+                return Ok((
+                    new_var_node(var, tok_loc, line_no),
+                    *tok.next.as_ref().unwrap().clone(),
+                ));
+            }
+            if sc.enum_ty.is_some() {
+                return Ok((
+                    new_num(sc.enum_val, tok_loc, line_no),
+                    *tok.next.as_ref().unwrap().clone(),
+                ));
+            }
+        }
+
         if equal(src, tok.next.as_ref().unwrap(), "(") {
-            return funcall(
+            return Err(error_tok(
                 filename,
                 src,
                 tok,
-                locals,
-                globals,
-                scope_stack,
-                tag_scope_stack,
-            );
+                "implicit declaration of a function",
+            ));
         }
-
-        let tok_loc = tok.loc;
-        let line_no = tok.line_no;
-        let funcname: String = src.chars().skip(tok.loc).take(tok.len).collect();
-
-        let sc = find_var(scope_stack, globals, &funcname)
-            .ok_or_else(|| error_tok(filename, src, tok, "undefined variable"))?;
-
-        if sc.var.is_none() && sc.enum_ty.is_none() {
-            return Err(error_tok(filename, src, tok, "undefined variable"));
-        }
-
-        let node = if let Some(var) = sc.var {
-            new_var_node(var, tok_loc, line_no)
-        } else {
-            new_num(sc.enum_val, tok_loc, line_no)
-        };
-        return Ok((node, *tok.next.as_ref().unwrap().clone()));
+        return Err(error_tok(filename, src, tok, "undefined variable"));
     }
 
     if tok.kind == TokenKind::Str {
