@@ -334,7 +334,7 @@ cargo run
 - [x] Add -o and --help options
 - [ ] Rewrite tests in shell script in C
 - [x] Emit .file and .loc assembler directives
-- [ ] Add stage2 build
+- [x] Add stage2 build
 - [ ] Self-host: including preprocessor, chibicc can compile itself
 - [ ] Split cc1 from compiler driver
 - [ ] Run "as" command unless -S is given

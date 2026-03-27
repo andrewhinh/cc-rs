@@ -1319,7 +1319,7 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
             continue;
         }
 
-        if is_function(src, &tok)? {
+        if is_function(src, &tok, &scope_stack)? {
             let (func, new_tok) = function(
                 filename,
                 src,

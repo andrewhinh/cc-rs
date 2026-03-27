@@ -1,8 +1,11 @@
-.PHONY: help conn create delete list reboot aws-setup ec2-setup start stop
+.PHONY: help conn create delete list reboot aws-setup ec2-setup start stop stage2 test-stage2 test-all
 
 ARG := $(word 2,$(MAKECMDGOALS))
 CMD ?=
 HOST ?=
+SRCS := $(wildcard chibicc/*.c)
+TEST_SRCS := $(wildcard chibicc/test/*.c)
+TESTS := $(TEST_SRCS:.c=.exe)
 
 help:
 	@echo "conn       connect to instance [instance-id] [CMD=...]"
@@ -47,4 +50,42 @@ stop:
 	bash scripts/stop.sh $(ARG)
 
 $(ARG):
-	@:
+
+# Stage 2 build
+
+stage2/chibicc: $(SRCS:chibicc/%.c=stage2/%.s)
+	@mkdir -p stage2
+	gcc -no-pie -o $@ $^
+
+stage2/%.s: chibicc/%.c self.py target/debug/cc-rs
+	@mkdir -p stage2
+	./self.py chibicc/chibicc.h $< > stage2/$*.c
+	./target/debug/cc-rs -o $@ stage2/$*.c
+
+target/debug/cc-rs:
+	cargo build
+
+test-stage2: stage2/chibicc
+	@for i in $(TEST_SRCS); do \
+		echo $$i; \
+		./stage2/chibicc -o stage2/test/$$(basename $${i%.c}).s $$i; \
+		gcc -no-pie -o stage2/test/$$(basename $${i%.c}).exe stage2/test/$$(basename $${i%.c}).s -xc chibicc/test/common; \
+		./stage2/test/$$(basename $${i%.c}).exe || exit 1; \
+		echo; \
+	done
+	bash chibicc/test/driver.sh ./stage2/chibicc
+
+test-all: test test-stage2
+
+test: target/debug/cc-rs
+	@echo "Running basic tests..."
+	@for i in $(TEST_SRCS); do \
+		echo $$i; \
+		./target/debug/cc-rs -o /tmp/$$(basename $${i%.c}).s $$i; \
+		gcc -no-pie -o /tmp/$$(basename $${i%.c}) /tmp/$$(basename $${i%.c}).s -xc chibicc/test/common; \
+		/tmp/$$(basename $${i%.c}) || exit 1; \
+		echo; \
+	done
+
+clean:
+	rm -rf stage2
