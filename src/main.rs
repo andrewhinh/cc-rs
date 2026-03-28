@@ -1,6 +1,7 @@
 use std::{
     env, fs,
     io::{self, Read, Write},
+    path::Path,
     process,
 };
 
@@ -10,6 +11,7 @@ use tempfile::NamedTempFile;
 struct Args {
     opt_cc1: bool,
     opt_s: bool,
+    opt_c: bool,
     opt_hash_hash_hash: bool,
     opt_o: Option<String>,
     base_file: Option<String>,
@@ -26,6 +28,7 @@ fn parse_args() -> Args {
     let args: Vec<String> = env::args().collect();
     let mut opt_cc1 = false;
     let mut opt_s = false;
+    let mut opt_c = false;
     let mut opt_hash_hash_hash = false;
     let mut opt_o: Option<String> = None;
     let mut base_file: Option<String> = None;
@@ -52,6 +55,12 @@ fn parse_args() -> Args {
 
         if args[i] == "-S" {
             opt_s = true;
+            i += 1;
+            continue;
+        }
+
+        if args[i] == "-c" {
+            opt_c = true;
             i += 1;
             continue;
         }
@@ -109,6 +118,7 @@ fn parse_args() -> Args {
     Args {
         opt_cc1,
         opt_s,
+        opt_c,
         opt_hash_hash_hash,
         opt_o,
         base_file,
@@ -228,6 +238,89 @@ fn assemble(input: &str, output: &str, opt_hash_hash_hash: bool) -> Result<(), S
     run_subprocess(opt_hash_hash_hash, &args)
 }
 
+fn endswith(s: &str, suffix: &str) -> bool {
+    s.len() >= suffix.len() && &s[s.len() - suffix.len()..] == suffix
+}
+
+fn file_exists(path: &str) -> bool {
+    Path::new(path).exists()
+}
+
+fn find_file(pattern: &str) -> Option<String> {
+    let paths: Vec<_> = glob::glob(pattern).ok()?.filter_map(Result::ok).collect();
+    paths.last().map(|p| p.to_string_lossy().into_owned())
+}
+
+fn find_libpath() -> Result<String, String> {
+    if file_exists("/usr/lib/x86_64-linux-gnu/crti.o") {
+        return Ok("/usr/lib/x86_64-linux-gnu".to_string());
+    }
+    if file_exists("/usr/lib64/crti.o") {
+        return Ok("/usr/lib64".to_string());
+    }
+    Err("library path is not found".to_string())
+}
+
+fn find_gcc_libpath() -> Result<String, String> {
+    let patterns = [
+        "/usr/lib/gcc/x86_64-linux-gnu/*/crtbegin.o",
+        "/usr/lib/gcc/x86_64-pc-linux-gnu/*/crtbegin.o",
+        "/usr/lib/gcc/x86_64-redhat-linux/*/crtbegin.o",
+    ];
+
+    for pattern in &patterns {
+        if let Some(path) = find_file(pattern)
+            && let Some(parent) = Path::new(&path).parent()
+        {
+            return Ok(parent.to_string_lossy().into_owned());
+        }
+    }
+
+    Err("gcc library path is not found".to_string())
+}
+
+fn run_linker(inputs: &[String], output: &str, opt_hash_hash_hash: bool) -> Result<(), String> {
+    let libpath = find_libpath()?;
+    let gcc_libpath = find_gcc_libpath()?;
+
+    let mut args = vec![
+        "ld".to_string(),
+        "-o".to_string(),
+        output.to_string(),
+        "-m".to_string(),
+        "elf_x86_64".to_string(),
+        "-dynamic-linker".to_string(),
+        "/lib64/ld-linux-x86-64.so.2".to_string(),
+        format!("{}/crt1.o", libpath),
+        format!("{}/crti.o", libpath),
+        format!("{}/crtbegin.o", gcc_libpath),
+        format!("-L{}", gcc_libpath),
+        format!("-L{}", libpath),
+        format!("-L{}/..", libpath),
+        "-L/usr/lib64".to_string(),
+        "-L/lib64".to_string(),
+        "-L/usr/lib/x86_64-linux-gnu".to_string(),
+        "-L/usr/lib/x86_64-pc-linux-gnu".to_string(),
+        "-L/usr/lib/x86_64-redhat-linux".to_string(),
+        "-L/usr/lib".to_string(),
+        "-L/lib".to_string(),
+    ];
+
+    for input in inputs {
+        args.push(input.clone());
+    }
+
+    args.push("-lc".to_string());
+    args.push("-lgcc".to_string());
+    args.push("--as-needed".to_string());
+    args.push("-lgcc_s".to_string());
+    args.push("--no-as-needed".to_string());
+    args.push(format!("{}/crtend.o", gcc_libpath));
+    args.push(format!("{}/crtn.o", libpath));
+
+    run_subprocess(opt_hash_hash_hash, &args)
+}
+
 fn run() -> Result<(), String> {
     let args = parse_args();
 
@@ -237,20 +330,40 @@ fn run() -> Result<(), String> {
 
     let orig_args: Vec<String> = env::args().collect();
 
-    if args.input_paths.len() > 1 && args.opt_o.is_some() {
-        return Err("cannot specify '-o' with multiple files".to_string());
+    if args.input_paths.len() > 1 && args.opt_o.is_some() && (args.opt_c || args.opt_s) {
+        return Err("cannot specify '-o' with '-c' or '-S' with multiple files".to_string());
     }
 
+    let mut ld_args: Vec<String> = Vec::new();
+    let mut _tmpfiles: Vec<NamedTempFile> = Vec::new();
+
     for input in &args.input_paths {
-        let output = if let Some(ref o) = args.opt_o {
-            o.clone()
-        } else if args.opt_s {
-            replace_extn(input, ".s")
-        } else {
-            replace_extn(input, ".o")
-        };
+        if endswith(input, ".o") {
+            ld_args.push(input.clone());
+            continue;
+        }
+
+        if endswith(input, ".s") {
+            if !args.opt_s {
+                let output = args
+                    .opt_o
+                    .clone()
+                    .unwrap_or_else(|| replace_extn(input, ".o"));
+                assemble(input, &output, args.opt_hash_hash_hash)?;
+                ld_args.push(output);
+            }
+            continue;
+        }
+
+        if !endswith(input, ".c") && input != "-" {
+            return Err(format!("unknown file extension: {}", input));
+        }
 
         if args.opt_s {
+            let output = args
+                .opt_o
+                .clone()
+                .unwrap_or_else(|| replace_extn(input, ".s"));
             run_cc1(
                 args.opt_hash_hash_hash,
                 &orig_args,
@@ -260,14 +373,40 @@ fn run() -> Result<(), String> {
             continue;
         }
 
-        let (_tmpfile, tmpfile_path) = create_tmpfile()?;
+        if args.opt_c {
+            let output = args
+                .opt_o
+                .clone()
+                .unwrap_or_else(|| replace_extn(input, ".o"));
+            let (tmpfile, tmpfile_path) = create_tmpfile()?;
+            _tmpfiles.push(tmpfile);
+            run_cc1(
+                args.opt_hash_hash_hash,
+                &orig_args,
+                Some(input),
+                Some(&tmpfile_path),
+            )?;
+            assemble(&tmpfile_path, &output, args.opt_hash_hash_hash)?;
+            continue;
+        }
+
+        let (tmpfile1, tmpfile_path1) = create_tmpfile()?;
+        let (tmpfile2, tmpfile_path2) = create_tmpfile()?;
+        _tmpfiles.push(tmpfile1);
+        _tmpfiles.push(tmpfile2);
         run_cc1(
             args.opt_hash_hash_hash,
             &orig_args,
             Some(input),
-            Some(&tmpfile_path),
+            Some(&tmpfile_path1),
         )?;
-        assemble(&tmpfile_path, &output, args.opt_hash_hash_hash)?;
+        assemble(&tmpfile_path1, &tmpfile_path2, args.opt_hash_hash_hash)?;
+        ld_args.push(tmpfile_path2);
+    }
+
+    if !ld_args.is_empty() {
+        let output = args.opt_o.clone().unwrap_or_else(|| "a.out".to_string());
+        run_linker(&ld_args, &output, args.opt_hash_hash_hash)?;
     }
 
     Ok(())
