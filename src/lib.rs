@@ -1,5 +1,6 @@
 pub mod codegen;
 pub mod parse;
+pub mod preprocess;
 pub mod tokenize;
 
 use std::cell::RefCell;
