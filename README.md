@@ -277,7 +277,7 @@ cargo run
 
 ### Preprocessor, Includes, and Macro System
 
-- [ ] Add a do-nothing preprocessor
+- [x] Add a do-nothing preprocessor
 - [ ] Add the null directive
 - [ ] Add #include "..."
 - [ ] Skip extra tokens after #include "..."

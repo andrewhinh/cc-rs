@@ -1,7 +1,9 @@
+use crate::preprocess::preprocess;
+use crate::tokenize::tokenize;
 use crate::{
     Node, NodeKind, Obj, TagScope, TokenKind, Type, TypeKind, VarAttr, VarScope, error_at,
 };
-use crate::{declspec, is_function, parse_typedef, tokenize};
+use crate::{declspec, is_function, parse_typedef};
 use crate::{function, global_variable};
 
 fn gen_addr(
@@ -1314,13 +1316,13 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         ));
     }
 
-    let tok = tokenize(filename, src)?;
+    let mut tok = tokenize(filename, src)?;
+    preprocess(src, &mut tok);
 
     let mut globals: Vec<Obj> = Vec::new();
     let mut tag_scope_stack: Vec<Vec<TagScope>> = vec![Vec::new()];
     let mut scope_stack: Vec<Vec<VarScope>> = vec![Vec::new()];
 
-    let mut tok = tok;
     while tok.kind != TokenKind::Eof {
         let mut attr = VarAttr::default();
         let (basety, new_tok) = declspec(

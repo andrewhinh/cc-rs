@@ -2897,7 +2897,7 @@ pub fn stmt(
         let tok_loc = tok.loc;
         let line_no = tok.line_no;
         let mut node = new_node(NodeKind::For, tok_loc, line_no);
-        let mut tok = skip(filename, src, tok, "(")?;
+        let mut tok = skip(filename, src, tok.next.as_ref().unwrap(), "(")?;
 
         scope_stack.push(Vec::new());
         tag_scope_stack.push(Vec::new());
