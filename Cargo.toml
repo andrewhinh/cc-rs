@@ -7,4 +7,5 @@ license = "MIT/Apache-2.0"
 repository = "https://github.com/andrewhinh/cc-rs"
 
 [dependencies]
+glob = "0.3"
 tempfile = "3"
