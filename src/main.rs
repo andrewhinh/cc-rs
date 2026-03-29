@@ -1,6 +1,6 @@
 use std::{
     env, fs,
-    io::{self, Read, Write},
+    io::{self, Write},
     path::Path,
     process, thread,
 };
@@ -136,31 +136,6 @@ fn open_output_file(path: Option<&String>) -> Box<dyn Write> {
     Box::new(file)
 }
 
-fn read_file(path: &str) -> Result<(String, String), String> {
-    let filename = if path == "-" {
-        String::from("<stdin>")
-    } else {
-        String::from(path)
-    };
-
-    let contents = if path == "-" {
-        let mut buf = String::new();
-        io::stdin()
-            .read_to_string(&mut buf)
-            .map_err(|e| format!("cannot read stdin: {e}"))?;
-        buf
-    } else {
-        fs::read_to_string(path).map_err(|e| format!("cannot open {path}: {e}"))?
-    };
-
-    let mut contents = contents;
-    if !contents.is_empty() && !contents.ends_with('\n') {
-        contents.push('\n');
-    }
-
-    Ok((filename, contents))
-}
-
 fn run_subprocess(opt_hash_hash_hash: bool, args: &[String]) -> Result<(), String> {
     if opt_hash_hash_hash {
         eprintln!("{}", args.join(" "));
@@ -202,8 +177,8 @@ fn run_cc1(
 
 fn cc1(args: &Args) -> Result<(), String> {
     let input = args.base_file.as_ref().ok_or("no input file for cc1")?;
-    let (filename, src) = read_file(input)?;
-    let asm = emit_assembly(&filename, &src)?;
+    unsafe { std::env::set_var("CC_RS_BASE_FILE", input) };
+    let asm = emit_assembly()?;
 
     let out_path = args.output_file.as_ref();
     let mut out = open_output_file(out_path);
