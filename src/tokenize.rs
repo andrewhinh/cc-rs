@@ -425,7 +425,14 @@ pub fn tokenize_file(path: &str) -> Option<Token> {
 }
 
 fn read_file(path: &str) -> Option<String> {
-    let contents = std::fs::read_to_string(path).ok()?;
+    let contents = if path == "-" {
+        use std::io::Read;
+        let mut contents = String::new();
+        std::io::stdin().read_to_string(&mut contents).ok()?;
+        contents
+    } else {
+        std::fs::read_to_string(path).ok()?
+    };
     let mut contents = contents;
     if !contents.is_empty() && !contents.ends_with('\n') {
         contents.push('\n');

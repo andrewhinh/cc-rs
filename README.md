@@ -279,7 +279,7 @@ cargo run
 - [x] Add the null directive
 - [x] Add #include "..."
 - [x] Skip extra tokens after #include "..."
-- [ ] Add -E option
+- [x] Add -E option
 - [ ] Add #if and #endif
 - [ ] Skip nested #if in a skipped #if-clause
 - [ ] Add #else

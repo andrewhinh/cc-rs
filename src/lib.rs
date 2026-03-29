@@ -11,6 +11,7 @@ pub use parse::{
     add_type, declspec, find_tag, find_typedef, function, global_variable, is_function,
     is_typename, parse_typedef, push_tag_scope,
 };
+pub use preprocess::preprocess;
 pub use tokenize::{
     consume, equal, error_at, error_tok, get_input_files, skip, tokenize, tokenize_file, warn_tok,
 };
