@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::{File, Token, TokenKind, equal, error_tok, get_input_files, tokenize_file};
+use crate::{File, Token, TokenKind, equal, error_tok, get_input_files, tokenize_file, warn_tok};
 
 fn is_keyword(name: &str) -> bool {
     matches!(
@@ -49,6 +49,17 @@ fn is_keyword(name: &str) -> bool {
 
 fn is_hash(files: &[File], tok: &Token) -> bool {
     tok.at_bol && equal(files, tok, "#")
+}
+
+fn skip_line(files: &[File], mut tok: Token) -> Token {
+    if tok.at_bol {
+        return tok;
+    }
+    warn_tok(files, &tok, "extra token");
+    while !tok.at_bol {
+        tok = *tok.next.unwrap();
+    }
+    tok
 }
 
 fn convert_keywords(files: &[File], tok: &mut Token) {
@@ -181,7 +192,7 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
                 )
             })?;
 
-            tok = *tok.next.unwrap();
+            tok = skip_line(files, *tok.next.unwrap());
             tok = append(tok2, tok);
             continue;
         }
