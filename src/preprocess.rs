@@ -1,4 +1,4 @@
-use crate::{Token, TokenKind};
+use crate::{Token, TokenKind, equal, error_tok};
 
 fn is_keyword(name: &str) -> bool {
     matches!(
@@ -45,6 +45,10 @@ fn is_keyword(name: &str) -> bool {
     )
 }
 
+fn is_hash(src: &str, tok: &Token) -> bool {
+    tok.at_bol && equal(src, tok, "#")
+}
+
 fn convert_keywords(src: &str, tok: &mut Token) {
     let mut cur = tok;
     loop {
@@ -61,6 +65,68 @@ fn convert_keywords(src: &str, tok: &mut Token) {
     }
 }
 
-pub fn preprocess(src: &str, tok: &mut Token) {
-    convert_keywords(src, tok);
+fn preprocess2(filename: &str, src: &str, tok: Token) -> Result<Token, String> {
+    let mut head = Token {
+        kind: TokenKind::Eof,
+        next: None,
+        val: 0,
+        fval: 0.0,
+        loc: 0,
+        len: 0,
+        ty: None,
+        str: None,
+        line_no: 0,
+        at_bol: false,
+    };
+    let mut cur = &mut head;
+    let mut tok = tok;
+
+    loop {
+        if tok.kind == TokenKind::Eof {
+            break;
+        }
+
+        if !is_hash(src, &tok) {
+            let next = tok.next.take();
+            cur.next = Some(Box::new(tok));
+            cur = cur.next.as_mut().unwrap();
+            tok = *next.unwrap();
+            continue;
+        }
+
+        tok = *tok.next.unwrap();
+
+        if tok.at_bol {
+            continue;
+        }
+
+        return Err(error_tok(
+            filename,
+            src,
+            &tok,
+            "invalid preprocessor directive",
+        ));
+    }
+
+    cur.next = Some(Box::new(Token {
+        kind: TokenKind::Eof,
+        next: None,
+        val: 0,
+        fval: 0.0,
+        loc: 0,
+        len: 0,
+        ty: None,
+        str: None,
+        line_no: 0,
+        at_bol: false,
+    }));
+
+    Ok(*head.next.unwrap())
+}
+
+pub fn preprocess(filename: &str, src: &str, tok: Token) -> Result<Token, String> {
+    let tok = preprocess2(filename, src, tok)?;
+    let mut tok = tok;
+    convert_keywords(src, &mut tok);
+    Ok(tok)
 }

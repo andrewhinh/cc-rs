@@ -1,6 +1,6 @@
 use crate::{Token, TokenKind, Type, error_at, error_tok};
 
-pub fn new_token(kind: TokenKind, start: usize, end: usize) -> Token {
+pub fn new_token(kind: TokenKind, start: usize, end: usize, at_bol: bool) -> Token {
     Token {
         kind,
         next: None,
@@ -11,6 +11,7 @@ pub fn new_token(kind: TokenKind, start: usize, end: usize) -> Token {
         ty: None,
         str: None,
         line_no: 0,
+        at_bol,
     }
 }
 
@@ -248,7 +249,7 @@ fn read_int_literal(chars: &[char], pos: usize) -> Result<(i64, usize, Type), St
     Ok((val, p, ty))
 }
 
-fn read_number(chars: &[char], pos: usize) -> Result<(Token, usize), String> {
+fn read_number(chars: &[char], pos: usize, at_bol: bool) -> Result<(Token, usize), String> {
     let start = pos;
 
     if chars[pos] == '.' {
@@ -278,7 +279,7 @@ fn read_number(chars: &[char], pos: usize) -> Result<(Token, usize), String> {
             Type::new_double()
         };
 
-        let mut tok = new_token(TokenKind::Num, start, p);
+        let mut tok = new_token(TokenKind::Num, start, p, at_bol);
         tok.fval = fval;
         tok.ty = Some(ty);
         return Ok((tok, p));
@@ -316,13 +317,13 @@ fn read_number(chars: &[char], pos: usize) -> Result<(Token, usize), String> {
             Type::new_double()
         };
 
-        let mut tok = new_token(TokenKind::Num, start, p);
+        let mut tok = new_token(TokenKind::Num, start, p, at_bol);
         tok.fval = fval;
         tok.ty = Some(ty);
         return Ok((tok, p));
     }
 
-    let mut tok = new_token(TokenKind::Num, start, end);
+    let mut tok = new_token(TokenKind::Num, start, end, at_bol);
     tok.val = val;
     tok.ty = Some(ty);
     Ok((tok, end))
@@ -395,12 +396,20 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
         ty: None,
         str: None,
         line_no: 0,
+        at_bol: false,
     };
     let mut cur = &mut head;
     let chars: Vec<char> = src.chars().collect();
     let mut pos = 0;
+    let mut at_bol = true;
 
     while pos < chars.len() {
+        if chars[pos] == '\n' {
+            pos += 1;
+            at_bol = true;
+            continue;
+        }
+
         if chars[pos].is_whitespace() {
             pos += 1;
             continue;
@@ -459,12 +468,13 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
                 return Err(error_at(filename, src, start, "unclosed string literal"));
             }
             pos += 1;
-            let mut tok = new_token(TokenKind::Str, start, pos);
+            let mut tok = new_token(TokenKind::Str, start, pos, at_bol);
             let len = str_content.len() + 1;
             tok.ty = Some(Type::new_array(Type::new_char(), len as i64));
             tok.str = Some(str_content);
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
+            at_bol = false;
             continue;
         }
 
@@ -492,11 +502,12 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
                 return Err(error_at(filename, src, pos, "unclosed char literal"));
             }
             pos += 1;
-            let mut tok = new_token(TokenKind::Num, start, pos);
+            let mut tok = new_token(TokenKind::Num, start, pos, at_bol);
             tok.val = c;
             tok.ty = Some(Type::new_int());
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
+            at_bol = false;
             continue;
         }
 
@@ -504,10 +515,11 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
             || (chars[pos] == '.' && pos + 1 < chars.len() && chars[pos + 1].is_ascii_digit())
         {
             let (tok, end) =
-                read_number(&chars, pos).map_err(|e| error_at(filename, src, pos, &e))?;
+                read_number(&chars, pos, at_bol).map_err(|e| error_at(filename, src, pos, &e))?;
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
             pos = end;
+            at_bol = false;
             continue;
         }
 
@@ -516,24 +528,26 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
             while pos < chars.len() && (chars[pos].is_ascii_alphanumeric() || chars[pos] == '_') {
                 pos += 1;
             }
-            let tok = new_token(TokenKind::Ident, start, pos);
+            let tok = new_token(TokenKind::Ident, start, pos, at_bol);
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
+            at_bol = false;
             continue;
         }
 
         if let Some(len) = read_punct(&chars, pos) {
-            let tok = new_token(TokenKind::Punct, pos, pos + len);
+            let tok = new_token(TokenKind::Punct, pos, pos + len, at_bol);
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
             pos += len;
+            at_bol = false;
             continue;
         }
 
         return Err(error_at(filename, src, pos, "invalid token"));
     }
 
-    cur.next = Some(Box::new(new_token(TokenKind::Eof, pos, pos)));
+    cur.next = Some(Box::new(new_token(TokenKind::Eof, pos, pos, at_bol)));
     let mut tok = head.next.unwrap();
     add_line_numbers(src, &mut tok);
     Ok(*tok)

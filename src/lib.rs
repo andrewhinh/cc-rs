@@ -34,6 +34,7 @@ pub struct Token {
     pub ty: Option<Type>,
     pub str: Option<Vec<u8>>,
     pub line_no: usize,
+    pub at_bol: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

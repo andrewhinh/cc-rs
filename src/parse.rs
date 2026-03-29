@@ -2514,6 +2514,7 @@ fn resolve_goto_labels(filename: &str, src: &str, body: &mut Node) -> Result<(),
                 ty: None,
                 str: None,
                 line_no: goto.line_no,
+                at_bol: false,
             };
             return Err(error_tok(filename, src, &tok, "use of undeclared label"));
         }
