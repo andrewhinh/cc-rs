@@ -1316,8 +1316,8 @@ pub fn emit_assembly(filename: &str, src: &str) -> Result<String, String> {
         ));
     }
 
-    let mut tok = tokenize(filename, src)?;
-    preprocess(src, &mut tok);
+    let tok = tokenize(filename, src)?;
+    let mut tok = preprocess(filename, src, tok)?;
 
     let mut globals: Vec<Obj> = Vec::new();
     let mut tag_scope_stack: Vec<Vec<TagScope>> = vec![Vec::new()];
