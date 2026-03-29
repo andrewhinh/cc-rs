@@ -1,6 +1,15 @@
-use crate::{Token, TokenKind, Type, error_at, error_tok};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-pub fn new_token(kind: TokenKind, start: usize, end: usize, at_bol: bool) -> Token {
+use crate::{File, Token, TokenKind, Type};
+
+static FILE_NO: AtomicUsize = AtomicUsize::new(0);
+
+fn get_file_no() -> usize {
+    FILE_NO.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+pub fn new_token(kind: TokenKind, start: usize, end: usize, at_bol: bool, file_no: usize) -> Token {
     Token {
         kind,
         next: None,
@@ -10,6 +19,7 @@ pub fn new_token(kind: TokenKind, start: usize, end: usize, at_bol: bool) -> Tok
         len: end - start,
         ty: None,
         str: None,
+        file_no,
         line_no: 0,
         at_bol,
     }
@@ -249,7 +259,12 @@ fn read_int_literal(chars: &[char], pos: usize) -> Result<(i64, usize, Type), St
     Ok((val, p, ty))
 }
 
-fn read_number(chars: &[char], pos: usize, at_bol: bool) -> Result<(Token, usize), String> {
+fn read_number(
+    chars: &[char],
+    pos: usize,
+    at_bol: bool,
+    file_no: usize,
+) -> Result<(Token, usize), String> {
     let start = pos;
 
     if chars[pos] == '.' {
@@ -279,7 +294,7 @@ fn read_number(chars: &[char], pos: usize, at_bol: bool) -> Result<(Token, usize
             Type::new_double()
         };
 
-        let mut tok = new_token(TokenKind::Num, start, p, at_bol);
+        let mut tok = new_token(TokenKind::Num, start, p, at_bol, file_no);
         tok.fval = fval;
         tok.ty = Some(ty);
         return Ok((tok, p));
@@ -317,13 +332,13 @@ fn read_number(chars: &[char], pos: usize, at_bol: bool) -> Result<(Token, usize
             Type::new_double()
         };
 
-        let mut tok = new_token(TokenKind::Num, start, p, at_bol);
+        let mut tok = new_token(TokenKind::Num, start, p, at_bol, file_no);
         tok.fval = fval;
         tok.ty = Some(ty);
         return Ok((tok, p));
     }
 
-    let mut tok = new_token(TokenKind::Num, start, end, at_bol);
+    let mut tok = new_token(TokenKind::Num, start, end, at_bol, file_no);
     tok.val = val;
     tok.ty = Some(ty);
     Ok((tok, end))
@@ -385,7 +400,42 @@ fn parse_hex_float(s: &str) -> Result<f64, String> {
     Ok(result)
 }
 
-pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
+static INPUT_FILES: Mutex<Vec<File>> = Mutex::new(Vec::new());
+
+pub fn get_input_files() -> Vec<File> {
+    INPUT_FILES.lock().unwrap().clone()
+}
+
+fn new_file(name: String, file_no: usize, contents: String) -> File {
+    File {
+        name,
+        file_no,
+        contents,
+    }
+}
+
+pub fn tokenize_file(path: &str) -> Option<Token> {
+    let contents = read_file(path)?;
+    let file_no = get_file_no();
+    let file = new_file(path.to_string(), file_no, contents);
+
+    INPUT_FILES.lock().unwrap().push(file.clone());
+
+    Some(tokenize(&file))
+}
+
+fn read_file(path: &str) -> Option<String> {
+    let contents = std::fs::read_to_string(path).ok()?;
+    let mut contents = contents;
+    if !contents.is_empty() && !contents.ends_with('\n') {
+        contents.push('\n');
+    }
+    Some(contents)
+}
+
+pub fn tokenize(file: &File) -> Token {
+    let file_no = file.file_no;
+    let src = &file.contents;
     let mut head = Token {
         kind: TokenKind::Eof,
         next: None,
@@ -395,6 +445,7 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
         len: 0,
         ty: None,
         str: None,
+        file_no,
         line_no: 0,
         at_bol: false,
     };
@@ -424,19 +475,13 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
         }
 
         if pos + 1 < chars.len() && chars[pos] == '/' && chars[pos + 1] == '*' {
-            let start = pos;
             pos += 2;
-            let mut found = false;
             while pos + 1 < chars.len() {
                 if chars[pos] == '*' && chars[pos + 1] == '/' {
                     pos += 2;
-                    found = true;
                     break;
                 }
                 pos += 1;
-            }
-            if !found {
-                return Err(error_at(filename, src, start, "unclosed block comment"));
             }
             continue;
         }
@@ -447,17 +492,33 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
             let mut str_content: Vec<u8> = Vec::new();
             while pos < chars.len() && chars[pos] != '"' {
                 if chars[pos] == '\n' || chars[pos] == '\0' {
-                    return Err(error_at(filename, src, start, "unclosed string literal"));
+                    cur.next = Some(Box::new(make_error_token(
+                        file_no,
+                        start,
+                        "unclosed string literal",
+                    )));
+                    return *head.next.unwrap();
                 }
                 if chars[pos] == '\\' {
                     pos += 1;
                     if pos >= chars.len() {
-                        return Err(error_at(filename, src, start, "unclosed string literal"));
+                        cur.next = Some(Box::new(make_error_token(
+                            file_no,
+                            start,
+                            "unclosed string literal",
+                        )));
+                        return *head.next.unwrap();
                     }
-                    let (escaped, consumed) = read_escaped_char(&chars, pos)
-                        .map_err(|e| error_at(filename, src, pos, &e))?;
-                    str_content.push(escaped as u8);
-                    pos += consumed;
+                    match read_escaped_char(&chars, pos) {
+                        Ok((escaped, consumed)) => {
+                            str_content.push(escaped as u8);
+                            pos += consumed;
+                        }
+                        Err(e) => {
+                            cur.next = Some(Box::new(make_error_token(file_no, pos, &e)));
+                            return *head.next.unwrap();
+                        }
+                    }
                     continue;
                 } else {
                     str_content.push(chars[pos] as u8);
@@ -465,10 +526,15 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
                 pos += 1;
             }
             if pos >= chars.len() {
-                return Err(error_at(filename, src, start, "unclosed string literal"));
+                cur.next = Some(Box::new(make_error_token(
+                    file_no,
+                    start,
+                    "unclosed string literal",
+                )));
+                return *head.next.unwrap();
             }
             pos += 1;
-            let mut tok = new_token(TokenKind::Str, start, pos, at_bol);
+            let mut tok = new_token(TokenKind::Str, start, pos, at_bol, file_no);
             let len = str_content.len() + 1;
             tok.ty = Some(Type::new_array(Type::new_char(), len as i64));
             tok.str = Some(str_content);
@@ -482,27 +548,48 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
             let start = pos;
             pos += 1;
             if pos >= chars.len() {
-                return Err(error_at(filename, src, start, "unclosed char literal"));
+                cur.next = Some(Box::new(make_error_token(
+                    file_no,
+                    start,
+                    "unclosed char literal",
+                )));
+                return *head.next.unwrap();
             }
             let c: i64;
             if chars[pos] == '\\' {
                 pos += 1;
                 if pos >= chars.len() {
-                    return Err(error_at(filename, src, start, "unclosed char literal"));
+                    cur.next = Some(Box::new(make_error_token(
+                        file_no,
+                        start,
+                        "unclosed char literal",
+                    )));
+                    return *head.next.unwrap();
                 }
-                let (escaped, consumed) =
-                    read_escaped_char(&chars, pos).map_err(|e| error_at(filename, src, pos, &e))?;
-                c = (escaped as u8) as i8 as i64;
-                pos += consumed;
+                match read_escaped_char(&chars, pos) {
+                    Ok((escaped, consumed)) => {
+                        c = (escaped as u8) as i8 as i64;
+                        pos += consumed;
+                    }
+                    Err(e) => {
+                        cur.next = Some(Box::new(make_error_token(file_no, pos, &e)));
+                        return *head.next.unwrap();
+                    }
+                }
             } else {
                 c = (chars[pos] as u8) as i8 as i64;
                 pos += 1;
             }
             if pos >= chars.len() || chars[pos] != '\'' {
-                return Err(error_at(filename, src, pos, "unclosed char literal"));
+                cur.next = Some(Box::new(make_error_token(
+                    file_no,
+                    pos,
+                    "unclosed char literal",
+                )));
+                return *head.next.unwrap();
             }
             pos += 1;
-            let mut tok = new_token(TokenKind::Num, start, pos, at_bol);
+            let mut tok = new_token(TokenKind::Num, start, pos, at_bol, file_no);
             tok.val = c;
             tok.ty = Some(Type::new_int());
             cur.next = Some(Box::new(tok));
@@ -514,12 +601,18 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
         if chars[pos].is_ascii_digit()
             || (chars[pos] == '.' && pos + 1 < chars.len() && chars[pos + 1].is_ascii_digit())
         {
-            let (tok, end) =
-                read_number(&chars, pos, at_bol).map_err(|e| error_at(filename, src, pos, &e))?;
-            cur.next = Some(Box::new(tok));
-            cur = cur.next.as_mut().unwrap();
-            pos = end;
-            at_bol = false;
+            match read_number(&chars, pos, at_bol, file_no) {
+                Ok((tok, end)) => {
+                    cur.next = Some(Box::new(tok));
+                    cur = cur.next.as_mut().unwrap();
+                    pos = end;
+                    at_bol = false;
+                }
+                Err(e) => {
+                    cur.next = Some(Box::new(make_error_token(file_no, pos, &e)));
+                    return *head.next.unwrap();
+                }
+            }
             continue;
         }
 
@@ -528,7 +621,7 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
             while pos < chars.len() && (chars[pos].is_ascii_alphanumeric() || chars[pos] == '_') {
                 pos += 1;
             }
-            let tok = new_token(TokenKind::Ident, start, pos, at_bol);
+            let tok = new_token(TokenKind::Ident, start, pos, at_bol, file_no);
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
             at_bol = false;
@@ -536,7 +629,7 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
         }
 
         if let Some(len) = read_punct(&chars, pos) {
-            let tok = new_token(TokenKind::Punct, pos, pos + len, at_bol);
+            let tok = new_token(TokenKind::Punct, pos, pos + len, at_bol, file_no);
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
             pos += len;
@@ -544,32 +637,118 @@ pub fn tokenize(filename: &str, src: &str) -> Result<Token, String> {
             continue;
         }
 
-        return Err(error_at(filename, src, pos, "invalid token"));
+        cur.next = Some(Box::new(make_error_token(file_no, pos, "invalid token")));
+        return *head.next.unwrap();
     }
 
-    cur.next = Some(Box::new(new_token(TokenKind::Eof, pos, pos, at_bol)));
+    cur.next = Some(Box::new(new_token(
+        TokenKind::Eof,
+        pos,
+        pos,
+        at_bol,
+        file_no,
+    )));
     let mut tok = head.next.unwrap();
     add_line_numbers(src, &mut tok);
-    Ok(*tok)
+    *tok
 }
 
-pub fn equal(src: &str, tok: &Token, s: &str) -> bool {
+fn make_error_token(file_no: usize, loc: usize, msg: &str) -> Token {
+    Token {
+        kind: TokenKind::Eof,
+        next: None,
+        val: 0,
+        fval: 0.0,
+        loc,
+        len: msg.len(),
+        ty: None,
+        str: Some(msg.as_bytes().to_vec()),
+        file_no,
+        line_no: 0,
+        at_bol: false,
+    }
+}
+
+pub fn equal(files: &[File], tok: &Token, s: &str) -> bool {
+    let file = match files.iter().find(|f| f.file_no == tok.file_no) {
+        Some(f) => f,
+        None => return false,
+    };
     (tok.kind == TokenKind::Punct || tok.kind == TokenKind::Keyword)
         && tok.len == s.len()
-        && src.chars().skip(tok.loc).take(tok.len).eq(s.chars())
+        && file
+            .contents
+            .chars()
+            .skip(tok.loc)
+            .take(tok.len)
+            .eq(s.chars())
 }
 
-pub fn skip(filename: &str, src: &str, tok: &Token, s: &str) -> Result<Token, String> {
-    if equal(src, tok, s) {
+pub fn skip(files: &[File], tok: &Token, s: &str) -> Result<Token, String> {
+    if equal(files, tok, s) {
         return Ok(*tok.next.as_ref().unwrap().clone());
     }
-    Err(error_tok(filename, src, tok, &format!("expected '{s}'")))
+    Err(error_tok(files, tok, &format!("expected '{s}'")))
 }
 
-pub fn consume(src: &str, tok: &Token, s: &str) -> (bool, Token) {
-    if equal(src, tok, s) {
+pub fn consume(files: &[File], tok: &Token, s: &str) -> (bool, Token) {
+    if equal(files, tok, s) {
         (true, *tok.next.as_ref().unwrap().clone())
     } else {
         (false, tok.clone())
     }
+}
+
+pub fn error_tok(files: &[File], tok: &Token, msg: &str) -> String {
+    let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
+    let src = &file.contents;
+    let filename = &file.name;
+
+    let mut line_start = tok.loc;
+    while line_start > 0 && src.as_bytes()[line_start - 1] != b'\n' {
+        line_start -= 1;
+    }
+
+    let mut line_end = tok.loc;
+    while line_end < src.len() && src.as_bytes()[line_end] != b'\n' {
+        line_end += 1;
+    }
+
+    let line = &src[line_start..line_end];
+    let indent = format!("{filename}:{}: ", tok.line_no).len();
+    let pos = tok.loc - line_start + indent;
+
+    format!(
+        "{filename}:{}: {line}\n{:width$}^ {msg}\n",
+        tok.line_no,
+        "",
+        width = pos
+    )
+}
+
+pub fn error_at(files: &[File], file_no: usize, loc: usize, msg: &str) -> String {
+    let file = files.iter().find(|f| f.file_no == file_no).unwrap();
+    let src = &file.contents;
+    let filename = &file.name;
+
+    let mut line_start = loc;
+    while line_start > 0 && src.as_bytes()[line_start - 1] != b'\n' {
+        line_start -= 1;
+    }
+
+    let mut line_end = loc;
+    while line_end < src.len() && src.as_bytes()[line_end] != b'\n' {
+        line_end += 1;
+    }
+
+    let line_no = src[..loc].matches('\n').count() + 1;
+    let line = &src[line_start..line_end];
+    let indent = format!("{filename}:{line_no}: ").len();
+    let pos = loc - line_start + indent;
+
+    format!(
+        "{filename}:{line_no}: {line}\n{:width$}^ {msg}\n",
+        "",
+        width = pos
+    )
 }

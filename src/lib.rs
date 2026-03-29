@@ -11,7 +11,9 @@ pub use parse::{
     add_type, declspec, find_tag, find_typedef, function, global_variable, is_function,
     is_typename, parse_typedef, push_tag_scope,
 };
-pub use tokenize::{consume, equal, skip, tokenize};
+pub use tokenize::{
+    consume, equal, error_at, error_tok, get_input_files, skip, tokenize, tokenize_file,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
@@ -24,6 +26,13 @@ pub enum TokenKind {
 }
 
 #[derive(Debug, Clone)]
+pub struct File {
+    pub name: String,
+    pub file_no: usize,
+    pub contents: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,
     pub next: Option<Box<Token>>,
@@ -33,6 +42,7 @@ pub struct Token {
     pub len: usize,
     pub ty: Option<Type>,
     pub str: Option<Vec<u8>>,
+    pub file_no: usize,
     pub line_no: usize,
     pub at_bol: bool,
 }
@@ -510,6 +520,7 @@ pub struct Obj {
 pub struct Node {
     pub kind: NodeKind,
     pub tok_loc: usize,
+    pub file_no: usize,
     pub line_no: usize,
     pub ty: Option<Type>,
     pub next: Option<Box<Node>>,
@@ -534,57 +545,6 @@ pub struct Node {
     pub cont_label: Option<String>,
     pub case_next: Option<Box<Node>>,
     pub default_case: Option<Box<Node>>,
-}
-
-pub fn error_at(filename: &str, src: &str, loc: usize, msg: &str) -> String {
-    let mut line_start = loc;
-    while line_start > 0 && src.as_bytes()[line_start - 1] != b'\n' {
-        line_start -= 1;
-    }
-
-    let mut line_end = loc;
-    while line_end < src.len() && src.as_bytes()[line_end] != b'\n' {
-        line_end += 1;
-    }
-
-    let line_no = src[..loc].matches('\n').count() + 1;
-    let line = &src[line_start..line_end];
-
-    let indent = format!("{filename}:{line_no}: ").len();
-    let pos = loc - line_start + indent;
-
-    format!(
-        "{filename}:{line_no}: {line}\n{:width$}^ {msg}\n",
-        "",
-        width = pos
-    )
-}
-
-fn verror_at(filename: &str, src: &str, loc: usize, line_no: usize, msg: &str) -> String {
-    let mut line_start = loc;
-    while line_start > 0 && src.as_bytes()[line_start - 1] != b'\n' {
-        line_start -= 1;
-    }
-
-    let mut line_end = loc;
-    while line_end < src.len() && src.as_bytes()[line_end] != b'\n' {
-        line_end += 1;
-    }
-
-    let line = &src[line_start..line_end];
-
-    let indent = format!("{filename}:{line_no}: ").len();
-    let pos = loc - line_start + indent;
-
-    format!(
-        "{filename}:{line_no}: {line}\n{:width$}^ {msg}\n",
-        "",
-        width = pos
-    )
-}
-
-pub fn error_tok(filename: &str, src: &str, tok: &Token, msg: &str) -> String {
-    verror_at(filename, src, tok.loc, tok.line_no, msg)
 }
 
 pub fn align_to(n: i64, align: i64) -> i64 {
