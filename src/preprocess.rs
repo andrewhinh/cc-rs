@@ -174,19 +174,22 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
             }
 
             let filename = String::from_utf8_lossy(&tok.str.clone().unwrap()).into_owned();
-            let current_file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
-            let current_path = Path::new(&current_file.name);
-            let dir = current_path.parent().unwrap_or(Path::new("."));
-            let include_path = dir.join(&filename);
+            let include_path = if filename.starts_with('/') {
+                filename
+            } else {
+                let current_file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
+                let current_path = Path::new(&current_file.name);
+                let dir = current_path.parent().unwrap_or(Path::new("."));
+                dir.join(&filename).to_string_lossy().into_owned()
+            };
 
-            let path_str = include_path.to_string_lossy().into_owned();
-            let tok2 = tokenize_file(&path_str).ok_or_else(|| {
+            let tok2 = tokenize_file(&include_path).ok_or_else(|| {
                 error_tok(
                     files,
                     &tok,
                     &format!(
                         "cannot open {}: {}",
-                        path_str,
+                        include_path,
                         std::io::Error::new(std::io::ErrorKind::NotFound, "file not found")
                     ),
                 )

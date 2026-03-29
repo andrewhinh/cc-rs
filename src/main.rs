@@ -5,13 +5,17 @@ use std::{
     process, thread,
 };
 
-use cc_rs::codegen::emit_assembly;
+use cc_rs::{
+    Token, TokenKind, codegen::emit_assembly, get_input_files, preprocess::preprocess,
+    tokenize::tokenize_file,
+};
 use tempfile::NamedTempFile;
 
 struct Args {
     opt_cc1: bool,
     opt_s: bool,
     opt_c: bool,
+    opt_e: bool,
     opt_hash_hash_hash: bool,
     opt_o: Option<String>,
     base_file: Option<String>,
@@ -29,6 +33,7 @@ fn parse_args() -> Args {
     let mut opt_cc1 = false;
     let mut opt_s = false;
     let mut opt_c = false;
+    let mut opt_e = false;
     let mut opt_hash_hash_hash = false;
     let mut opt_o: Option<String> = None;
     let mut base_file: Option<String> = None;
@@ -61,6 +66,12 @@ fn parse_args() -> Args {
 
         if args[i] == "-c" {
             opt_c = true;
+            i += 1;
+            continue;
+        }
+
+        if args[i] == "-E" {
+            opt_e = true;
             i += 1;
             continue;
         }
@@ -119,6 +130,7 @@ fn parse_args() -> Args {
         opt_cc1,
         opt_s,
         opt_c,
+        opt_e,
         opt_hash_hash_hash,
         opt_o,
         base_file,
@@ -175,9 +187,37 @@ fn run_cc1(
     run_subprocess(opt_hash_hash_hash, &new_args)
 }
 
+fn print_tokens(tok: &Token, opt_o: Option<&String>) -> Result<(), String> {
+    let mut out = open_output_file(opt_o);
+    let files = get_input_files();
+    let mut tok = tok;
+
+    while tok.kind != TokenKind::Eof {
+        if tok.at_bol {
+            writeln!(out).map_err(|e| format!("write error: {e}"))?;
+        }
+        let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
+        let token_str: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
+        write!(out, " {}", token_str).map_err(|e| format!("write error: {e}"))?;
+        tok = tok.next.as_ref().unwrap();
+    }
+    writeln!(out).map_err(|e| format!("write error: {e}"))?;
+    Ok(())
+}
+
 fn cc1(args: &Args) -> Result<(), String> {
     let input = args.base_file.as_ref().ok_or("no input file for cc1")?;
-    unsafe { std::env::set_var("CC_RS_BASE_FILE", input) };
+    unsafe {
+        std::env::set_var("CC_RS_BASE_FILE", input);
+    }
+
+    let tok = tokenize_file(input).ok_or("cannot open input file")?;
+    let tok = preprocess(tok)?;
+
+    if args.opt_e {
+        return print_tokens(&tok, args.opt_o.as_ref());
+    }
+
     let asm = emit_assembly()?;
 
     let out_path = args.output_file.as_ref();
@@ -305,8 +345,11 @@ fn run() -> Result<(), String> {
 
     let orig_args: Vec<String> = env::args().collect();
 
-    if args.input_paths.len() > 1 && args.opt_o.is_some() && (args.opt_c || args.opt_s) {
-        return Err("cannot specify '-o' with '-c' or '-S' with multiple files".to_string());
+    if args.input_paths.len() > 1
+        && args.opt_o.is_some()
+        && (args.opt_c || args.opt_s || args.opt_e)
+    {
+        return Err("cannot specify '-o' with '-c', '-S' or '-E' with multiple files".to_string());
     }
 
     let mut ld_args: Vec<String> = Vec::new();
@@ -332,6 +375,11 @@ fn run() -> Result<(), String> {
 
         if !endswith(input, ".c") && input != "-" {
             return Err(format!("unknown file extension: {}", input));
+        }
+
+        if args.opt_e {
+            run_cc1(args.opt_hash_hash_hash, &orig_args, Some(input), None)?;
+            continue;
         }
 
         if args.opt_s {
