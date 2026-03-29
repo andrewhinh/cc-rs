@@ -12,7 +12,7 @@ pub use parse::{
     is_typename, parse_typedef, push_tag_scope,
 };
 pub use tokenize::{
-    consume, equal, error_at, error_tok, get_input_files, skip, tokenize, tokenize_file,
+    consume, equal, error_at, error_tok, get_input_files, skip, tokenize, tokenize_file, warn_tok,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

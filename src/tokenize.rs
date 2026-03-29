@@ -700,6 +700,11 @@ pub fn consume(files: &[File], tok: &Token, s: &str) -> (bool, Token) {
     }
 }
 
+pub fn warn_tok(files: &[File], tok: &Token, msg: &str) {
+    let warning = error_tok(files, tok, msg);
+    eprint!("warning: {}", warning);
+}
+
 pub fn error_tok(files: &[File], tok: &Token, msg: &str) -> String {
     let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
     let src = &file.contents;
