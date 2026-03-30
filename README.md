@@ -285,7 +285,7 @@ cargo run
 - [x] Add #if and #endif
 - [x] Skip nested #if in a skipped #if-clause
 - [x] Add #else
-- [ ] Add #elif
+- [x] Add #elif
 - [ ] Add objlike #define
 - [ ] Add #undef
 - [ ] Expand macros in the #if and #elif argument context

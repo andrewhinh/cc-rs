@@ -7,8 +7,9 @@ use crate::{
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum CondInclCtx {
-    InThen,
-    InElse,
+    Then,
+    Elif,
+    Else,
 }
 
 #[derive(Debug, Clone)]
@@ -139,10 +140,11 @@ fn skip_cond_incl(files: &[File], mut tok: Token) -> Token {
             continue;
         }
         if is_hash(files, &tok)
-            && tok
-                .next
-                .as_ref()
-                .is_some_and(|n| token_str_eq(files, n, "else") || token_str_eq(files, n, "endif"))
+            && tok.next.as_ref().is_some_and(|n| {
+                token_str_eq(files, n, "elif")
+                    || token_str_eq(files, n, "else")
+                    || token_str_eq(files, n, "endif")
+            })
         {
             break;
         }
@@ -207,7 +209,7 @@ fn eval_const_expr(files: &[File], tok: &Token) -> Result<(i64, Token), String> 
 fn push_cond_incl(tok: &Token, included: bool) {
     let ci = CondIncl {
         next: cond_incl_get(),
-        ctx: CondInclCtx::InThen,
+        ctx: CondInclCtx::Then,
         tok: tok.clone(),
         included,
     };
@@ -363,13 +365,37 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
             continue;
         }
 
+        if token_str_eq(files, &tok, "elif") {
+            let ci = cond_incl_get();
+            if ci.is_none() || ci.as_ref().unwrap().ctx == CondInclCtx::Else {
+                return Err(error_tok(files, &start, "stray #elif"));
+            }
+            let mut ci = ci.unwrap();
+            ci.ctx = CondInclCtx::Elif;
+            cond_incl_set(Some(ci.clone()));
+
+            if !ci.included {
+                let (val, new_tok) = eval_const_expr(files, &tok)?;
+                tok = new_tok;
+                if val != 0 {
+                    ci.included = true;
+                    cond_incl_set(Some(ci));
+                } else {
+                    tok = skip_cond_incl(files, tok);
+                }
+            } else {
+                tok = skip_cond_incl(files, tok);
+            }
+            continue;
+        }
+
         if token_str_eq(files, &tok, "else") {
             let ci = cond_incl_get();
-            if ci.is_none() || ci.as_ref().unwrap().ctx == CondInclCtx::InElse {
+            if ci.is_none() || ci.as_ref().unwrap().ctx == CondInclCtx::Else {
                 return Err(error_tok(files, &start, "stray #else"));
             }
             let mut ci = ci.unwrap();
-            ci.ctx = CondInclCtx::InElse;
+            ci.ctx = CondInclCtx::Else;
             cond_incl_set(Some(ci));
             tok = skip_line(files, *tok.next.unwrap());
 
