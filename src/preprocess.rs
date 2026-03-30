@@ -101,9 +101,19 @@ fn skip_cond_incl(files: &[File], mut tok: Token) -> Token {
             && tok
                 .next
                 .as_ref()
+                .is_some_and(|n| token_str_eq(files, n, "if"))
+        {
+            tok = skip_cond_incl(files, *tok.next.unwrap().next.unwrap());
+            tok = *tok.next.unwrap();
+            continue;
+        }
+        if is_hash(files, &tok)
+            && tok
+                .next
+                .as_ref()
                 .is_some_and(|n| token_str_eq(files, n, "endif"))
         {
-            return tok;
+            break;
         }
         tok = *tok.next.unwrap();
     }
