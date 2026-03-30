@@ -283,7 +283,7 @@ cargo run
 - [x] Skip extra tokens after #include "..."
 - [x] Add -E option
 - [x] Add #if and #endif
-- [ ] Skip nested #if in a skipped #if-clause
+- [x] Skip nested #if in a skipped #if-clause
 - [ ] Add #else
 - [ ] Add #elif
 - [ ] Add objlike #define
