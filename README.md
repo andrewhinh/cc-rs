@@ -284,7 +284,7 @@ cargo run
 - [x] Add -E option
 - [x] Add #if and #endif
 - [x] Skip nested #if in a skipped #if-clause
-- [ ] Add #else
+- [x] Add #else
 - [ ] Add #elif
 - [ ] Add objlike #define
 - [ ] Add #undef

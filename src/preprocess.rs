@@ -5,10 +5,18 @@ use crate::{
     File, Token, TokenKind, const_expr, equal, error_tok, get_input_files, tokenize_file, warn_tok,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CondInclCtx {
+    InThen,
+    InElse,
+}
+
 #[derive(Debug, Clone)]
 struct CondIncl {
     next: Option<Box<CondIncl>>,
+    ctx: CondInclCtx,
     tok: Token,
+    included: bool,
 }
 
 thread_local! {
@@ -95,6 +103,30 @@ fn skip_line(files: &[File], mut tok: Token) -> Token {
     tok
 }
 
+fn skip_cond_incl2(files: &[File], mut tok: Token) -> Token {
+    while tok.kind != TokenKind::Eof {
+        if is_hash(files, &tok)
+            && tok
+                .next
+                .as_ref()
+                .is_some_and(|n| token_str_eq(files, n, "if"))
+        {
+            tok = skip_cond_incl2(files, *tok.next.unwrap().next.unwrap());
+            continue;
+        }
+        if is_hash(files, &tok)
+            && tok
+                .next
+                .as_ref()
+                .is_some_and(|n| token_str_eq(files, n, "endif"))
+        {
+            return *tok.next.unwrap().next.unwrap();
+        }
+        tok = *tok.next.unwrap();
+    }
+    tok
+}
+
 fn skip_cond_incl(files: &[File], mut tok: Token) -> Token {
     while tok.kind != TokenKind::Eof {
         if is_hash(files, &tok)
@@ -103,15 +135,14 @@ fn skip_cond_incl(files: &[File], mut tok: Token) -> Token {
                 .as_ref()
                 .is_some_and(|n| token_str_eq(files, n, "if"))
         {
-            tok = skip_cond_incl(files, *tok.next.unwrap().next.unwrap());
-            tok = *tok.next.unwrap();
+            tok = skip_cond_incl2(files, *tok.next.unwrap().next.unwrap());
             continue;
         }
         if is_hash(files, &tok)
             && tok
                 .next
                 .as_ref()
-                .is_some_and(|n| token_str_eq(files, n, "endif"))
+                .is_some_and(|n| token_str_eq(files, n, "else") || token_str_eq(files, n, "endif"))
         {
             break;
         }
@@ -173,10 +204,12 @@ fn eval_const_expr(files: &[File], tok: &Token) -> Result<(i64, Token), String> 
     Ok((val, rest))
 }
 
-fn push_cond_incl(tok: &Token) {
+fn push_cond_incl(tok: &Token, included: bool) {
     let ci = CondIncl {
         next: cond_incl_get(),
+        ctx: CondInclCtx::InThen,
         tok: tok.clone(),
+        included,
     };
     cond_incl_set(Some(Box::new(ci)));
 }
@@ -323,10 +356,28 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
         if token_str_eq(files, &tok, "if") {
             let (val, new_tok) = eval_const_expr(files, &tok)?;
             tok = new_tok;
-            push_cond_incl(&start);
+            push_cond_incl(&start, val != 0);
             if val == 0 {
                 tok = skip_cond_incl(files, tok);
             }
+            continue;
+        }
+
+        if token_str_eq(files, &tok, "else") {
+            let ci = cond_incl_get();
+            if ci.is_none() || ci.as_ref().unwrap().ctx == CondInclCtx::InElse {
+                return Err(error_tok(files, &start, "stray #else"));
+            }
+            let mut ci = ci.unwrap();
+            ci.ctx = CondInclCtx::InElse;
+            cond_incl_set(Some(ci));
+            tok = skip_line(files, *tok.next.unwrap());
+
+            let ci = cond_incl_get().unwrap();
+            if ci.included {
+                tok = skip_cond_incl(files, tok);
+            }
+            cond_incl_set(Some(ci));
             continue;
         }
 
