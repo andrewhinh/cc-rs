@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 
 pub use parse::{
-    add_type, declspec, find_tag, find_typedef, function, global_variable, is_function,
+    add_type, const_expr, declspec, find_tag, find_typedef, function, global_variable, is_function,
     is_typename, parse_typedef, push_tag_scope,
 };
 pub use preprocess::preprocess;

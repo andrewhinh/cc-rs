@@ -1,6 +1,27 @@
+use std::cell::Cell;
 use std::path::Path;
 
-use crate::{File, Token, TokenKind, equal, error_tok, get_input_files, tokenize_file, warn_tok};
+use crate::{
+    File, Token, TokenKind, const_expr, equal, error_tok, get_input_files, tokenize_file, warn_tok,
+};
+
+#[derive(Debug, Clone)]
+struct CondIncl {
+    next: Option<Box<CondIncl>>,
+    tok: Token,
+}
+
+thread_local! {
+    static COND_INCL: Cell<Option<Box<CondIncl>>> = const { Cell::new(None) };
+}
+
+fn cond_incl_get() -> Option<Box<CondIncl>> {
+    COND_INCL.with(|c| c.take())
+}
+
+fn cond_incl_set(ci: Option<Box<CondIncl>>) {
+    COND_INCL.with(|c| c.set(ci));
+}
 
 fn is_keyword(name: &str) -> bool {
     matches!(
@@ -51,6 +72,18 @@ fn is_hash(files: &[File], tok: &Token) -> bool {
     tok.at_bol && equal(files, tok, "#")
 }
 
+fn copy_token(tok: &Token) -> Token {
+    tok.clone()
+}
+
+fn new_eof(tok: &Token) -> Token {
+    let mut t = copy_token(tok);
+    t.kind = TokenKind::Eof;
+    t.len = 0;
+    t.next = None;
+    t
+}
+
 fn skip_line(files: &[File], mut tok: Token) -> Token {
     if tok.at_bol {
         return tok;
@@ -60,6 +93,82 @@ fn skip_line(files: &[File], mut tok: Token) -> Token {
         tok = *tok.next.unwrap();
     }
     tok
+}
+
+fn skip_cond_incl(files: &[File], mut tok: Token) -> Token {
+    while tok.kind != TokenKind::Eof {
+        if is_hash(files, &tok)
+            && tok
+                .next
+                .as_ref()
+                .is_some_and(|n| token_str_eq(files, n, "endif"))
+        {
+            return tok;
+        }
+        tok = *tok.next.unwrap();
+    }
+    tok
+}
+
+fn copy_line(_files: &[File], tok: &Token) -> (Token, Token) {
+    let mut head = Token {
+        kind: TokenKind::Eof,
+        next: None,
+        val: 0,
+        fval: 0.0,
+        loc: 0,
+        len: 0,
+        ty: None,
+        str: None,
+        file_no: 0,
+        line_no: 0,
+        at_bol: false,
+    };
+    let mut cur = &mut head;
+    let mut tok = tok.clone();
+
+    while !tok.at_bol && tok.kind != TokenKind::Eof {
+        let next = tok.next.take();
+        cur.next = Some(Box::new(copy_token(&tok)));
+        cur = cur.next.as_mut().unwrap();
+        match next {
+            Some(n) => tok = *n,
+            None => break,
+        }
+    }
+
+    cur.next = Some(Box::new(new_eof(&tok)));
+    (*head.next.unwrap(), tok)
+}
+
+fn eval_const_expr(files: &[File], tok: &Token) -> Result<(i64, Token), String> {
+    let start = tok.clone();
+    let (expr, rest) = copy_line(files, tok.next.as_ref().unwrap());
+
+    if expr.kind == TokenKind::Eof {
+        return Err(error_tok(files, &start, "no expression"));
+    }
+
+    let mut empty_tag_scope_stack: Vec<Vec<crate::TagScope>> = Vec::new();
+    let mut empty_scope_stack: Vec<Vec<crate::VarScope>> = Vec::new();
+    let (val, rest2) = const_expr(
+        files,
+        &expr,
+        &mut empty_tag_scope_stack,
+        &mut empty_scope_stack,
+    )?;
+    if rest2.kind != TokenKind::Eof {
+        return Err(error_tok(files, &rest2, "extra token"));
+    }
+    Ok((val, rest))
+}
+
+fn push_cond_incl(tok: &Token) {
+    let ci = CondIncl {
+        next: cond_incl_get(),
+        tok: tok.clone(),
+    };
+    cond_incl_set(Some(Box::new(ci)));
 }
 
 fn convert_keywords(files: &[File], tok: &mut Token) {
@@ -164,6 +273,7 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
             continue;
         }
 
+        let start = tok.clone();
         tok = *tok.next.unwrap();
 
         if token_str_eq(files, &tok, "include") {
@@ -200,6 +310,26 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
             continue;
         }
 
+        if token_str_eq(files, &tok, "if") {
+            let (val, new_tok) = eval_const_expr(files, &tok)?;
+            tok = new_tok;
+            push_cond_incl(&start);
+            if val == 0 {
+                tok = skip_cond_incl(files, tok);
+            }
+            continue;
+        }
+
+        if token_str_eq(files, &tok, "endif") {
+            let ci = cond_incl_get();
+            if ci.is_none() {
+                return Err(error_tok(files, &start, "stray #endif"));
+            }
+            cond_incl_set(ci.unwrap().next);
+            tok = skip_line(files, *tok.next.unwrap());
+            continue;
+        }
+
         if tok.at_bol {
             continue;
         }
@@ -227,6 +357,14 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
 pub fn preprocess(tok: Token) -> Result<Token, String> {
     let files = get_input_files();
     let tok = preprocess2(&files, tok)?;
+    let ci = cond_incl_get();
+    if let Some(c) = ci {
+        return Err(error_tok(
+            &files,
+            &c.tok,
+            "unterminated conditional directive",
+        ));
+    }
     let mut tok = tok;
     let files = get_input_files();
     convert_keywords(&files, &mut tok);
