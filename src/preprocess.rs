@@ -242,6 +242,7 @@ fn copy_line(_files: &[File], tok: &Token) -> (Token, Token) {
 fn eval_const_expr(files: &[File], tok: &Token) -> Result<(i64, Token), String> {
     let start = tok.clone();
     let (expr, rest) = copy_line(files, tok.next.as_ref().unwrap());
+    let expr = preprocess2(files, expr)?;
 
     if expr.kind == TokenKind::Eof {
         return Err(error_tok(files, &start, "no expression"));
