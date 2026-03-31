@@ -3,7 +3,8 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::{
-    File, Token, TokenKind, const_expr, equal, error_tok, get_input_files, tokenize_file, warn_tok,
+    File, Token, TokenKind, const_expr, equal, error_tok, get_input_files, skip, tokenize_file,
+    warn_tok,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -25,6 +26,7 @@ struct CondIncl {
 struct Macro {
     next: Option<Box<Macro>>,
     name: String,
+    is_objlike: bool,
     body: Token,
     deleted: bool,
 }
@@ -73,14 +75,35 @@ fn find_macro(files: &[File], tok: &Token) -> Option<Macro> {
     result
 }
 
-fn add_macro(name: String, body: Token, deleted: bool) {
+fn add_macro(name: String, is_objlike: bool, body: Token, deleted: bool) {
     let m = Macro {
         next: macros_get(),
         name,
+        is_objlike,
         body,
         deleted,
     };
     macros_set(Some(Box::new(m)));
+}
+
+fn read_macro_definition(files: &[File], tok: &Token) -> Result<Token, String> {
+    if tok.kind != TokenKind::Ident {
+        return Err(error_tok(files, tok, "macro name must be an identifier"));
+    }
+    let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
+    let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
+    let next_tok = tok.next.as_ref().unwrap();
+
+    if !next_tok.has_space && equal(files, next_tok, "(") {
+        let tok = skip(files, next_tok.next.as_ref().unwrap(), ")")?;
+        let (body, rest) = copy_line(files, &tok);
+        add_macro(name, false, body, false);
+        return Ok(rest);
+    }
+
+    let (body, rest) = copy_line(files, next_tok);
+    add_macro(name, true, body, false);
+    Ok(rest)
 }
 
 fn expand_macro(files: &[File], tok: &Token) -> Option<Token> {
@@ -93,11 +116,24 @@ fn expand_macro(files: &[File], tok: &Token) -> Option<Token> {
         return None;
     }
 
-    let mut hs = tok.hideset.clone();
-    hs.insert(m.name.clone());
+    if m.is_objlike {
+        let mut hs = tok.hideset.clone();
+        hs.insert(m.name.clone());
+        let body = add_hideset(m.body, &hs);
+        return Some(append(body, *tok.next.as_ref().unwrap().clone()));
+    }
 
-    let body = add_hideset(m.body, &hs);
-    Some(append(body, *tok.next.as_ref().unwrap().clone()))
+    if !equal(files, tok.next.as_ref().unwrap(), "(") {
+        return None;
+    }
+
+    let tok = skip(
+        files,
+        tok.next.as_ref().unwrap().next.as_ref().unwrap(),
+        ")",
+    )
+    .ok()?;
+    Some(append(m.body, tok))
 }
 
 fn is_keyword(name: &str) -> bool {
@@ -182,6 +218,7 @@ fn add_hideset(tok: Token, hs: &HashSet<String>) -> Token {
         file_no: 0,
         line_no: 0,
         at_bol: false,
+        has_space: false,
         hideset: HashSet::new(),
     };
     let mut cur = &mut head;
@@ -278,6 +315,7 @@ fn copy_line(_files: &[File], tok: &Token) -> (Token, Token) {
         file_no: 0,
         line_no: 0,
         at_bol: false,
+        has_space: false,
         hideset: HashSet::new(),
     };
     let mut cur = &mut head;
@@ -367,6 +405,7 @@ fn append(tok1: Token, tok2: Token) -> Token {
         file_no: 0,
         line_no: 0,
         at_bol: false,
+        has_space: false,
         hideset: HashSet::new(),
     };
     let mut cur = &mut head;
@@ -416,6 +455,7 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
         file_no: 0,
         line_no: 0,
         at_bol: false,
+        has_space: false,
         hideset: HashSet::new(),
     };
     let mut cur = &mut head;
@@ -559,15 +599,7 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
         }
 
         if token_str_eq(files, &tok, "define") {
-            tok = *tok.next.unwrap();
-            if tok.kind != TokenKind::Ident {
-                return Err(error_tok(files, &tok, "macro name must be an identifier"));
-            }
-            let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
-            let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
-            let (body, rest) = copy_line(files, tok.next.as_ref().unwrap());
-            add_macro(name, body, false);
-            tok = rest;
+            tok = read_macro_definition(files, tok.next.as_ref().unwrap())?;
             continue;
         }
 
@@ -579,7 +611,7 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
             let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
             let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
             tok = skip_line(files, *tok.next.unwrap());
-            add_macro(name, new_eof(&tok), true);
+            add_macro(name, true, new_eof(&tok), true);
             continue;
         }
 
@@ -602,6 +634,7 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
         file_no: 0,
         line_no: 0,
         at_bol: false,
+        has_space: false,
         hideset: HashSet::new(),
     }));
 

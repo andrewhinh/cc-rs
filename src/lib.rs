@@ -47,6 +47,7 @@ pub struct Token {
     pub file_no: usize,
     pub line_no: usize,
     pub at_bol: bool,
+    pub has_space: bool,
     pub hideset: HashSet<String>,
 }
 

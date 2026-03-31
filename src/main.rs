@@ -196,9 +196,12 @@ fn print_tokens(tok: &Token, opt_o: Option<&String>) -> Result<(), String> {
         if tok.at_bol {
             writeln!(out).map_err(|e| format!("write error: {e}"))?;
         }
+        if tok.has_space && !tok.at_bol {
+            write!(out, " ").map_err(|e| format!("write error: {e}"))?;
+        }
         let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
         let token_str: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
-        write!(out, " {}", token_str).map_err(|e| format!("write error: {e}"))?;
+        write!(out, "{}", token_str).map_err(|e| format!("write error: {e}"))?;
         tok = tok.next.as_ref().unwrap();
     }
     writeln!(out).map_err(|e| format!("write error: {e}"))?;
