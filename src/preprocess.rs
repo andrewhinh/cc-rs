@@ -25,6 +25,7 @@ struct Macro {
     next: Option<Box<Macro>>,
     name: String,
     body: Token,
+    deleted: bool,
 }
 
 thread_local! {
@@ -60,7 +61,9 @@ fn find_macro(files: &[File], tok: &Token) -> Option<Macro> {
     let mut m = &macros;
     while let Some(current) = m {
         if current.name == name {
-            result = Some((**current).clone());
+            if !current.deleted {
+                result = Some((**current).clone());
+            }
             break;
         }
         m = &current.next;
@@ -69,11 +72,12 @@ fn find_macro(files: &[File], tok: &Token) -> Option<Macro> {
     result
 }
 
-fn add_macro(name: String, body: Token) {
+fn add_macro(name: String, body: Token, deleted: bool) {
     let m = Macro {
         next: macros_get(),
         name,
         body,
+        deleted,
     };
     macros_set(Some(Box::new(m)));
 }
@@ -481,8 +485,20 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
             let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
             let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
             let (body, rest) = copy_line(files, tok.next.as_ref().unwrap());
-            add_macro(name, body);
+            add_macro(name, body, false);
             tok = rest;
+            continue;
+        }
+
+        if token_str_eq(files, &tok, "undef") {
+            tok = *tok.next.unwrap();
+            if tok.kind != TokenKind::Ident {
+                return Err(error_tok(files, &tok, "macro name must be an identifier"));
+            }
+            let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
+            let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
+            tok = skip_line(files, *tok.next.unwrap());
+            add_macro(name, new_eof(&tok), true);
             continue;
         }
 
