@@ -10,7 +10,14 @@ fn get_file_no() -> usize {
     FILE_NO.fetch_add(1, Ordering::SeqCst) + 1
 }
 
-pub fn new_token(kind: TokenKind, start: usize, end: usize, at_bol: bool, file_no: usize) -> Token {
+pub fn new_token(
+    kind: TokenKind,
+    start: usize,
+    end: usize,
+    at_bol: bool,
+    has_space: bool,
+    file_no: usize,
+) -> Token {
     Token {
         kind,
         next: None,
@@ -23,6 +30,7 @@ pub fn new_token(kind: TokenKind, start: usize, end: usize, at_bol: bool, file_n
         file_no,
         line_no: 0,
         at_bol,
+        has_space,
         hideset: HashSet::new(),
     }
 }
@@ -265,6 +273,7 @@ fn read_number(
     chars: &[char],
     pos: usize,
     at_bol: bool,
+    has_space: bool,
     file_no: usize,
 ) -> Result<(Token, usize), String> {
     let start = pos;
@@ -296,7 +305,7 @@ fn read_number(
             Type::new_double()
         };
 
-        let mut tok = new_token(TokenKind::Num, start, p, at_bol, file_no);
+        let mut tok = new_token(TokenKind::Num, start, p, at_bol, has_space, file_no);
         tok.fval = fval;
         tok.ty = Some(ty);
         return Ok((tok, p));
@@ -334,13 +343,13 @@ fn read_number(
             Type::new_double()
         };
 
-        let mut tok = new_token(TokenKind::Num, start, p, at_bol, file_no);
+        let mut tok = new_token(TokenKind::Num, start, p, at_bol, has_space, file_no);
         tok.fval = fval;
         tok.ty = Some(ty);
         return Ok((tok, p));
     }
 
-    let mut tok = new_token(TokenKind::Num, start, end, at_bol, file_no);
+    let mut tok = new_token(TokenKind::Num, start, end, at_bol, has_space, file_no);
     tok.val = val;
     tok.ty = Some(ty);
     Ok((tok, end))
@@ -457,22 +466,26 @@ pub fn tokenize(file: &File) -> Token {
         file_no,
         line_no: 0,
         at_bol: false,
+        has_space: false,
         hideset: HashSet::new(),
     };
     let mut cur = &mut head;
     let chars: Vec<char> = src.chars().collect();
     let mut pos = 0;
     let mut at_bol = true;
+    let mut has_space = false;
 
     while pos < chars.len() {
         if chars[pos] == '\n' {
             pos += 1;
             at_bol = true;
+            has_space = false;
             continue;
         }
 
         if chars[pos].is_whitespace() {
             pos += 1;
+            has_space = true;
             continue;
         }
 
@@ -481,6 +494,7 @@ pub fn tokenize(file: &File) -> Token {
             while pos < chars.len() && chars[pos] != '\n' {
                 pos += 1;
             }
+            has_space = true;
             continue;
         }
 
@@ -493,6 +507,7 @@ pub fn tokenize(file: &File) -> Token {
                 }
                 pos += 1;
             }
+            has_space = true;
             continue;
         }
 
@@ -544,13 +559,14 @@ pub fn tokenize(file: &File) -> Token {
                 return *head.next.unwrap();
             }
             pos += 1;
-            let mut tok = new_token(TokenKind::Str, start, pos, at_bol, file_no);
+            let mut tok = new_token(TokenKind::Str, start, pos, at_bol, has_space, file_no);
             let len = str_content.len() + 1;
             tok.ty = Some(Type::new_array(Type::new_char(), len as i64));
             tok.str = Some(str_content);
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
             at_bol = false;
+            has_space = false;
             continue;
         }
 
@@ -599,24 +615,26 @@ pub fn tokenize(file: &File) -> Token {
                 return *head.next.unwrap();
             }
             pos += 1;
-            let mut tok = new_token(TokenKind::Num, start, pos, at_bol, file_no);
+            let mut tok = new_token(TokenKind::Num, start, pos, at_bol, has_space, file_no);
             tok.val = c;
             tok.ty = Some(Type::new_int());
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
             at_bol = false;
+            has_space = false;
             continue;
         }
 
         if chars[pos].is_ascii_digit()
             || (chars[pos] == '.' && pos + 1 < chars.len() && chars[pos + 1].is_ascii_digit())
         {
-            match read_number(&chars, pos, at_bol, file_no) {
+            match read_number(&chars, pos, at_bol, has_space, file_no) {
                 Ok((tok, end)) => {
                     cur.next = Some(Box::new(tok));
                     cur = cur.next.as_mut().unwrap();
                     pos = end;
                     at_bol = false;
+                    has_space = false;
                 }
                 Err(e) => {
                     cur.next = Some(Box::new(make_error_token(file_no, pos, &e)));
@@ -631,19 +649,21 @@ pub fn tokenize(file: &File) -> Token {
             while pos < chars.len() && (chars[pos].is_ascii_alphanumeric() || chars[pos] == '_') {
                 pos += 1;
             }
-            let tok = new_token(TokenKind::Ident, start, pos, at_bol, file_no);
+            let tok = new_token(TokenKind::Ident, start, pos, at_bol, has_space, file_no);
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
             at_bol = false;
+            has_space = false;
             continue;
         }
 
         if let Some(len) = read_punct(&chars, pos) {
-            let tok = new_token(TokenKind::Punct, pos, pos + len, at_bol, file_no);
+            let tok = new_token(TokenKind::Punct, pos, pos + len, at_bol, has_space, file_no);
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
             pos += len;
             at_bol = false;
+            has_space = false;
             continue;
         }
 
@@ -656,6 +676,7 @@ pub fn tokenize(file: &File) -> Token {
         pos,
         pos,
         at_bol,
+        has_space,
         file_no,
     )));
     let mut tok = head.next.unwrap();
@@ -676,6 +697,7 @@ fn make_error_token(file_no: usize, loc: usize, msg: &str) -> Token {
         file_no,
         line_no: 0,
         at_bol: false,
+        has_space: false,
         hideset: HashSet::new(),
     }
 }
