@@ -286,7 +286,7 @@ cargo run
 - [x] Skip nested #if in a skipped #if-clause
 - [x] Add #else
 - [x] Add #elif
-- [ ] Add objlike #define
+- [x] Add objlike #define
 - [ ] Add #undef
 - [ ] Expand macros in the #if and #elif argument context
 - [ ] Do not expand a token more than once for the same objlike macro

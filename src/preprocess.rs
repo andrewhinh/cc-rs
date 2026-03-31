@@ -20,8 +20,16 @@ struct CondIncl {
     included: bool,
 }
 
+#[derive(Debug, Clone)]
+struct Macro {
+    next: Option<Box<Macro>>,
+    name: String,
+    body: Token,
+}
+
 thread_local! {
     static COND_INCL: Cell<Option<Box<CondIncl>>> = const { Cell::new(None) };
+    static MACROS: Cell<Option<Box<Macro>>> = const { Cell::new(None) };
 }
 
 fn cond_incl_get() -> Option<Box<CondIncl>> {
@@ -30,6 +38,49 @@ fn cond_incl_get() -> Option<Box<CondIncl>> {
 
 fn cond_incl_set(ci: Option<Box<CondIncl>>) {
     COND_INCL.with(|c| c.set(ci));
+}
+
+fn macros_get() -> Option<Box<Macro>> {
+    MACROS.with(|m| m.take())
+}
+
+fn macros_set(m: Option<Box<Macro>>) {
+    MACROS.with(|cell| cell.set(m));
+}
+
+fn find_macro(files: &[File], tok: &Token) -> Option<Macro> {
+    if tok.kind != TokenKind::Ident {
+        return None;
+    }
+    let file = files.iter().find(|f| f.file_no == tok.file_no)?;
+    let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
+
+    let macros = macros_get();
+    let mut result: Option<Macro> = None;
+    let mut m = &macros;
+    while let Some(current) = m {
+        if current.name == name {
+            result = Some((**current).clone());
+            break;
+        }
+        m = &current.next;
+    }
+    macros_set(macros);
+    result
+}
+
+fn add_macro(name: String, body: Token) {
+    let m = Macro {
+        next: macros_get(),
+        name,
+        body,
+    };
+    macros_set(Some(Box::new(m)));
+}
+
+fn expand_macro(files: &[File], tok: &Token) -> Option<Token> {
+    let m = find_macro(files, tok)?;
+    Some(append(m.body, *tok.next.as_ref().unwrap().clone()))
 }
 
 fn is_keyword(name: &str) -> bool {
@@ -310,6 +361,11 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
             break;
         }
 
+        if let Some(expanded) = expand_macro(files, &tok) {
+            tok = expanded;
+            continue;
+        }
+
         if !is_hash(files, &tok) {
             let next = tok.next.take();
             cur.next = Some(Box::new(tok));
@@ -417,6 +473,19 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
             continue;
         }
 
+        if token_str_eq(files, &tok, "define") {
+            tok = *tok.next.unwrap();
+            if tok.kind != TokenKind::Ident {
+                return Err(error_tok(files, &tok, "macro name must be an identifier"));
+            }
+            let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
+            let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
+            let (body, rest) = copy_line(files, tok.next.as_ref().unwrap());
+            add_macro(name, body);
+            tok = rest;
+            continue;
+        }
+
         if tok.at_bol {
             continue;
         }
@@ -442,6 +511,7 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
 }
 
 pub fn preprocess(tok: Token) -> Result<Token, String> {
+    macros_set(None);
     let files = get_input_files();
     let tok = preprocess2(&files, tok)?;
     let ci = cond_incl_get();
