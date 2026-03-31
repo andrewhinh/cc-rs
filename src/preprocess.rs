@@ -217,10 +217,11 @@ fn skip_line(files: &[File], mut tok: Token) -> Token {
 fn skip_cond_incl2(files: &[File], mut tok: Token) -> Token {
     while tok.kind != TokenKind::Eof {
         if is_hash(files, &tok)
-            && tok
-                .next
-                .as_ref()
-                .is_some_and(|n| token_str_eq(files, n, "if"))
+            && tok.next.as_ref().is_some_and(|n| {
+                token_str_eq(files, n, "if")
+                    || token_str_eq(files, n, "ifdef")
+                    || token_str_eq(files, n, "ifndef")
+            })
         {
             tok = skip_cond_incl2(files, *tok.next.unwrap().next.unwrap());
             continue;
@@ -241,10 +242,11 @@ fn skip_cond_incl2(files: &[File], mut tok: Token) -> Token {
 fn skip_cond_incl(files: &[File], mut tok: Token) -> Token {
     while tok.kind != TokenKind::Eof {
         if is_hash(files, &tok)
-            && tok
-                .next
-                .as_ref()
-                .is_some_and(|n| token_str_eq(files, n, "if"))
+            && tok.next.as_ref().is_some_and(|n| {
+                token_str_eq(files, n, "if")
+                    || token_str_eq(files, n, "ifdef")
+                    || token_str_eq(files, n, "ifndef")
+            })
         {
             tok = skip_cond_incl2(files, *tok.next.unwrap().next.unwrap());
             continue;
@@ -479,6 +481,26 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
             tok = new_tok;
             push_cond_incl(&start, val != 0);
             if val == 0 {
+                tok = skip_cond_incl(files, tok);
+            }
+            continue;
+        }
+
+        if token_str_eq(files, &tok, "ifdef") {
+            let defined = find_macro(files, tok.next.as_ref().unwrap()).is_some();
+            push_cond_incl(&start, defined);
+            tok = skip_line(files, *tok.next.unwrap().next.unwrap());
+            if !defined {
+                tok = skip_cond_incl(files, tok);
+            }
+            continue;
+        }
+
+        if token_str_eq(files, &tok, "ifndef") {
+            let defined = find_macro(files, tok.next.as_ref().unwrap()).is_some();
+            push_cond_incl(&start, !defined);
+            tok = skip_line(files, *tok.next.unwrap().next.unwrap());
+            if defined {
                 tok = skip_cond_incl(files, tok);
             }
             continue;
