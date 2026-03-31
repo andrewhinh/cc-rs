@@ -285,7 +285,7 @@ cargo run
 - [x] Add #else
 - [x] Add #elif
 - [x] Add objlike #define
-- [ ] Add #undef
+- [x] Add #undef
 - [ ] Expand macros in the #if and #elif argument context
 - [ ] Do not expand a token more than once for the same objlike macro
 - [ ] Add #ifdef and #ifndef
