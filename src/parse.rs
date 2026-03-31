@@ -2436,6 +2436,7 @@ fn resolve_goto_labels(files: &[File], body: &mut Node) -> Result<(), String> {
                 str: None,
                 line_no: goto.line_no,
                 at_bol: false,
+                hideset: std::collections::HashSet::new(),
             };
             return Err(error_tok(files, &tok, "use of undeclared label"));
         }

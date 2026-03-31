@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -22,6 +23,7 @@ pub fn new_token(kind: TokenKind, start: usize, end: usize, at_bol: bool, file_n
         file_no,
         line_no: 0,
         at_bol,
+        hideset: HashSet::new(),
     }
 }
 
@@ -455,6 +457,7 @@ pub fn tokenize(file: &File) -> Token {
         file_no,
         line_no: 0,
         at_bol: false,
+        hideset: HashSet::new(),
     };
     let mut cur = &mut head;
     let chars: Vec<char> = src.chars().collect();
@@ -673,6 +676,7 @@ fn make_error_token(file_no: usize, loc: usize, msg: &str) -> Token {
         file_no,
         line_no: 0,
         at_bol: false,
+        hideset: HashSet::new(),
     }
 }
 

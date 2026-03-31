@@ -4,6 +4,7 @@ pub mod preprocess;
 pub mod tokenize;
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 
@@ -46,6 +47,7 @@ pub struct Token {
     pub file_no: usize,
     pub line_no: usize,
     pub at_bol: bool,
+    pub hideset: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

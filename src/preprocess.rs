@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::{
@@ -84,7 +85,19 @@ fn add_macro(name: String, body: Token, deleted: bool) {
 
 fn expand_macro(files: &[File], tok: &Token) -> Option<Token> {
     let m = find_macro(files, tok)?;
-    Some(append(m.body, *tok.next.as_ref().unwrap().clone()))
+
+    let file = files.iter().find(|f| f.file_no == tok.file_no)?;
+    let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
+
+    if hideset_contains(&tok.hideset, &name) {
+        return None;
+    }
+
+    let mut hs = tok.hideset.clone();
+    hs.insert(m.name.clone());
+
+    let body = add_hideset(m.body, &hs);
+    Some(append(body, *tok.next.as_ref().unwrap().clone()))
 }
 
 fn is_keyword(name: &str) -> bool {
@@ -146,6 +159,48 @@ fn new_eof(tok: &Token) -> Token {
     t.len = 0;
     t.next = None;
     t
+}
+
+fn hideset_contains(hs: &HashSet<String>, name: &str) -> bool {
+    hs.contains(name)
+}
+
+fn hideset_union(hs1: &HashSet<String>, hs2: &HashSet<String>) -> HashSet<String> {
+    hs1.union(hs2).cloned().collect()
+}
+
+fn add_hideset(tok: Token, hs: &HashSet<String>) -> Token {
+    let mut head = Token {
+        kind: TokenKind::Eof,
+        next: None,
+        val: 0,
+        fval: 0.0,
+        loc: 0,
+        len: 0,
+        ty: None,
+        str: None,
+        file_no: 0,
+        line_no: 0,
+        at_bol: false,
+        hideset: HashSet::new(),
+    };
+    let mut cur = &mut head;
+    let mut tok = tok;
+
+    while tok.kind != TokenKind::Eof {
+        let next = tok.next.take();
+        let mut t = copy_token(&tok);
+        t.hideset = hideset_union(&t.hideset, hs);
+        cur.next = Some(Box::new(t));
+        cur = cur.next.as_mut().unwrap();
+        match next {
+            Some(n) => tok = *n,
+            None => break,
+        }
+    }
+
+    cur.next = Some(Box::new(new_eof(&tok)));
+    *head.next.unwrap()
 }
 
 fn skip_line(files: &[File], mut tok: Token) -> Token {
@@ -221,6 +276,7 @@ fn copy_line(_files: &[File], tok: &Token) -> (Token, Token) {
         file_no: 0,
         line_no: 0,
         at_bol: false,
+        hideset: HashSet::new(),
     };
     let mut cur = &mut head;
     let mut tok = tok.clone();
@@ -309,6 +365,7 @@ fn append(tok1: Token, tok2: Token) -> Token {
         file_no: 0,
         line_no: 0,
         at_bol: false,
+        hideset: HashSet::new(),
     };
     let mut cur = &mut head;
 
@@ -357,6 +414,7 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
         file_no: 0,
         line_no: 0,
         at_bol: false,
+        hideset: HashSet::new(),
     };
     let mut cur = &mut head;
     let mut tok = tok;
@@ -522,6 +580,7 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
         file_no: 0,
         line_no: 0,
         at_bol: false,
+        hideset: HashSet::new(),
     }));
 
     Ok(*head.next.unwrap())
