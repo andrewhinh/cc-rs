@@ -23,10 +23,24 @@ struct CondIncl {
 }
 
 #[derive(Debug, Clone)]
+struct MacroParam {
+    next: Option<Box<MacroParam>>,
+    name: String,
+}
+
+#[derive(Debug, Clone)]
+struct MacroArg {
+    next: Option<Box<MacroArg>>,
+    name: String,
+    tok: Token,
+}
+
+#[derive(Debug, Clone)]
 struct Macro {
     next: Option<Box<Macro>>,
     name: String,
     is_objlike: bool,
+    params: Option<Box<MacroParam>>,
     body: Token,
     deleted: bool,
 }
@@ -75,15 +89,218 @@ fn find_macro(files: &[File], tok: &Token) -> Option<Macro> {
     result
 }
 
-fn add_macro(name: String, is_objlike: bool, body: Token, deleted: bool) {
+fn add_macro(
+    name: String,
+    is_objlike: bool,
+    params: Option<Box<MacroParam>>,
+    body: Token,
+    deleted: bool,
+) {
     let m = Macro {
         next: macros_get(),
         name,
         is_objlike,
+        params,
         body,
         deleted,
     };
     macros_set(Some(Box::new(m)));
+}
+
+fn read_macro_params(
+    files: &[File],
+    tok: &Token,
+) -> Result<(Option<Box<MacroParam>>, Token), String> {
+    let mut head: Option<Box<MacroParam>> = None;
+    let mut cur: &mut Option<Box<MacroParam>> = &mut head;
+    let mut tok = tok.clone();
+
+    while !equal(files, &tok, ")") {
+        if cur.is_some() {
+            tok = skip(files, &tok, ",")?;
+        }
+
+        if tok.kind != TokenKind::Ident {
+            return Err(error_tok(files, &tok, "expected an identifier"));
+        }
+
+        let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
+        let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
+
+        let param = Box::new(MacroParam { next: None, name });
+
+        if cur.is_none() {
+            head = Some(param);
+            cur = &mut head;
+        } else {
+            cur.as_mut().unwrap().next = Some(param);
+            cur = &mut cur.as_mut().unwrap().next;
+        }
+
+        tok = *tok.next.unwrap();
+    }
+
+    Ok((head, *tok.next.unwrap()))
+}
+
+fn read_macro_arg_one(files: &[File], tok: &Token) -> Result<(MacroArg, Token), String> {
+    let mut head = Token {
+        kind: TokenKind::Eof,
+        next: None,
+        val: 0,
+        fval: 0.0,
+        loc: 0,
+        len: 0,
+        ty: None,
+        str: None,
+        file_no: 0,
+        line_no: 0,
+        at_bol: false,
+        has_space: false,
+        hideset: HashSet::new(),
+    };
+    let mut cur = &mut head;
+    let mut tok = tok.clone();
+
+    while !equal(files, &tok, ",") && !equal(files, &tok, ")") {
+        if tok.kind == TokenKind::Eof {
+            return Err(error_tok(files, &tok, "premature end of input"));
+        }
+        let next = tok.next.take();
+        cur.next = Some(Box::new(copy_token(&tok)));
+        cur = cur.next.as_mut().unwrap();
+        match next {
+            Some(n) => tok = *n,
+            None => break,
+        }
+    }
+
+    cur.next = Some(Box::new(new_eof(&tok)));
+
+    let arg = MacroArg {
+        next: None,
+        name: String::new(),
+        tok: *head.next.unwrap(),
+    };
+
+    Ok((arg, tok))
+}
+
+fn read_macro_args(
+    files: &[File],
+    tok: &Token,
+    params: &Option<Box<MacroParam>>,
+) -> Result<(Option<Box<MacroArg>>, Token), String> {
+    let start = tok.clone();
+    let mut tok = tok
+        .next
+        .as_ref()
+        .unwrap()
+        .next
+        .as_ref()
+        .unwrap()
+        .as_ref()
+        .clone();
+
+    let mut head: Option<Box<MacroArg>> = None;
+    let mut cur: &mut Option<Box<MacroArg>> = &mut head;
+
+    let mut pp = params.as_ref();
+    while let Some(p) = pp {
+        if cur.is_some() {
+            tok = skip(files, &tok, ",")?;
+        }
+
+        let (arg, new_tok) = read_macro_arg_one(files, &tok)?;
+        tok = new_tok;
+
+        let mut arg = arg;
+        arg.name = p.name.clone();
+
+        let arg_box = Box::new(arg);
+        if cur.is_none() {
+            head = Some(arg_box);
+            cur = &mut head;
+        } else {
+            cur.as_mut().unwrap().next = Some(arg_box);
+            cur = &mut cur.as_mut().unwrap().next;
+        }
+
+        pp = p.next.as_ref();
+    }
+
+    if pp.is_some() {
+        return Err(error_tok(files, &start, "too many arguments"));
+    }
+
+    tok = skip(files, &tok, ")")?;
+    Ok((head, tok))
+}
+
+fn find_arg<'a>(
+    args: &'a Option<Box<MacroArg>>,
+    files: &[File],
+    tok: &Token,
+) -> Option<&'a MacroArg> {
+    let mut ap = args.as_ref();
+    while let Some(arg) = ap {
+        let file = files.iter().find(|f| f.file_no == tok.file_no)?;
+        let tok_str: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
+        if tok_str == arg.name {
+            return Some(arg);
+        }
+        ap = arg.next.as_ref();
+    }
+    None
+}
+
+fn subst(files: &[File], tok: &Token, args: &Option<Box<MacroArg>>) -> Result<Token, String> {
+    let mut head = Token {
+        kind: TokenKind::Eof,
+        next: None,
+        val: 0,
+        fval: 0.0,
+        loc: 0,
+        len: 0,
+        ty: None,
+        str: None,
+        file_no: 0,
+        line_no: 0,
+        at_bol: false,
+        has_space: false,
+        hideset: HashSet::new(),
+    };
+    let mut cur = &mut head;
+    let mut tok = tok.clone();
+
+    while tok.kind != TokenKind::Eof {
+        if let Some(arg) = find_arg(args, files, &tok) {
+            let t = preprocess2(files, arg.tok.clone())?;
+            let mut t = t;
+            while t.kind != TokenKind::Eof {
+                let next = t.next.take();
+                cur.next = Some(Box::new(copy_token(&t)));
+                cur = cur.next.as_mut().unwrap();
+                match next {
+                    Some(n) => t = *n,
+                    None => break,
+                }
+            }
+            tok = *tok.next.unwrap();
+            continue;
+        }
+
+        let next = tok.next.take();
+        cur.next = Some(Box::new(copy_token(&tok)));
+        cur = cur.next.as_mut().unwrap();
+        match next {
+            Some(n) => tok = *n,
+            None => break,
+        }
+    }
+
+    cur.next = Some(Box::new(tok));
+    Ok(*head.next.unwrap())
 }
 
 fn read_macro_definition(files: &[File], tok: &Token) -> Result<Token, String> {
@@ -95,14 +312,14 @@ fn read_macro_definition(files: &[File], tok: &Token) -> Result<Token, String> {
     let next_tok = tok.next.as_ref().unwrap();
 
     if !next_tok.has_space && equal(files, next_tok, "(") {
-        let tok = skip(files, next_tok.next.as_ref().unwrap(), ")")?;
+        let (params, tok) = read_macro_params(files, next_tok.next.as_ref().unwrap())?;
         let (body, rest) = copy_line(files, &tok);
-        add_macro(name, false, body, false);
+        add_macro(name, false, params, body, false);
         return Ok(rest);
     }
 
     let (body, rest) = copy_line(files, next_tok);
-    add_macro(name, true, body, false);
+    add_macro(name, true, None, body, false);
     Ok(rest)
 }
 
@@ -127,13 +344,9 @@ fn expand_macro(files: &[File], tok: &Token) -> Option<Token> {
         return None;
     }
 
-    let tok = skip(
-        files,
-        tok.next.as_ref().unwrap().next.as_ref().unwrap(),
-        ")",
-    )
-    .ok()?;
-    Some(append(m.body, tok))
+    let (args, tok) = read_macro_args(files, tok, &m.params).ok()?;
+    let body = subst(files, &m.body, &args).ok()?;
+    Some(append(body, tok))
 }
 
 fn is_keyword(name: &str) -> bool {
@@ -611,7 +824,7 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
             let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
             let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
             tok = skip_line(files, *tok.next.unwrap());
-            add_macro(name, true, new_eof(&tok), true);
+            add_macro(name, true, None, new_eof(&tok), true);
             continue;
         }
 
