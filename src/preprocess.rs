@@ -239,7 +239,7 @@ fn read_macro_args(
         return Err(error_tok(files, &start, "too many arguments"));
     }
 
-    tok = skip(files, &tok, ")")?;
+    skip(files, &tok, ")")?;
     Ok((head, tok))
 }
 
@@ -350,9 +350,13 @@ fn expand_macro(files: &[File], tok: &Token) -> Option<Token> {
         return None;
     }
 
-    let (args, tok) = read_macro_args(files, tok, &m.params).ok()?;
+    let macro_token = tok;
+    let (args, rparen) = read_macro_args(files, tok, &m.params).ok()?;
+    let hs = hideset_intersection(&macro_token.hideset, &rparen.hideset);
+    let hs = hideset_union(&hs, &HashSet::from([m.name.clone()]));
     let body = subst(files, &m.body, &args).ok()?;
-    Some(append(body, tok))
+    let body = add_hideset(body, &hs);
+    Some(append(body, *rparen.next.unwrap()))
 }
 
 fn is_keyword(name: &str) -> bool {
@@ -418,6 +422,10 @@ fn new_eof(tok: &Token) -> Token {
 
 fn hideset_contains(hs: &HashSet<String>, name: &str) -> bool {
     hs.contains(name)
+}
+
+fn hideset_intersection(hs1: &HashSet<String>, hs2: &HashSet<String>) -> HashSet<String> {
+    hs1.intersection(hs2).cloned().collect()
 }
 
 fn hideset_union(hs1: &HashSet<String>, hs2: &HashSet<String>) -> HashSet<String> {
