@@ -295,7 +295,7 @@ cargo run
 - [x] Add multi-arity funclike #define
 - [x] Allow empty macro arguments
 - [x] Allow parenthesized expressions as macro arguments
-- [ ] Do not expand a token more than once for the same funclike macro
+- [x] Do not expand a token more than once for the same funclike macro
 - [ ] Add macro stringizing operator (#)
 - [ ] Add macro token-pasting operator (##)
 - [ ] Use C compiler's preprocessor for all tests
