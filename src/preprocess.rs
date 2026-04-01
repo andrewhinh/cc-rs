@@ -161,10 +161,16 @@ fn read_macro_arg_one(files: &[File], tok: &Token) -> Result<(MacroArg, Token), 
     };
     let mut cur = &mut head;
     let mut tok = tok.clone();
+    let mut level: i32 = 0;
 
-    while !equal(files, &tok, ",") && !equal(files, &tok, ")") {
+    while level > 0 || (!equal(files, &tok, ",") && !equal(files, &tok, ")")) {
         if tok.kind == TokenKind::Eof {
             return Err(error_tok(files, &tok, "premature end of input"));
+        }
+        if equal(files, &tok, "(") {
+            level += 1;
+        } else if equal(files, &tok, ")") {
+            level -= 1;
         }
         let next = tok.next.take();
         cur.next = Some(Box::new(copy_token(&tok)));
