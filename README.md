@@ -292,7 +292,7 @@ cargo run
 - [x] Do not expand a token more than once for the same objlike macro
 - [x] Add #ifdef and #ifndef
 - [x] Add zero-arity funclike #define
-- [ ] Add multi-arity funclike #define
+- [x] Add multi-arity funclike #define
 - [ ] Allow empty macro arguments
 - [ ] Allow parenthesized expressions as macro arguments
 - [ ] Do not expand a token more than once for the same funclike macro
