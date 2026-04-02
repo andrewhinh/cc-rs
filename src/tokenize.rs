@@ -6,7 +6,7 @@ use crate::{File, Token, TokenKind, Type};
 
 static FILE_NO: AtomicUsize = AtomicUsize::new(0);
 
-fn get_file_no() -> usize {
+pub fn get_file_no() -> usize {
     FILE_NO.fetch_add(1, Ordering::SeqCst) + 1
 }
 
@@ -118,6 +118,7 @@ fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
         || remaining.starts_with("||")
         || remaining.starts_with("<<")
         || remaining.starts_with(">>")
+        || remaining.starts_with("##")
     {
         return Some(2);
     }
@@ -415,6 +416,10 @@ static INPUT_FILES: Mutex<Vec<File>> = Mutex::new(Vec::new());
 
 pub fn get_input_files() -> Vec<File> {
     INPUT_FILES.lock().unwrap().clone()
+}
+
+pub fn add_input_file(file: File) {
+    INPUT_FILES.lock().unwrap().push(file);
 }
 
 pub fn new_file(name: String, file_no: usize, contents: String) -> File {

@@ -14,8 +14,8 @@ pub use parse::{
 };
 pub use preprocess::preprocess;
 pub use tokenize::{
-    consume, equal, error_at, error_tok, get_input_files, new_file, skip, tokenize, tokenize_file,
-    warn_tok,
+    add_input_file, consume, equal, error_at, error_tok, get_file_no, get_input_files, new_file,
+    skip, tokenize, tokenize_file, warn_tok,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
