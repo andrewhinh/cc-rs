@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::{
-    File, Token, TokenKind, const_expr, equal, error_tok, get_input_files, new_file, skip,
-    tokenize, tokenize_file, warn_tok,
+    File, Token, TokenKind, add_input_file, const_expr, equal, error_tok, get_file_no,
+    get_input_files, new_file, skip, tokenize, tokenize_file, warn_tok,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -318,6 +318,40 @@ fn stringize(files: &[File], hash: &Token, arg: &Token) -> Token {
     new_str_token(files, &s, hash)
 }
 
+fn paste(lhs: &Token, rhs: &Token) -> Result<Token, String> {
+    let files = get_input_files();
+    let lhs_file = files.iter().find(|f| f.file_no == lhs.file_no).unwrap();
+    let rhs_file = files.iter().find(|f| f.file_no == rhs.file_no).unwrap();
+    let lhs_str: String = lhs_file
+        .contents
+        .chars()
+        .skip(lhs.loc)
+        .take(lhs.len)
+        .collect();
+    let rhs_str: String = rhs_file
+        .contents
+        .chars()
+        .skip(rhs.loc)
+        .take(rhs.len)
+        .collect();
+    let buf = format!("{}{}", lhs_str, rhs_str);
+
+    let file_no = get_file_no();
+    let new_file = new_file(lhs_file.name.clone(), file_no, buf.clone());
+    add_input_file(new_file.clone());
+    let tok = tokenize(&new_file);
+
+    if tok.next.as_ref().is_some_and(|n| n.kind != TokenKind::Eof) {
+        return Err(error_tok(
+            &files,
+            lhs,
+            &format!("pasting forms '{}', an invalid token", buf),
+        ));
+    }
+
+    Ok(tok)
+}
+
 fn subst(files: &[File], tok: &Token, args: &Option<Box<MacroArg>>) -> Result<Token, String> {
     let mut head = Token {
         kind: TokenKind::Eof,
@@ -336,6 +370,7 @@ fn subst(files: &[File], tok: &Token, args: &Option<Box<MacroArg>>) -> Result<To
     };
     let mut cur = &mut head;
     let mut tok = tok.clone();
+    let mut is_start = true;
 
     while tok.kind != TokenKind::Eof {
         if equal(files, &tok, "#") {
@@ -350,17 +385,102 @@ fn subst(files: &[File], tok: &Token, args: &Option<Box<MacroArg>>) -> Result<To
             let arg = arg.unwrap();
             cur.next = Some(Box::new(stringize(files, &tok, &arg.tok)));
             cur = cur.next.as_mut().unwrap();
+            is_start = false;
+            tok = *tok.next.take().unwrap().next.take().unwrap();
+            continue;
+        }
+
+        if equal(files, &tok, "##") {
+            if is_start {
+                return Err(error_tok(
+                    files,
+                    &tok,
+                    "'##' cannot appear at start of macro expansion",
+                ));
+            }
+
+            if tok.next.as_ref().is_none_or(|n| n.kind == TokenKind::Eof) {
+                return Err(error_tok(
+                    files,
+                    &tok,
+                    "'##' cannot appear at end of macro expansion",
+                ));
+            }
+
+            let arg = find_arg(args, files, tok.next.as_ref().unwrap());
+            if let Some(arg) = arg {
+                if arg.tok.kind != TokenKind::Eof {
+                    let cur_tok = (*cur).clone();
+                    *cur = paste(&cur_tok, &arg.tok)?;
+                    let mut t = arg.tok.next.clone();
+                    while let Some(token) = t {
+                        if token.kind == TokenKind::Eof {
+                            break;
+                        }
+                        let next = token.next.clone();
+                        cur.next = Some(Box::new(copy_token(&token)));
+                        cur = cur.next.as_mut().unwrap();
+                        t = next;
+                    }
+                }
+                tok = *tok.next.take().unwrap().next.take().unwrap();
+                continue;
+            }
+
+            let cur_tok = (*cur).clone();
+            *cur = paste(&cur_tok, tok.next.as_ref().unwrap())?;
             tok = *tok.next.take().unwrap().next.take().unwrap();
             continue;
         }
 
         if let Some(arg) = find_arg(args, files, &tok) {
+            if equal(files, tok.next.as_ref().unwrap(), "##") {
+                if arg.tok.kind == TokenKind::Eof {
+                    let rhs = tok.next.as_ref().unwrap().next.as_ref().unwrap();
+                    let arg2 = find_arg(args, files, rhs);
+                    if let Some(arg2) = arg2 {
+                        let mut t: Option<Token> = Some(arg2.tok.clone());
+                        while let Some(token) = t {
+                            if token.kind == TokenKind::Eof {
+                                break;
+                            }
+                            let next = token.next.clone();
+                            cur.next = Some(Box::new(copy_token(&token)));
+                            cur = cur.next.as_mut().unwrap();
+                            is_start = false;
+                            t = next.map(|n| *n);
+                        }
+                    } else {
+                        cur.next = Some(Box::new(copy_token(rhs)));
+                        cur = cur.next.as_mut().unwrap();
+                        is_start = false;
+                    }
+                    tok = *rhs.next.clone().unwrap();
+                    continue;
+                }
+
+                let mut t: Option<Token> = Some(arg.tok.clone());
+                while let Some(token) = t {
+                    if token.kind == TokenKind::Eof {
+                        break;
+                    }
+                    let next = token.next.clone();
+                    cur.next = Some(Box::new(copy_token(&token)));
+                    cur = cur.next.as_mut().unwrap();
+                    is_start = false;
+                    t = next.map(|n| *n);
+                }
+                tok = *tok.next.take().unwrap();
+                continue;
+            }
+
             let t = preprocess2(files, arg.tok.clone())?;
             let mut t = t;
             while t.kind != TokenKind::Eof {
                 let next = t.next.take();
                 cur.next = Some(Box::new(copy_token(&t)));
                 cur = cur.next.as_mut().unwrap();
+                is_start = false;
                 match next {
                     Some(n) => t = *n,
                     None => break,
@@ -373,6 +493,7 @@ fn subst(files: &[File], tok: &Token, args: &Option<Box<MacroArg>>) -> Result<To
         let next = tok.next.take();
         cur.next = Some(Box::new(copy_token(&tok)));
         cur = cur.next.as_mut().unwrap();
+        is_start = false;
         match next {
             Some(n) => tok = *n,
             None => break,
