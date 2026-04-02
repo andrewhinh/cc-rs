@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::{
-    File, Token, TokenKind, const_expr, equal, error_tok, get_input_files, skip, tokenize_file,
-    warn_tok,
+    File, Token, TokenKind, const_expr, equal, error_tok, get_input_files, new_file, skip,
+    tokenize, tokenize_file, warn_tok,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -260,6 +260,64 @@ fn find_arg<'a>(
     None
 }
 
+fn quote_string(str: &str) -> String {
+    let mut bufsize = 3;
+    for c in str.chars() {
+        if c == '\\' || c == '"' {
+            bufsize += 1;
+        }
+        bufsize += 1;
+    }
+
+    let mut buf = String::with_capacity(bufsize);
+    buf.push('"');
+    for c in str.chars() {
+        if c == '\\' || c == '"' {
+            buf.push('\\');
+        }
+        buf.push(c);
+    }
+    buf.push('"');
+    buf
+}
+
+fn new_str_token(files: &[File], s: &str, tmpl: &Token) -> Token {
+    let quoted = quote_string(s);
+    let file = files.iter().find(|f| f.file_no == tmpl.file_no).unwrap();
+    let new_file = new_file(file.name.clone(), tmpl.file_no, quoted);
+    tokenize(&new_file)
+}
+
+fn join_tokens(files: &[File], tok: &Token) -> String {
+    let mut len = 1;
+    let mut t = tok.clone();
+    while t.kind != TokenKind::Eof {
+        if t.has_space && t.loc != tok.loc {
+            len += 1;
+        }
+        len += t.len;
+        t = *t.next.unwrap();
+    }
+
+    let mut buf = String::with_capacity(len);
+    let mut t = tok.clone();
+    while t.kind != TokenKind::Eof {
+        if t.has_space && t.loc != tok.loc {
+            buf.push(' ');
+        }
+        let file = files.iter().find(|f| f.file_no == t.file_no).unwrap();
+        let token_str: String = file.contents.chars().skip(t.loc).take(t.len).collect();
+        buf.push_str(&token_str);
+        t = *t.next.unwrap();
+    }
+    buf
+}
+
+fn stringize(files: &[File], hash: &Token, arg: &Token) -> Token {
+    let s = join_tokens(files, arg);
+    new_str_token(files, &s, hash)
+}
+
 fn subst(files: &[File], tok: &Token, args: &Option<Box<MacroArg>>) -> Result<Token, String> {
     let mut head = Token {
         kind: TokenKind::Eof,
@@ -280,6 +338,22 @@ fn subst(files: &[File], tok: &Token, args: &Option<Box<MacroArg>>) -> Result<To
     let mut tok = tok.clone();
 
     while tok.kind != TokenKind::Eof {
+        if equal(files, &tok, "#") {
+            let arg = find_arg(args, files, tok.next.as_ref().unwrap());
+            if arg.is_none() {
+                return Err(error_tok(
+                    files,
+                    tok.next.as_ref().unwrap(),
+                    "'#' is not followed by a macro parameter",
+                ));
+            }
+            let arg = arg.unwrap();
+            cur.next = Some(Box::new(stringize(files, &tok, &arg.tok)));
+            cur = cur.next.as_mut().unwrap();
+            tok = *tok.next.take().unwrap().next.take().unwrap();
+            continue;
+        }
+
         if let Some(arg) = find_arg(args, files, &tok) {
             let t = preprocess2(files, arg.tok.clone())?;
             let mut t = t;

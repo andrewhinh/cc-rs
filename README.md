@@ -294,7 +294,7 @@ cargo run
 - [x] Allow empty macro arguments
 - [x] Allow parenthesized expressions as macro arguments
 - [x] Do not expand a token more than once for the same funclike macro
-- [ ] Add macro stringizing operator (#)
+- [x] Add macro stringizing operator (#)
 - [ ] Add macro token-pasting operator (##)
 - [ ] Use chibicc's preprocessor for all tests
 - [ ] Add defined() macro operator
