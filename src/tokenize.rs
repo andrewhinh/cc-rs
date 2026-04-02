@@ -417,7 +417,7 @@ pub fn get_input_files() -> Vec<File> {
     INPUT_FILES.lock().unwrap().clone()
 }
 
-fn new_file(name: String, file_no: usize, contents: String) -> File {
+pub fn new_file(name: String, file_no: usize, contents: String) -> File {
     File {
         name,
         file_no,
