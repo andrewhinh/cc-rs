@@ -303,7 +303,7 @@ cargo run
 - [x] Support line continuation
 - [x] Add #include <...>
 - [x] Add -I<dir> option
-- [ ] Add default include paths
+- [x] Add default include paths
 - [ ] Add #error
 - [ ] Add predefine macros such as __STDC__
 - [ ] Add __FILE__ and __LINE__

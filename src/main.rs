@@ -29,6 +29,19 @@ fn usage(status: i32) {
     process::exit(status);
 }
 
+fn add_default_include_paths(argv0: &str) {
+    let path = Path::new(argv0);
+    let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
+    if let Some(parent) = canonical_path.parent() {
+        add_include_path(format!("{}/include", parent.display()));
+    }
+
+    add_include_path("/usr/local/include".to_string());
+    add_include_path("/usr/include/x86_64-linux-gnu".to_string());
+    add_include_path("/usr/include".to_string());
+}
+
 fn parse_args() -> Args {
     let args: Vec<String> = env::args().collect();
     let mut opt_cc1 = false;
@@ -247,6 +260,10 @@ fn cc1(args: &Args) -> Result<(), String> {
 
     for path in &args.include_paths {
         add_include_path(path.clone());
+    }
+
+    if let Some(argv0) = env::args().next() {
+        add_default_include_paths(&argv0);
     }
 
     let tok = tokenize_file(input).ok_or("cannot open input file")?;
