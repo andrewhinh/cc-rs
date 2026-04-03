@@ -296,7 +296,7 @@ cargo run
 - [x] Do not expand a token more than once for the same funclike macro
 - [x] Add macro stringizing operator (#)
 - [x] Add macro token-pasting operator (##)
-- [ ] Use chibicc's preprocessor for all tests
+- [x] Use chibicc's preprocessor for all tests
 - [ ] Add defined() macro operator
 - [ ] Replace remaining identifiers with 0 in macro constexpr
 - [ ] Preserve newline and space during macro expansion
