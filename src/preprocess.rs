@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::{
-    File, Token, TokenKind, add_input_file, const_expr, equal, error_tok, get_file_no,
+    File, Token, TokenKind, add_input_file, const_expr, consume, equal, error_tok, get_file_no,
     get_input_files, new_file, skip, tokenize, tokenize_file, warn_tok,
 };
 
@@ -285,6 +285,13 @@ fn new_str_token(files: &[File], s: &str, tmpl: &Token) -> Token {
     let quoted = quote_string(s);
     let file = files.iter().find(|f| f.file_no == tmpl.file_no).unwrap();
     let new_file = new_file(file.name.clone(), tmpl.file_no, quoted);
+    tokenize(&new_file)
+}
+
+fn new_num_token(files: &[File], val: i64, tmpl: &Token) -> Token {
+    let buf = format!("{}\n", val);
+    let file = files.iter().find(|f| f.file_no == tmpl.file_no).unwrap();
+    let new_file = new_file(file.name.clone(), tmpl.file_no, buf);
     tokenize(&new_file)
 }
 
@@ -757,9 +764,70 @@ fn copy_line(_files: &[File], tok: &Token) -> (Token, Token) {
     (*head.next.unwrap(), tok)
 }
 
+fn read_const_expr(files: &[File], tok: &Token) -> Result<(Token, Token), String> {
+    let (line, rest) = copy_line(files, tok);
+
+    let mut head = Token {
+        kind: TokenKind::Eof,
+        next: None,
+        val: 0,
+        fval: 0.0,
+        loc: 0,
+        len: 0,
+        ty: None,
+        str: None,
+        file_no: 0,
+        line_no: 0,
+        at_bol: false,
+        has_space: false,
+        hideset: HashSet::new(),
+    };
+    let mut cur = &mut head;
+    let mut tok = line;
+
+    while tok.kind != TokenKind::Eof {
+        if token_str_eq(files, &tok, "defined") {
+            let start = tok.clone();
+            tok = *tok.next.unwrap();
+            let (has_paren, new_tok) = consume(files, &tok, "(");
+            tok = new_tok;
+
+            if tok.kind != TokenKind::Ident {
+                return Err(error_tok(files, &start, "macro name must be an identifier"));
+            }
+
+            let m = find_macro(files, &tok);
+            tok = *tok.next.unwrap();
+
+            if has_paren {
+                tok = skip(files, &tok, ")")?;
+            }
+
+            cur.next = Some(Box::new(new_num_token(
+                files,
+                if m.is_some() { 1 } else { 0 },
+                &start,
+            )));
+            cur = cur.next.as_mut().unwrap();
+            continue;
+        }
+
+        let next = tok.next.take();
+        cur.next = Some(Box::new(copy_token(&tok)));
+        cur = cur.next.as_mut().unwrap();
+        match next {
+            Some(n) => tok = *n,
+            None => break,
+        }
+    }
+
+    cur.next = Some(Box::new(tok));
+    Ok((*head.next.unwrap(), rest))
+}
+
 fn eval_const_expr(files: &[File], tok: &Token) -> Result<(i64, Token), String> {
     let start = tok.clone();
-    let (expr, rest) = copy_line(files, tok.next.as_ref().unwrap());
+    let (expr, rest) = read_const_expr(files, tok.next.as_ref().unwrap())?;
     let expr = preprocess2(&[], expr)?;
 
     if expr.kind == TokenKind::Eof {
