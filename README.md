@@ -307,7 +307,7 @@ cargo run
 - [x] Add -I<dir> option
 - [x] Add default include paths
 - [x] Add #error
-- [ ] Add predefine macros such as __STDC__
+- [x] Add predefine macros such as __STDC__
 - [ ] Add __FILE__ and __LINE__
 - [ ] Add __VA_ARGS__
 - [ ] Add __func__
