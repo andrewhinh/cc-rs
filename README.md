@@ -304,7 +304,7 @@ cargo run
 - [x] Preserve newline and space during macro expansion
 - [x] Support line continuation
 - [x] Add #include <...>
-- [ ] Add -I option
+- [x] Add -I<dir> option
 - [ ] Add default include paths
 - [ ] Add #error
 - [ ] Add predefine macros such as __STDC__

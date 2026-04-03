@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::{
     File, Token, TokenKind, add_input_file, const_expr, consume, equal, error_tok, get_file_no,
-    get_input_files, new_file, skip, tokenize, tokenize_file, warn_tok,
+    get_include_paths, get_input_files, new_file, skip, tokenize, tokenize_file, warn_tok,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -987,6 +987,21 @@ fn token_str_eq(files: &[File], tok: &Token, s: &str) -> bool {
             .eq(s.chars())
 }
 
+fn search_include_paths(filename: &str) -> Option<String> {
+    if filename.starts_with('/') {
+        return Some(filename.to_string());
+    }
+
+    let paths = get_include_paths();
+    for dir in &paths {
+        let path = Path::new(dir).join(filename);
+        if path.exists() {
+            return Some(path.to_string_lossy().into_owned());
+        }
+    }
+    None
+}
+
 fn read_include_filename(tok: &Token, is_dquote: &mut bool) -> Result<(String, Token), String> {
     let files = get_input_files();
 
@@ -1104,7 +1119,7 @@ fn preprocess2(_files: &[File], tok: Token) -> Result<Token, String> {
 
             let filename_tok = start.next.as_ref().unwrap().clone();
 
-            if !filename.starts_with('/') {
+            if !filename.starts_with('/') && is_dquote {
                 let current_file = files.iter().find(|f| f.file_no == start.file_no).unwrap();
                 let current_path = Path::new(&current_file.name);
                 let dir = current_path.parent().unwrap_or(Path::new("."));
@@ -1115,8 +1130,8 @@ fn preprocess2(_files: &[File], tok: Token) -> Result<Token, String> {
                 }
             }
 
-            // TODO: Search a file from the include paths.
-            tok = include_file(tok, &filename, &filename_tok)?;
+            let path = search_include_paths(&filename);
+            tok = include_file(tok, path.as_deref().unwrap_or(&filename), &filename_tok)?;
             continue;
         }
 
