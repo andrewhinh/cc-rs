@@ -295,10 +295,16 @@ fn new_num_token(files: &[File], val: i64, tmpl: &Token) -> Token {
     tokenize(&new_file)
 }
 
-fn join_tokens(files: &[File], tok: &Token) -> String {
+fn join_tokens(files: &[File], tok: &Token, end: Option<&Token>) -> String {
     let mut len = 1;
     let mut t = tok.clone();
     while t.kind != TokenKind::Eof {
+        if let Some(e) = end
+            && t.loc == e.loc
+            && t.file_no == e.file_no
+        {
+            break;
+        }
         if t.has_space && t.loc != tok.loc {
             len += 1;
         }
@@ -309,6 +315,12 @@ fn join_tokens(files: &[File], tok: &Token) -> String {
     let mut buf = String::with_capacity(len);
     let mut t = tok.clone();
     while t.kind != TokenKind::Eof {
+        if let Some(e) = end
+            && t.loc == e.loc
+            && t.file_no == e.file_no
+        {
+            break;
+        }
         if t.has_space && t.loc != tok.loc {
             buf.push(' ');
         }
@@ -321,7 +333,7 @@ fn join_tokens(files: &[File], tok: &Token) -> String {
 }
 
 fn stringize(files: &[File], hash: &Token, arg: &Token) -> Token {
-    let s = join_tokens(files, arg);
+    let s = join_tokens(files, arg, None);
     new_str_token(files, &s, hash)
 }
 
@@ -975,6 +987,73 @@ fn token_str_eq(files: &[File], tok: &Token, s: &str) -> bool {
             .eq(s.chars())
 }
 
+fn read_include_filename(tok: &Token, is_dquote: &mut bool) -> Result<(String, Token), String> {
+    let files = get_input_files();
+
+    // Pattern 1: #include "foo.h"
+    if tok.kind == TokenKind::Str {
+        let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
+        let filename: String = file
+            .contents
+            .chars()
+            .skip(tok.loc + 1)
+            .take(tok.len - 2)
+            .collect();
+        *is_dquote = true;
+        let rest = skip_line(&files, *tok.next.as_ref().unwrap().clone());
+        return Ok((filename, rest));
+    }
+
+    // Pattern 2: #include <foo.h>
+    if equal(&files, tok, "<") {
+        let start = tok.clone();
+        let mut tok = *tok.next.as_ref().unwrap().clone();
+
+        // Find closing ">"
+        while !equal(&files, &tok, ">") {
+            if tok.at_bol || tok.kind == TokenKind::Eof {
+                return Err(error_tok(&files, &tok, "expected '>'"));
+            }
+            tok = *tok.next.as_ref().unwrap().clone();
+        }
+
+        let end = &tok;
+        *is_dquote = false;
+        let files = get_input_files();
+        let filename = join_tokens(&files, start.next.as_ref().unwrap(), Some(end));
+        let rest = skip_line(&files, *tok.next.as_ref().unwrap().clone());
+        return Ok((filename, rest));
+    }
+
+    // Pattern 3: #include FOO
+    // In this case FOO must be macro-expanded to either
+    // a single string token or a sequence of "<" ... ">".
+    if tok.kind == TokenKind::Ident {
+        let files = get_input_files();
+        let (line, rest) = copy_line(&files, tok);
+        let tok2 = preprocess2(&[], line)?;
+        return read_include_filename(&tok2, is_dquote).map(|(f, _)| (f, rest));
+    }
+
+    let files = get_input_files();
+    Err(error_tok(&files, tok, "expected a filename"))
+}
+
+fn include_file(tok: Token, path: &str, filename_tok: &Token) -> Result<Token, String> {
+    match tokenize_file(path) {
+        Some(tok2) => Ok(append(tok2, tok)),
+        None => Err(error_tok(
+            &get_input_files(),
+            filename_tok,
+            &format!(
+                "{}: cannot open file: {}",
+                path,
+                std::io::Error::new(std::io::ErrorKind::NotFound, "file not found")
+            ),
+        )),
+    }
+}
+
 fn preprocess2(_files: &[File], tok: Token) -> Result<Token, String> {
     let mut head = Token {
         kind: TokenKind::Eof,
@@ -1018,36 +1097,26 @@ fn preprocess2(_files: &[File], tok: Token) -> Result<Token, String> {
         tok = *tok.next.unwrap();
 
         if token_str_eq(&files, &tok, "include") {
-            tok = *tok.next.unwrap();
+            let mut is_dquote = false;
+            let (filename, new_tok) =
+                read_include_filename(tok.next.as_ref().unwrap(), &mut is_dquote)?;
+            tok = new_tok;
 
-            if tok.kind != TokenKind::Str {
-                return Err(error_tok(&files, &tok, "expected a filename"));
-            }
+            let filename_tok = start.next.as_ref().unwrap().clone();
 
-            let filename = String::from_utf8_lossy(&tok.str.clone().unwrap()).into_owned();
-            let include_path = if filename.starts_with('/') {
-                filename
-            } else {
-                let current_file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
+            if !filename.starts_with('/') {
+                let current_file = files.iter().find(|f| f.file_no == start.file_no).unwrap();
                 let current_path = Path::new(&current_file.name);
                 let dir = current_path.parent().unwrap_or(Path::new("."));
-                dir.join(&filename).to_string_lossy().into_owned()
-            };
+                let path = dir.join(&filename).to_string_lossy().into_owned();
+                if Path::new(&path).exists() {
+                    tok = include_file(tok, &path, &filename_tok)?;
+                    continue;
+                }
+            }
 
-            let tok2 = tokenize_file(&include_path).ok_or_else(|| {
-                error_tok(
-                    &get_input_files(),
-                    &tok,
-                    &format!(
-                        "cannot open {}: {}",
-                        include_path,
-                        std::io::Error::new(std::io::ErrorKind::NotFound, "file not found")
-                    ),
-                )
-            })?;
-
-            tok = skip_line(&get_input_files(), *tok.next.unwrap());
-            tok = append(tok2, tok);
+            // TODO: Search a file from the include paths.
+            tok = include_file(tok, &filename, &filename_tok)?;
             continue;
         }
 
@@ -1166,21 +1235,7 @@ fn preprocess2(_files: &[File], tok: Token) -> Result<Token, String> {
         ));
     }
 
-    cur.next = Some(Box::new(Token {
-        kind: TokenKind::Eof,
-        next: None,
-        val: 0,
-        fval: 0.0,
-        loc: 0,
-        len: 0,
-        ty: None,
-        str: None,
-        file_no: 0,
-        line_no: 0,
-        at_bol: false,
-        has_space: false,
-        hideset: HashSet::new(),
-    }));
+    cur.next = Some(Box::new(new_eof(&tok)));
 
     Ok(*head.next.unwrap())
 }
