@@ -474,7 +474,7 @@ fn subst(files: &[File], tok: &Token, args: &Option<Box<MacroArg>>) -> Result<To
                 continue;
             }
 
-            let t = preprocess2(files, arg.tok.clone())?;
+            let t = preprocess2(&[], arg.tok.clone())?;
             let mut t = t;
             while t.kind != TokenKind::Eof {
                 let next = t.next.take();
@@ -760,7 +760,7 @@ fn copy_line(_files: &[File], tok: &Token) -> (Token, Token) {
 fn eval_const_expr(files: &[File], tok: &Token) -> Result<(i64, Token), String> {
     let start = tok.clone();
     let (expr, rest) = copy_line(files, tok.next.as_ref().unwrap());
-    let expr = preprocess2(files, expr)?;
+    let expr = preprocess2(&[], expr)?;
 
     if expr.kind == TokenKind::Eof {
         return Err(error_tok(files, &start, "no expression"));
@@ -864,7 +864,7 @@ fn token_str_eq(files: &[File], tok: &Token, s: &str) -> bool {
             .eq(s.chars())
 }
 
-fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
+fn preprocess2(_files: &[File], tok: Token) -> Result<Token, String> {
     let mut head = Token {
         kind: TokenKind::Eof,
         next: None,
@@ -884,16 +884,18 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
     let mut tok = tok;
 
     loop {
+        let files = get_input_files();
+
         if tok.kind == TokenKind::Eof {
             break;
         }
 
-        if let Some(expanded) = expand_macro(files, &tok) {
+        if let Some(expanded) = expand_macro(&files, &tok) {
             tok = expanded;
             continue;
         }
 
-        if !is_hash(files, &tok) {
+        if !is_hash(&files, &tok) {
             let next = tok.next.take();
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
@@ -904,11 +906,11 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
         let start = tok.clone();
         tok = *tok.next.unwrap();
 
-        if token_str_eq(files, &tok, "include") {
+        if token_str_eq(&files, &tok, "include") {
             tok = *tok.next.unwrap();
 
             if tok.kind != TokenKind::Str {
-                return Err(error_tok(files, &tok, "expected a filename"));
+                return Err(error_tok(&files, &tok, "expected a filename"));
             }
 
             let filename = String::from_utf8_lossy(&tok.str.clone().unwrap()).into_owned();
@@ -923,7 +925,7 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
 
             let tok2 = tokenize_file(&include_path).ok_or_else(|| {
                 error_tok(
-                    files,
+                    &get_input_files(),
                     &tok,
                     &format!(
                         "cannot open {}: {}",
@@ -933,106 +935,111 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
                 )
             })?;
 
-            tok = skip_line(files, *tok.next.unwrap());
+            tok = skip_line(&get_input_files(), *tok.next.unwrap());
             tok = append(tok2, tok);
             continue;
         }
 
-        if token_str_eq(files, &tok, "if") {
-            let (val, new_tok) = eval_const_expr(files, &tok)?;
+        if token_str_eq(&files, &tok, "if") {
+            let (val, new_tok) = eval_const_expr(&files, &tok)?;
             tok = new_tok;
             push_cond_incl(&start, val != 0);
             if val == 0 {
-                tok = skip_cond_incl(files, tok);
+                tok = skip_cond_incl(&get_input_files(), tok);
             }
             continue;
         }
 
-        if token_str_eq(files, &tok, "ifdef") {
-            let defined = find_macro(files, tok.next.as_ref().unwrap()).is_some();
+        if token_str_eq(&files, &tok, "ifdef") {
+            let defined = find_macro(&get_input_files(), tok.next.as_ref().unwrap()).is_some();
             push_cond_incl(&start, defined);
-            tok = skip_line(files, *tok.next.unwrap().next.unwrap());
+            tok = skip_line(&get_input_files(), *tok.next.unwrap().next.unwrap());
             if !defined {
-                tok = skip_cond_incl(files, tok);
+                tok = skip_cond_incl(&get_input_files(), tok);
             }
             continue;
         }
 
-        if token_str_eq(files, &tok, "ifndef") {
-            let defined = find_macro(files, tok.next.as_ref().unwrap()).is_some();
+        if token_str_eq(&files, &tok, "ifndef") {
+            let defined = find_macro(&get_input_files(), tok.next.as_ref().unwrap()).is_some();
             push_cond_incl(&start, !defined);
-            tok = skip_line(files, *tok.next.unwrap().next.unwrap());
+            tok = skip_line(&get_input_files(), *tok.next.unwrap().next.unwrap());
             if defined {
-                tok = skip_cond_incl(files, tok);
+                tok = skip_cond_incl(&get_input_files(), tok);
             }
             continue;
         }
 
-        if token_str_eq(files, &tok, "elif") {
+        if token_str_eq(&files, &tok, "elif") {
             let ci = cond_incl_get();
             if ci.is_none() || ci.as_ref().unwrap().ctx == CondInclCtx::Else {
-                return Err(error_tok(files, &start, "stray #elif"));
+                return Err(error_tok(&get_input_files(), &start, "stray #elif"));
             }
             let mut ci = ci.unwrap();
             ci.ctx = CondInclCtx::Elif;
             cond_incl_set(Some(ci.clone()));
 
             if !ci.included {
-                let (val, new_tok) = eval_const_expr(files, &tok)?;
+                let (val, new_tok) = eval_const_expr(&get_input_files(), &tok)?;
                 tok = new_tok;
                 if val != 0 {
                     ci.included = true;
                     cond_incl_set(Some(ci));
                 } else {
-                    tok = skip_cond_incl(files, tok);
+                    tok = skip_cond_incl(&get_input_files(), tok);
                 }
             } else {
-                tok = skip_cond_incl(files, tok);
+                tok = skip_cond_incl(&get_input_files(), tok);
             }
             continue;
         }
 
-        if token_str_eq(files, &tok, "else") {
+        if token_str_eq(&files, &tok, "else") {
             let ci = cond_incl_get();
             if ci.is_none() || ci.as_ref().unwrap().ctx == CondInclCtx::Else {
-                return Err(error_tok(files, &start, "stray #else"));
+                return Err(error_tok(&get_input_files(), &start, "stray #else"));
             }
             let mut ci = ci.unwrap();
             ci.ctx = CondInclCtx::Else;
             cond_incl_set(Some(ci));
-            tok = skip_line(files, *tok.next.unwrap());
+            tok = skip_line(&get_input_files(), *tok.next.unwrap());
 
             let ci = cond_incl_get().unwrap();
             if ci.included {
-                tok = skip_cond_incl(files, tok);
+                tok = skip_cond_incl(&get_input_files(), tok);
             }
             cond_incl_set(Some(ci));
             continue;
         }
 
-        if token_str_eq(files, &tok, "endif") {
+        if token_str_eq(&files, &tok, "endif") {
             let ci = cond_incl_get();
             if ci.is_none() {
-                return Err(error_tok(files, &start, "stray #endif"));
+                return Err(error_tok(&get_input_files(), &start, "stray #endif"));
             }
             cond_incl_set(ci.unwrap().next);
-            tok = skip_line(files, *tok.next.unwrap());
+            tok = skip_line(&get_input_files(), *tok.next.unwrap());
             continue;
         }
 
-        if token_str_eq(files, &tok, "define") {
-            tok = read_macro_definition(files, tok.next.as_ref().unwrap())?;
+        if token_str_eq(&files, &tok, "define") {
+            tok = read_macro_definition(&get_input_files(), tok.next.as_ref().unwrap())?;
             continue;
         }
 
-        if token_str_eq(files, &tok, "undef") {
+        if token_str_eq(&files, &tok, "undef") {
             tok = *tok.next.unwrap();
             if tok.kind != TokenKind::Ident {
-                return Err(error_tok(files, &tok, "macro name must be an identifier"));
+                return Err(error_tok(
+                    &get_input_files(),
+                    &tok,
+                    "macro name must be an identifier",
+                ));
             }
+            let files = get_input_files();
             let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
             let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
-            tok = skip_line(files, *tok.next.unwrap());
+            tok = skip_line(&files, *tok.next.unwrap());
             add_macro(name, true, None, new_eof(&tok), true);
             continue;
         }
@@ -1041,7 +1048,11 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
             continue;
         }
 
-        return Err(error_tok(files, &tok, "invalid preprocessor directive"));
+        return Err(error_tok(
+            &get_input_files(),
+            &tok,
+            "invalid preprocessor directive",
+        ));
     }
 
     cur.next = Some(Box::new(Token {
@@ -1066,7 +1077,7 @@ fn preprocess2(files: &[File], tok: Token) -> Result<Token, String> {
 pub fn preprocess(tok: Token) -> Result<Token, String> {
     macros_set(None);
     let files = get_input_files();
-    let tok = preprocess2(&files, tok)?;
+    let tok = preprocess2(&[], tok)?;
     let ci = cond_incl_get();
     if let Some(c) = ci {
         return Err(error_tok(

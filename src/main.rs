@@ -199,9 +199,22 @@ fn print_tokens(tok: &Token, opt_o: Option<&String>) -> Result<(), String> {
         if tok.has_space && !tok.at_bol {
             write!(out, " ").map_err(|e| format!("write error: {e}"))?;
         }
-        let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
-        let token_str: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
-        write!(out, "{}", token_str).map_err(|e| format!("write error: {e}"))?;
+
+        if tok.kind == TokenKind::Str {
+            let str_content = tok.str.as_ref().unwrap();
+            write!(out, "\"").map_err(|e| format!("write error: {e}"))?;
+            for &c in str_content.iter().take_while(|&&c| c != 0) {
+                if c == b'"' || c == b'\\' {
+                    write!(out, "\\").map_err(|e| format!("write error: {e}"))?;
+                }
+                write!(out, "{}", c as char).map_err(|e| format!("write error: {e}"))?;
+            }
+            write!(out, "\"").map_err(|e| format!("write error: {e}"))?;
+        } else {
+            let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
+            let token_str: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
+            write!(out, "{}", token_str).map_err(|e| format!("write error: {e}"))?;
+        }
         tok = tok.next.as_ref().unwrap();
     }
     writeln!(out).map_err(|e| format!("write error: {e}"))?;
