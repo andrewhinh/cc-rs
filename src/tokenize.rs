@@ -32,6 +32,7 @@ pub fn new_token(
         at_bol,
         has_space,
         hideset: HashSet::new(),
+        origin: None,
     }
 }
 
@@ -508,6 +509,7 @@ pub fn tokenize(file: &File) -> Token {
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
+        origin: None,
     };
     let mut cur = &mut head;
     let chars: Vec<char> = src.chars().collect();
@@ -739,6 +741,7 @@ fn make_error_token(file_no: usize, loc: usize, msg: &str) -> Token {
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
+        origin: None,
     }
 }
 
