@@ -298,7 +298,7 @@ cargo run
 - [x] Add macro token-pasting operator (##)
 - [x] Use chibicc's preprocessor for all tests
 - [x] Add defined() macro operator
-- [ ] Replace remaining identifiers with 0 in macro constexpr
+- [x] Replace remaining identifiers with 0 in macro constexpr
 - [ ] Preserve newline and space during macro expansion
 - [ ] Support line continuation
 - [ ] Add #include <...>
