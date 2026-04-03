@@ -481,8 +481,9 @@ fn subst(files: &[File], tok: &Token, args: &Option<Box<MacroArg>>) -> Result<To
                 continue;
             }
 
-            let t = preprocess2(&[], arg.tok.clone())?;
-            let mut t = t;
+            let mut t = preprocess2(&[], arg.tok.clone())?;
+            t.at_bol = tok.at_bol;
+            t.has_space = tok.has_space;
             while t.kind != TokenKind::Eof {
                 let next = t.next.take();
                 cur.next = Some(Box::new(copy_token(&t)));
@@ -545,7 +546,10 @@ fn expand_macro(files: &[File], tok: &Token) -> Option<Token> {
         let mut hs = tok.hideset.clone();
         hs.insert(m.name.clone());
         let body = add_hideset(m.body, &hs);
-        return Some(append(body, *tok.next.as_ref().unwrap().clone()));
+        let mut result = append(body, *tok.next.as_ref().unwrap().clone());
+        result.at_bol = tok.at_bol;
+        result.has_space = tok.has_space;
+        return Some(result);
     }
 
     if !equal(files, tok.next.as_ref().unwrap(), "(") {
@@ -558,7 +562,10 @@ fn expand_macro(files: &[File], tok: &Token) -> Option<Token> {
     let hs = hideset_union(&hs, &HashSet::from([m.name.clone()]));
     let body = subst(files, &m.body, &args).ok()?;
     let body = add_hideset(body, &hs);
-    Some(append(body, *rparen.next.unwrap()))
+    let mut result = append(body, *rparen.next.unwrap());
+    result.at_bol = macro_token.at_bol;
+    result.has_space = macro_token.has_space;
+    Some(result)
 }
 
 fn is_keyword(name: &str) -> bool {

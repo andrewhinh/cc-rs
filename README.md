@@ -301,7 +301,7 @@ cargo run
 - [x] Use C compiler's preprocessor for all tests
 - [x] Add defined() macro operator
 - [x] Replace remaining identifiers with 0 in macro constexpr
-- [ ] Preserve newline and space during macro expansion
+- [x] Preserve newline and space during macro expansion
 - [ ] Support line continuation
 - [ ] Add #include <...>
 - [ ] Add -I option
