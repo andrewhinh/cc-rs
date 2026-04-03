@@ -440,6 +440,40 @@ pub fn tokenize_file(path: &str) -> Option<Token> {
     Some(tokenize(&file))
 }
 
+fn remove_backslash_newline(contents: &mut String) {
+    let bytes = unsafe { contents.as_bytes_mut() };
+    let mut i = 0;
+    let mut j = 0;
+    let mut n = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'\n' {
+            i += 2;
+            n += 1;
+        } else if bytes[i] == b'\n' {
+            bytes[j] = bytes[i];
+            j += 1;
+            i += 1;
+            for _ in 0..n {
+                bytes[j] = b'\n';
+                j += 1;
+            }
+            n = 0;
+        } else {
+            bytes[j] = bytes[i];
+            j += 1;
+            i += 1;
+        }
+    }
+
+    for _ in 0..n {
+        bytes[j] = b'\n';
+        j += 1;
+    }
+
+    contents.truncate(j);
+}
+
 fn read_file(path: &str) -> Option<String> {
     let contents = if path == "-" {
         use std::io::Read;
@@ -453,6 +487,7 @@ fn read_file(path: &str) -> Option<String> {
     if !contents.is_empty() && !contents.ends_with('\n') {
         contents.push('\n');
     }
+    remove_backslash_newline(&mut contents);
     Some(contents)
 }
 

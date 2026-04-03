@@ -300,7 +300,7 @@ cargo run
 - [x] Add defined() macro operator
 - [x] Replace remaining identifiers with 0 in macro constexpr
 - [x] Preserve newline and space during macro expansion
-- [ ] Support line continuation
+- [x] Support line continuation
 - [ ] Add #include <...>
 - [ ] Add -I option
 - [ ] Add default include paths
