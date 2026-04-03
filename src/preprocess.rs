@@ -22,6 +22,8 @@ struct CondIncl {
     included: bool,
 }
 
+type MacroHandler = fn(&Token) -> Token;
+
 #[derive(Debug, Clone)]
 struct MacroParam {
     next: Option<Box<MacroParam>>,
@@ -43,6 +45,7 @@ struct Macro {
     params: Option<Box<MacroParam>>,
     body: Token,
     deleted: bool,
+    handler: Option<MacroHandler>,
 }
 
 thread_local! {
@@ -95,6 +98,7 @@ fn add_macro(
     params: Option<Box<MacroParam>>,
     body: Token,
     deleted: bool,
+    handler: Option<MacroHandler>,
 ) {
     let m = Macro {
         next: macros_get(),
@@ -103,6 +107,7 @@ fn add_macro(
         params,
         body,
         deleted,
+        handler,
     };
     macros_set(Some(Box::new(m)));
 }
@@ -112,7 +117,34 @@ fn define_macro(name: &str, body: &str) {
     let file = new_file("<built-in>".to_string(), file_no, body.to_string());
     add_input_file(file.clone());
     let tok = tokenize(&file);
-    add_macro(name.to_string(), true, None, tok, false);
+    add_macro(name.to_string(), true, None, tok, false, None);
+}
+
+fn add_builtin(name: &str, handler: MacroHandler) {
+    let file_no = get_file_no();
+    let file = new_file("<built-in>".to_string(), file_no, String::new());
+    add_input_file(file.clone());
+    let tok = tokenize(&file);
+    add_macro(name.to_string(), true, None, tok, false, Some(handler));
+}
+
+fn file_macro(tmpl: &Token) -> Token {
+    let files = get_input_files();
+    let mut tmpl = tmpl.clone();
+    while let Some(ref origin) = tmpl.origin {
+        tmpl = *origin.clone();
+    }
+    let file = files.iter().find(|f| f.file_no == tmpl.file_no).unwrap();
+    new_str_token(&files, &file.name, &tmpl)
+}
+
+fn line_macro(tmpl: &Token) -> Token {
+    let files = get_input_files();
+    let mut tmpl = tmpl.clone();
+    while let Some(ref origin) = tmpl.origin {
+        tmpl = *origin.clone();
+    }
+    new_num_token(&files, tmpl.line_no as i64, &tmpl)
 }
 
 fn init_macros() {
@@ -157,6 +189,9 @@ fn init_macros() {
     define_macro("__x86_64__", "1");
     define_macro("linux", "1");
     define_macro("unix", "1");
+
+    add_builtin("__FILE__", file_macro);
+    add_builtin("__LINE__", line_macro);
 }
 
 fn read_macro_params(
@@ -210,6 +245,7 @@ fn read_macro_arg_one(files: &[File], tok: &Token) -> Result<(MacroArg, Token), 
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
+        origin: None,
     };
     let mut cur = &mut head;
     let mut tok = tok.clone();
@@ -438,6 +474,7 @@ fn subst(files: &[File], tok: &Token, args: &Option<Box<MacroArg>>) -> Result<To
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
+        origin: None,
     };
     let mut cur = &mut head;
     let mut tok = tok.clone();
@@ -587,12 +624,12 @@ fn read_macro_definition(files: &[File], tok: &Token) -> Result<Token, String> {
     if !next_tok.has_space && equal(files, next_tok, "(") {
         let (params, tok) = read_macro_params(files, next_tok.next.as_ref().unwrap())?;
         let (body, rest) = copy_line(files, &tok);
-        add_macro(name, false, params, body, false);
+        add_macro(name, false, params, body, false, None);
         return Ok(rest);
     }
 
     let (body, rest) = copy_line(files, next_tok);
-    add_macro(name, true, None, body, false);
+    add_macro(name, true, None, body, false, None);
     Ok(rest)
 }
 
@@ -606,10 +643,17 @@ fn expand_macro(files: &[File], tok: &Token) -> Option<Token> {
         return None;
     }
 
+    if let Some(handler) = m.handler {
+        let mut result = handler(tok);
+        result.next = tok.next.clone();
+        return Some(result);
+    }
+
     if m.is_objlike {
         let mut hs = tok.hideset.clone();
         hs.insert(m.name.clone());
-        let body = add_hideset(m.body, &hs);
+        let mut body = add_hideset(m.body, &hs);
+        set_origin(&mut body, tok);
         let mut result = append(body, *tok.next.as_ref().unwrap().clone());
         result.at_bol = tok.at_bol;
         result.has_space = tok.has_space;
@@ -624,12 +668,26 @@ fn expand_macro(files: &[File], tok: &Token) -> Option<Token> {
     let (args, rparen) = read_macro_args(files, tok, &m.params).ok()?;
     let hs = hideset_intersection(&macro_token.hideset, &rparen.hideset);
     let hs = hideset_union(&hs, &HashSet::from([m.name.clone()]));
-    let body = subst(files, &m.body, &args).ok()?;
-    let body = add_hideset(body, &hs);
+    let mut body = subst(files, &m.body, &args).ok()?;
+    body = add_hideset(body, &hs);
+    set_origin(&mut body, macro_token);
     let mut result = append(body, *rparen.next.unwrap());
     result.at_bol = macro_token.at_bol;
     result.has_space = macro_token.has_space;
     Some(result)
+}
+
+fn set_origin(tok: &mut Token, origin: &Token) {
+    let origin_box = Box::new(origin.clone());
+    let mut cur = tok;
+    while cur.kind != TokenKind::Eof {
+        cur.origin = Some(origin_box.clone());
+        if let Some(ref mut next) = cur.next {
+            cur = next;
+        } else {
+            break;
+        }
+    }
 }
 
 fn is_keyword(name: &str) -> bool {
@@ -720,6 +778,7 @@ fn add_hideset(tok: Token, hs: &HashSet<String>) -> Token {
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
+        origin: None,
     };
     let mut cur = &mut head;
     let mut tok = tok;
@@ -817,6 +876,7 @@ fn copy_line(_files: &[File], tok: &Token) -> (Token, Token) {
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
+        origin: None,
     };
     let mut cur = &mut head;
     let mut tok = tok.clone();
@@ -852,6 +912,7 @@ fn read_const_expr(files: &[File], tok: &Token) -> Result<(Token, Token), String
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
+        origin: None,
     };
     let mut cur = &mut head;
     let mut tok = line;
@@ -911,6 +972,7 @@ fn replace_idents_with_zero(mut tok: Token) -> Token {
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
+        origin: None,
     };
     let mut cur = &mut head;
 
@@ -1004,6 +1066,7 @@ fn append(tok1: Token, tok2: Token) -> Token {
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
+        origin: None,
     };
     let mut cur = &mut head;
 
@@ -1136,6 +1199,7 @@ fn preprocess2(_files: &[File], tok: Token) -> Result<Token, String> {
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
+        origin: None,
     };
     let mut cur = &mut head;
     let mut tok = tok;
@@ -1287,7 +1351,7 @@ fn preprocess2(_files: &[File], tok: Token) -> Result<Token, String> {
             let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
             let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
             tok = skip_line(&files, *tok.next.unwrap());
-            add_macro(name, true, None, new_eof(&tok), true);
+            add_macro(name, true, None, new_eof(&tok), true, None);
             continue;
         }
 

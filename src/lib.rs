@@ -51,6 +51,7 @@ pub struct Token {
     pub at_bol: bool,
     pub has_space: bool,
     pub hideset: HashSet<String>,
+    pub origin: Option<Box<Token>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
