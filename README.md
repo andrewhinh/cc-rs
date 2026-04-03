@@ -297,7 +297,7 @@ cargo run
 - [x] Add macro stringizing operator (#)
 - [x] Add macro token-pasting operator (##)
 - [x] Use chibicc's preprocessor for all tests
-- [ ] Add defined() macro operator
+- [x] Add defined() macro operator
 - [ ] Replace remaining identifiers with 0 in macro constexpr
 - [ ] Preserve newline and space during macro expansion
 - [ ] Support line continuation
