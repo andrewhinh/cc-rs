@@ -303,7 +303,7 @@ cargo run
 - [x] Replace remaining identifiers with 0 in macro constexpr
 - [x] Preserve newline and space during macro expansion
 - [x] Support line continuation
-- [ ] Add #include <...>
+- [x] Add #include <...>
 - [ ] Add -I option
 - [ ] Add default include paths
 - [ ] Add #error
