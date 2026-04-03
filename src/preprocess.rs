@@ -1239,6 +1239,10 @@ fn preprocess2(_files: &[File], tok: Token) -> Result<Token, String> {
             continue;
         }
 
+        if token_str_eq(&files, &tok, "error") {
+            return Err(error_tok(&get_input_files(), &tok, "error"));
+        }
+
         if tok.at_bol {
             continue;
         }
