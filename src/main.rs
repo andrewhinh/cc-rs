@@ -6,8 +6,8 @@ use std::{
 };
 
 use cc_rs::{
-    Token, TokenKind, codegen::emit_assembly, get_input_files, preprocess::preprocess,
-    tokenize::tokenize_file,
+    Token, TokenKind, add_include_path, codegen::emit_assembly, get_input_files,
+    preprocess::preprocess, tokenize::tokenize_file,
 };
 use tempfile::NamedTempFile;
 
@@ -21,6 +21,7 @@ struct Args {
     base_file: Option<String>,
     output_file: Option<String>,
     input_paths: Vec<String>,
+    include_paths: Vec<String>,
 }
 
 fn usage(status: i32) {
@@ -39,6 +40,7 @@ fn parse_args() -> Args {
     let mut base_file: Option<String> = None;
     let mut output_file: Option<String> = None;
     let mut input_paths: Vec<String> = Vec::new();
+    let mut include_paths: Vec<String> = Vec::new();
     let mut i = 1;
 
     while i < args.len() {
@@ -112,6 +114,21 @@ fn parse_args() -> Args {
             continue;
         }
 
+        if args[i].starts_with("-I") {
+            if args[i].len() > 2 {
+                include_paths.push(args[i][2..].to_string());
+                i += 1;
+            } else {
+                i += 1;
+                if i >= args.len() {
+                    usage(1);
+                }
+                include_paths.push(args[i].clone());
+                i += 1;
+            }
+            continue;
+        }
+
         if args[i].starts_with('-') && args[i].len() > 1 {
             eprintln!("unknown argument: {}", args[i]);
             process::exit(1);
@@ -136,6 +153,7 @@ fn parse_args() -> Args {
         base_file,
         output_file,
         input_paths,
+        include_paths,
     }
 }
 
@@ -225,6 +243,10 @@ fn cc1(args: &Args) -> Result<(), String> {
     let input = args.base_file.as_ref().ok_or("no input file for cc1")?;
     unsafe {
         std::env::set_var("CC_RS_BASE_FILE", input);
+    }
+
+    for path in &args.include_paths {
+        add_include_path(path.clone());
     }
 
     let tok = tokenize_file(input).ok_or("cannot open input file")?;

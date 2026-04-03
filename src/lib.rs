@@ -6,6 +6,7 @@ pub mod tokenize;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 
 pub use parse::{
@@ -606,4 +607,18 @@ pub struct VarAttr {
     pub is_static: bool,
     pub is_extern: bool,
     pub align: i64,
+}
+
+static INCLUDE_PATHS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+pub fn get_include_paths() -> Vec<String> {
+    INCLUDE_PATHS.lock().unwrap().clone()
+}
+
+pub fn set_include_paths(paths: Vec<String>) {
+    *INCLUDE_PATHS.lock().unwrap() = paths;
+}
+
+pub fn add_include_path(path: String) {
+    INCLUDE_PATHS.lock().unwrap().push(path);
 }
