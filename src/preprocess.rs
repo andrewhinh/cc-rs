@@ -825,6 +825,40 @@ fn read_const_expr(files: &[File], tok: &Token) -> Result<(Token, Token), String
     Ok((*head.next.unwrap(), rest))
 }
 
+fn replace_idents_with_zero(mut tok: Token) -> Token {
+    let mut head = Token {
+        kind: TokenKind::Eof,
+        next: None,
+        val: 0,
+        fval: 0.0,
+        loc: 0,
+        len: 0,
+        ty: None,
+        str: None,
+        file_no: 0,
+        line_no: 0,
+        at_bol: false,
+        has_space: false,
+        hideset: HashSet::new(),
+    };
+    let mut cur = &mut head;
+
+    while tok.kind != TokenKind::Eof {
+        let next = tok.next.take();
+        if tok.kind == TokenKind::Ident {
+            tok.kind = TokenKind::Num;
+            tok.val = 0;
+            tok.ty = Some(crate::Type::new_int());
+        }
+        cur.next = Some(Box::new(tok));
+        cur = cur.next.as_mut().unwrap();
+        tok = *next.unwrap();
+    }
+
+    cur.next = Some(Box::new(tok));
+    *head.next.unwrap()
+}
+
 fn eval_const_expr(files: &[File], tok: &Token) -> Result<(i64, Token), String> {
     let start = tok.clone();
     let (expr, rest) = read_const_expr(files, tok.next.as_ref().unwrap())?;
@@ -833,6 +867,8 @@ fn eval_const_expr(files: &[File], tok: &Token) -> Result<(i64, Token), String> 
     if expr.kind == TokenKind::Eof {
         return Err(error_tok(files, &start, "no expression"));
     }
+
+    let expr = replace_idents_with_zero(expr);
 
     let mut empty_tag_scope_stack: Vec<Vec<crate::TagScope>> = Vec::new();
     let mut empty_scope_stack: Vec<Vec<crate::VarScope>> = Vec::new();
