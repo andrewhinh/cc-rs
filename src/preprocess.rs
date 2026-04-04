@@ -43,6 +43,7 @@ struct Macro {
     name: String,
     is_objlike: bool,
     params: Option<Box<MacroParam>>,
+    is_variadic: bool,
     body: Token,
     deleted: bool,
     handler: Option<MacroHandler>,
@@ -96,6 +97,7 @@ fn add_macro(
     name: String,
     is_objlike: bool,
     params: Option<Box<MacroParam>>,
+    is_variadic: bool,
     body: Token,
     deleted: bool,
     handler: Option<MacroHandler>,
@@ -105,6 +107,7 @@ fn add_macro(
         name,
         is_objlike,
         params,
+        is_variadic,
         body,
         deleted,
         handler,
@@ -117,7 +120,7 @@ fn define_macro(name: &str, body: &str) {
     let file = new_file("<built-in>".to_string(), file_no, body.to_string());
     add_input_file(file.clone());
     let tok = tokenize(&file);
-    add_macro(name.to_string(), true, None, tok, false, None);
+    add_macro(name.to_string(), true, None, false, tok, false, None);
 }
 
 fn add_builtin(name: &str, handler: MacroHandler) {
@@ -125,7 +128,15 @@ fn add_builtin(name: &str, handler: MacroHandler) {
     let file = new_file("<built-in>".to_string(), file_no, String::new());
     add_input_file(file.clone());
     let tok = tokenize(&file);
-    add_macro(name.to_string(), true, None, tok, false, Some(handler));
+    add_macro(
+        name.to_string(),
+        true,
+        None,
+        false,
+        tok,
+        false,
+        Some(handler),
+    );
 }
 
 fn file_macro(tmpl: &Token) -> Token {
@@ -197,6 +208,7 @@ fn init_macros() {
 fn read_macro_params(
     files: &[File],
     tok: &Token,
+    is_variadic: &mut bool,
 ) -> Result<(Option<Box<MacroParam>>, Token), String> {
     let mut head: Option<Box<MacroParam>> = None;
     let mut cur: &mut Option<Box<MacroParam>> = &mut head;
@@ -205,6 +217,12 @@ fn read_macro_params(
     while !equal(files, &tok, ")") {
         if cur.is_some() {
             tok = skip(files, &tok, ",")?;
+        }
+
+        if equal(files, &tok, "...") {
+            *is_variadic = true;
+            let tok = skip(files, tok.next.as_ref().unwrap(), ")")?;
+            return Ok((head, tok));
         }
 
         if tok.kind != TokenKind::Ident {
@@ -230,7 +248,11 @@ fn read_macro_params(
     Ok((head, *tok.next.unwrap()))
 }
 
-fn read_macro_arg_one(files: &[File], tok: &Token) -> Result<(MacroArg, Token), String> {
+fn read_macro_arg_one(
+    files: &[File],
+    tok: &Token,
+    read_rest: bool,
+) -> Result<(MacroArg, Token), String> {
     let mut head = Token {
         kind: TokenKind::Eof,
         next: None,
@@ -251,7 +273,14 @@ fn read_macro_arg_one(files: &[File], tok: &Token) -> Result<(MacroArg, Token), 
     let mut tok = tok.clone();
     let mut level: i32 = 0;
 
-    while level > 0 || (!equal(files, &tok, ",") && !equal(files, &tok, ")")) {
+    loop {
+        if level == 0 && equal(files, &tok, ")") {
+            break;
+        }
+        if level == 0 && !read_rest && equal(files, &tok, ",") {
+            break;
+        }
+
         if tok.kind == TokenKind::Eof {
             return Err(error_tok(files, &tok, "premature end of input"));
         }
@@ -284,6 +313,7 @@ fn read_macro_args(
     files: &[File],
     tok: &Token,
     params: &Option<Box<MacroParam>>,
+    is_variadic: bool,
 ) -> Result<(Option<Box<MacroArg>>, Token), String> {
     let start = tok.clone();
     let mut tok = tok
@@ -305,7 +335,7 @@ fn read_macro_args(
             tok = skip(files, &tok, ",")?;
         }
 
-        let (arg, new_tok) = read_macro_arg_one(files, &tok)?;
+        let (arg, new_tok) = read_macro_arg_one(files, &tok, false)?;
         tok = new_tok;
 
         let mut arg = arg;
@@ -323,12 +353,35 @@ fn read_macro_args(
         pp = p.next.as_ref();
     }
 
-    if pp.is_some() {
+    if is_variadic {
+        let arg = if equal(files, &tok, ")") {
+            MacroArg {
+                next: None,
+                name: "__VA_ARGS__".to_string(),
+                tok: new_eof(&tok),
+            }
+        } else {
+            if params.is_some() {
+                tok = skip(files, &tok, ",")?;
+            }
+            let (mut arg, new_tok) = read_macro_arg_one(files, &tok, true)?;
+            tok = new_tok;
+            arg.name = "__VA_ARGS__".to_string();
+            arg
+        };
+        let arg_box = Box::new(arg);
+        if cur.is_none() {
+            head = Some(arg_box);
+        } else {
+            cur.as_mut().unwrap().next = Some(arg_box);
+        }
+    } else if pp.is_some() {
         return Err(error_tok(files, &start, "too many arguments"));
     }
 
+    let rparen = tok.clone();
     skip(files, &tok, ")")?;
-    Ok((head, tok))
+    Ok((head, rparen))
 }
 
 fn find_arg<'a>(
@@ -622,14 +675,16 @@ fn read_macro_definition(files: &[File], tok: &Token) -> Result<Token, String> {
     let next_tok = tok.next.as_ref().unwrap();
 
     if !next_tok.has_space && equal(files, next_tok, "(") {
-        let (params, tok) = read_macro_params(files, next_tok.next.as_ref().unwrap())?;
+        let mut is_variadic = false;
+        let (params, tok) =
+            read_macro_params(files, next_tok.next.as_ref().unwrap(), &mut is_variadic)?;
         let (body, rest) = copy_line(files, &tok);
-        add_macro(name, false, params, body, false, None);
+        add_macro(name, false, params, is_variadic, body, false, None);
         return Ok(rest);
     }
 
     let (body, rest) = copy_line(files, next_tok);
-    add_macro(name, true, None, body, false, None);
+    add_macro(name, true, None, false, body, false, None);
     Ok(rest)
 }
 
@@ -665,13 +720,17 @@ fn expand_macro(files: &[File], tok: &Token) -> Option<Token> {
     }
 
     let macro_token = tok;
-    let (args, rparen) = read_macro_args(files, tok, &m.params).ok()?;
+    let (args, rparen) = read_macro_args(files, tok, &m.params, m.is_variadic).ok()?;
     let hs = hideset_intersection(&macro_token.hideset, &rparen.hideset);
     let hs = hideset_union(&hs, &HashSet::from([m.name.clone()]));
     let mut body = subst(files, &m.body, &args).ok()?;
     body = add_hideset(body, &hs);
     set_origin(&mut body, macro_token);
-    let mut result = append(body, *rparen.next.unwrap());
+    let next_tok = rparen
+        .next
+        .clone()
+        .unwrap_or_else(|| Box::new(new_eof(&rparen)));
+    let mut result = append(body, *next_tok);
     result.at_bol = macro_token.at_bol;
     result.has_space = macro_token.has_space;
     Some(result)
@@ -1351,7 +1410,7 @@ fn preprocess2(_files: &[File], tok: Token) -> Result<Token, String> {
             let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
             let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
             tok = skip_line(&files, *tok.next.unwrap());
-            add_macro(name, true, None, new_eof(&tok), true, None);
+            add_macro(name, true, None, false, new_eof(&tok), true, None);
             continue;
         }
 
