@@ -2559,6 +2559,13 @@ pub fn function(
     globals.push(func_name_var.clone());
     local_scope_stack.last_mut().unwrap().push(VarScope {
         name: "__func__".to_string(),
+        var: Some(func_name_var.clone()),
+        type_def: None,
+        enum_ty: None,
+        enum_val: 0,
+    });
+    local_scope_stack.last_mut().unwrap().push(VarScope {
+        name: "__FUNCTION__".to_string(),
         var: Some(func_name_var),
         type_def: None,
         enum_ty: None,
