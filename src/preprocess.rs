@@ -1106,6 +1106,69 @@ fn convert_keywords(files: &[File], tok: &mut Token) {
     }
 }
 
+fn join_adjacent_string_literals(tok: &mut Token) {
+    let mut tok1 = tok;
+    loop {
+        if tok1.kind == TokenKind::Eof {
+            break;
+        }
+        if tok1.kind != TokenKind::Str
+            || tok1.next.is_none()
+            || tok1.next.as_ref().unwrap().kind != TokenKind::Str
+        {
+            tok1 = tok1.next.as_mut().unwrap();
+            continue;
+        }
+
+        let tok2_loc;
+        let tok2_file_no;
+        {
+            let mut tok2 = tok1.next.as_mut().unwrap();
+            while tok2.kind == TokenKind::Str {
+                if tok2.next.is_none() {
+                    break;
+                }
+                tok2 = tok2.next.as_mut().unwrap();
+            }
+            tok2_loc = tok2.loc;
+            tok2_file_no = tok2.file_no;
+        }
+
+        let base_ty = tok1
+            .ty
+            .as_ref()
+            .unwrap()
+            .base
+            .as_ref()
+            .unwrap()
+            .borrow()
+            .clone();
+
+        let mut len = tok1.ty.as_ref().unwrap().array_len;
+        let mut t = tok1.next.as_ref().unwrap();
+        while t.kind == TokenKind::Str && (t.loc != tok2_loc || t.file_no != tok2_file_no) {
+            len += t.ty.as_ref().unwrap().array_len - 1;
+            t = t.next.as_ref().unwrap();
+        }
+
+        let mut buf: Vec<u8> = Vec::new();
+        if let Some(ref s) = tok1.str {
+            buf.extend_from_slice(s);
+        }
+        let mut t = *tok1.next.as_ref().unwrap().clone();
+        while t.kind == TokenKind::Str && (t.loc != tok2_loc || t.file_no != tok2_file_no) {
+            if let Some(ref s) = t.str {
+                buf.extend_from_slice(s);
+            }
+            t = *t.next.as_ref().unwrap().clone();
+        }
+
+        tok1.str = Some(buf);
+        tok1.ty = Some(crate::Type::new_array(base_ty, len));
+        tok1.next = Some(Box::new(t));
+    }
+}
+
 fn append(tok1: Token, tok2: Token) -> Token {
     if tok1.kind == TokenKind::Eof {
         return tok2;
@@ -1450,5 +1513,6 @@ pub fn preprocess(tok: Token) -> Result<Token, String> {
     let mut tok = tok;
     let files = get_input_files();
     convert_keywords(&files, &mut tok);
+    join_adjacent_string_literals(&mut tok);
     Ok(tok)
 }
