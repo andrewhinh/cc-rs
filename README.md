@@ -311,7 +311,7 @@ cargo run
 - [x] Add __FILE__ and __LINE__
 - [x] Add __VA_ARGS__
 - [x] Add __func__
-- [ ] [GNU] Add __FUNCTION__
+- [x] [GNU] Add __FUNCTION__
 - [ ] Add __DATE__ and __TIME__ macros
 - [ ] [GNU] Add __COUNTER__ macro
 - [ ] Add #line
