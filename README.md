@@ -309,7 +309,7 @@ cargo run
 - [x] Add #error
 - [x] Add predefine macros such as __STDC__
 - [x] Add __FILE__ and __LINE__
-- [ ] Add __VA_ARGS__
+- [x] Add __VA_ARGS__
 - [ ] Add __func__
 - [ ] [GNU] Add __FUNCTION__
 - [ ] Add __DATE__ and __TIME__ macros
