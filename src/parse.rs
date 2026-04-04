@@ -2552,6 +2552,19 @@ pub fn function(
     }
 
     let tok = skip(files, &tok, "{")?;
+
+    let func_name_bytes = fn_obj.name.as_bytes();
+    let func_name_ty = Type::new_array(Type::new_char(), func_name_bytes.len() as i64 + 1);
+    let func_name_var = new_string_literal(func_name_bytes, func_name_ty);
+    globals.push(func_name_var.clone());
+    local_scope_stack.last_mut().unwrap().push(VarScope {
+        name: "__func__".to_string(),
+        var: Some(func_name_var),
+        type_def: None,
+        enum_ty: None,
+        enum_val: 0,
+    });
+
     let return_ty = ty.return_ty.as_ref().map(|b| b.as_ref());
     let (mut body, tok) = compound_stmt(
         files,
