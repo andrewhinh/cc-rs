@@ -612,6 +612,61 @@ pub fn tokenize(file: &File) -> Token {
             continue;
         }
 
+        if pos + 1 < chars.len() && chars[pos] == 'L' && chars[pos + 1] == '\'' {
+            let start = pos;
+            pos += 2;
+            if pos >= chars.len() {
+                cur.next = Some(Box::new(make_error_token(
+                    file_no,
+                    start,
+                    "unclosed char literal",
+                )));
+                return *head.next.unwrap();
+            }
+            let c: i64;
+            if chars[pos] == '\\' {
+                pos += 1;
+                if pos >= chars.len() {
+                    cur.next = Some(Box::new(make_error_token(
+                        file_no,
+                        start,
+                        "unclosed char literal",
+                    )));
+                    return *head.next.unwrap();
+                }
+                match read_escaped_char(&chars, pos) {
+                    Ok((escaped, consumed)) => {
+                        c = (escaped as u8) as i8 as i64;
+                        pos += consumed;
+                    }
+                    Err(e) => {
+                        cur.next = Some(Box::new(make_error_token(file_no, pos, &e)));
+                        return *head.next.unwrap();
+                    }
+                }
+            } else {
+                c = (chars[pos] as u8) as i8 as i64;
+                pos += 1;
+            }
+            if pos >= chars.len() || chars[pos] != '\'' {
+                cur.next = Some(Box::new(make_error_token(
+                    file_no,
+                    pos,
+                    "unclosed char literal",
+                )));
+                return *head.next.unwrap();
+            }
+            pos += 1;
+            let mut tok = new_token(TokenKind::Num, start, pos, at_bol, has_space, file_no);
+            tok.val = c;
+            tok.ty = Some(Type::new_int());
+            cur.next = Some(Box::new(tok));
+            cur = cur.next.as_mut().unwrap();
+            at_bol = false;
+            has_space = false;
+            continue;
+        }
+
         if chars[pos] == '\'' {
             let start = pos;
             pos += 1;

@@ -253,7 +253,7 @@ cargo run
 - [x] Add line and block comments
 - [x] Add character literal
 - [x] Concatenate adjacent string literals
-- [ ] Recognize wide character literal
+- [x] Recognize wide character literal
 - [ ] Tokenize numeric tokens as pp-numbers
 - [x] Precompute line number for each token
 - [ ] Use hashmap for keyword lookup
