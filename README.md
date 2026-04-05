@@ -337,7 +337,7 @@ cargo run
 - [ ] Rewrite tests in shell script in C
 - [x] Emit .file and .loc assembler directives
 - [x] Add stage2 build
-- [ ] Self-host: including preprocessor, the C compiler can compile itself
+- [x] Self-host: including preprocessor, the C compiler can compile itself
 - [x] Split cc1 from compiler driver
 - [x] Run "as" command unless -S is given
 - [x] Accept multiple input files

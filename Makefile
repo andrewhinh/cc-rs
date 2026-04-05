@@ -70,10 +70,9 @@ stage2/cpp: $(SRCS:src/cpp/%.c=stage2/%.s)
 	@mkdir -p stage2
 	gcc -no-pie -o $@ $^
 
-stage2/%.s: src/cpp/%.c self.py target/debug/cc-rs
+stage2/%.s: src/cpp/%.c target/release/cc-rs
 	@mkdir -p stage2
-	./self.py src/cpp/chibicc.h $< > stage2/$*.c
-	./target/debug/cc-rs -o $@ stage2/$*.c
+	./target/debug/cc-rs -o $@ $<
 
 target/debug/cc-rs: $(RUST_SRCS)
 	cargo build
@@ -84,7 +83,7 @@ target/release/cc-rs: $(RUST_SRCS)
 test-stage2: stage2/cpp
 	@for i in $(TEST_SRCS); do \
 		echo $$i; \
-		./stage2/cpp -o stage2/test/$$(basename $${i%.c}).s $$i; \
+		./stage2/cpp -Isrc/cpp/include -Isrc/cpp/test -o stage2/test/$$(basename $${i%.c}).s $$i; \
 		gcc -no-pie -o stage2/test/$$(basename $${i%.c}).exe stage2/test/$$(basename $${i%.c}).s -xc src/cpp/test/common; \
 		./stage2/test/$$(basename $${i%.c}).exe || exit 1; \
 		echo; \
@@ -97,7 +96,7 @@ test: target/release/cc-rs
 	@echo "Running basic tests..."
 	@for i in $(TEST_SRCS); do \
 		echo $$i; \
-		./target/debug/cc-rs -o /tmp/$$(basename $${i%.c}).s $$i; \
+		./target/debug/cc-rs -Isrc/cpp/include -Isrc/cpp/test -o /tmp/$$(basename $${i%.c}).s $$i; \
 		gcc -no-pie -o /tmp/$$(basename $${i%.c}) /tmp/$$(basename $${i%.c}).s -xc src/cpp/test/common; \
 		/tmp/$$(basename $${i%.c}) || exit 1; \
 		echo; \
