@@ -4883,6 +4883,24 @@ pub fn primary(
             .take(tok.len)
             .collect();
 
+        if name == "__builtin_reg_class" {
+            let (ty, tok) = typename(
+                files,
+                tok.next.as_ref().unwrap().next.as_ref().unwrap(),
+                tag_scope_stack,
+                scope_stack,
+            )?;
+            let tok = skip(files, &tok, ")")?;
+
+            if crate::is_integer(&ty) || ty.kind == TypeKind::Ptr {
+                return Ok((new_num(0, tok_loc, file_no, line_no), tok));
+            }
+            if crate::is_flonum(&ty) {
+                return Ok((new_num(1, tok_loc, file_no, line_no), tok));
+            }
+            return Ok((new_num(2, tok_loc, file_no, line_no), tok));
+        }
+
         let sc = find_var(scope_stack, globals, &name);
 
         if let Some(sc) = sc {
