@@ -340,7 +340,7 @@ cargo run
 - [x] Run "as" command unless -S is given
 - [x] Accept multiple input files
 - [x] Run "ld" unless -c is given
-- [ ] Add stdarg.h, stdbool.h, stddef.h, stdalign.h and float.h
+- [x] Add stdarg.h, stdbool.h, stddef.h, stdalign.h and float.h
 - [ ] Add -D option
 - [ ] Add -U option
 - [ ] Write to an in-memory buffer before writing to an actual output file
