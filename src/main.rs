@@ -37,6 +37,7 @@ fn add_default_include_paths(argv0: &str) {
         add_include_path(format!("{}/include", parent.display()));
     }
 
+    add_include_path("src/cpp/include".to_string());
     add_include_path("/usr/local/include".to_string());
     add_include_path("/usr/include/x86_64-linux-gnu".to_string());
     add_include_path("/usr/include".to_string());
