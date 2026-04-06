@@ -19,7 +19,7 @@ fn gen_addr(
         NodeKind::Var => {
             let var = node.var.as_ref().unwrap();
             if var.is_local {
-                result.push_str(&format!("  lea -{}(%rbp), %rax\n", var.offset));
+                result.push_str(&format!("  lea {}(%rbp), %rax\n", var.offset));
                 return Ok(());
             }
 
@@ -727,7 +727,7 @@ fn gen_expr(
         NodeKind::Memzero => {
             let var = node.var.as_ref().unwrap();
             result.push_str(&format!("  mov ${}, %rcx\n", var.ty.size));
-            result.push_str(&format!("  lea -{}(%rbp), %rdi\n", var.offset));
+            result.push_str(&format!("  lea {}(%rbp), %rdi\n", var.offset));
             result.push_str("  mov $0, %al\n");
             result.push_str("  rep stosb\n");
             return Ok(());
@@ -1130,18 +1130,18 @@ fn store_gp(r: usize, offset: i64, sz: i64, result: &mut String) {
     let argreg32 = ["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"];
     let argreg64 = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
     match sz {
-        1 => result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg8[r], offset)),
-        2 => result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg16[r], offset)),
-        4 => result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg32[r], offset)),
-        8 => result.push_str(&format!("  mov {}, -{}(%rbp)\n", argreg64[r], offset)),
+        1 => result.push_str(&format!("  mov {}, {}(%rbp)\n", argreg8[r], offset)),
+        2 => result.push_str(&format!("  mov {}, {}(%rbp)\n", argreg16[r], offset)),
+        4 => result.push_str(&format!("  mov {}, {}(%rbp)\n", argreg32[r], offset)),
+        8 => result.push_str(&format!("  mov {}, {}(%rbp)\n", argreg64[r], offset)),
         _ => unreachable!(),
     }
 }
 
 fn store_fp(r: usize, offset: i64, sz: i64, result: &mut String) {
     match sz {
-        4 => result.push_str(&format!("  movss %xmm{}, -{}(%rbp)\n", r, offset)),
-        8 => result.push_str(&format!("  movsd %xmm{}, -{}(%rbp)\n", r, offset)),
+        4 => result.push_str(&format!("  movss %xmm{}, {}(%rbp)\n", r, offset)),
+        8 => result.push_str(&format!("  movsd %xmm{}, {}(%rbp)\n", r, offset)),
         _ => unreachable!(),
     }
 }
@@ -1319,13 +1319,44 @@ pub fn emit_assembly() -> Result<String, String> {
             continue;
         }
 
-        let mut offset = 0;
-        for var in func.locals.iter_mut().rev() {
-            offset += var.ty.size;
-            offset = align_to(offset, var.align);
-            var.offset = offset;
+        let mut top = 16;
+        let mut bottom = 0;
+
+        let mut gp = 0;
+        let mut fp = 0;
+
+        for var in func.params.iter_mut() {
+            if crate::is_flonum(&var.ty) {
+                if fp < FP_MAX {
+                    fp += 1;
+                    continue;
+                }
+            } else if gp < GP_MAX {
+                gp += 1;
+                continue;
+            }
+
+            top = align_to(top, 8);
+            var.offset = top;
+
+            if let Some(local_var) = func.locals.iter_mut().find(|l| l.name == var.name) {
+                local_var.offset = top;
+            }
+
+            top += var.ty.size;
         }
-        let stack_size = align_to(offset, 16);
+
+        for var in func.locals.iter_mut().rev() {
+            if var.offset != 0 {
+                continue;
+            }
+
+            bottom += var.ty.size;
+            bottom = align_to(bottom, var.align);
+            var.offset = -bottom;
+        }
+
+        let stack_size = align_to(bottom, 16);
 
         let locals = func.locals.clone();
         if let Some(va_area) = &mut func.va_area
@@ -1404,6 +1435,11 @@ pub fn emit_assembly() -> Result<String, String> {
             if let Some(lv) = local_var {
                 var.offset = lv.offset;
             }
+
+            if var.offset > 0 {
+                continue;
+            }
+
             if crate::is_flonum(&var.ty) {
                 store_fp(fp, var.offset, var.ty.size, &mut result);
                 fp += 1;
