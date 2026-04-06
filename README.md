@@ -105,7 +105,7 @@ cargo run
 - [x] Decay a function to a pointer in the func param context
 - [x] Add usual arithmetic conversion for function pointer
 - [x] Add va_arg()
-- [ ] Support passed-on-stack arguments
+- [x] Support passed-on-stack arguments
 - [ ] Support passed-on-stack parameters
 - [ ] Allow struct parameter
 - [ ] Allow struct argument

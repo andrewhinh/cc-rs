@@ -131,6 +131,9 @@ fn cmp_zero(ty: &Type, result: &mut String) {
     }
 }
 
+const GP_MAX: i32 = 6;
+const FP_MAX: i32 = 8;
+
 fn pushf(result: &mut String, depth: &mut i32) {
     result.push_str("  sub $8, %rsp\n");
     result.push_str("  movsd %xmm0, (%rsp)\n");
@@ -143,16 +146,63 @@ fn popf(result: &mut String, depth: &mut i32, reg: i32) {
     *depth -= 1;
 }
 
-fn push_args(
+fn count_args(node: &Node) -> (i32, i32, Vec<bool>) {
+    let mut gp = 0;
+    let mut fp = 0;
+    let mut pass_by_stack = Vec::new();
+
+    let mut arg: Option<&Node> = Some(node);
+    while let Some(arg_node) = arg {
+        if crate::is_flonum(arg_node.ty.as_ref().unwrap()) {
+            if fp >= FP_MAX {
+                pass_by_stack.push(true);
+            } else {
+                pass_by_stack.push(false);
+            }
+            fp += 1;
+        } else {
+            if gp >= GP_MAX {
+                pass_by_stack.push(true);
+            } else {
+                pass_by_stack.push(false);
+            }
+            gp += 1;
+        }
+        arg = arg_node.next.as_deref();
+    }
+    (gp, fp, pass_by_stack)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_args2(
     node: &Node,
+    first_pass: bool,
+    pass_by_stack: &[bool],
+    pos: usize,
     result: &mut String,
     files: &[File],
     current_fn: &str,
     depth: &mut i32,
 ) -> Result<(), String> {
     if let Some(next) = node.next.as_ref() {
-        push_args(next, result, files, current_fn, depth)?;
+        push_args2(
+            next,
+            first_pass,
+            pass_by_stack,
+            pos + 1,
+            result,
+            files,
+            current_fn,
+            depth,
+        )?;
     }
+
+    let is_stack = pass_by_stack[pos];
+
+    if (first_pass && !is_stack) || (!first_pass && is_stack) {
+        return Ok(());
+    }
+
     gen_expr(node, result, files, current_fn, depth)?;
     if crate::is_flonum(node.ty.as_ref().unwrap()) {
         pushf(result, depth);
@@ -161,6 +211,46 @@ fn push_args(
         *depth += 1;
     }
     Ok(())
+}
+
+fn push_args(
+    node: &Node,
+    result: &mut String,
+    files: &[File],
+    current_fn: &str,
+    depth: &mut i32,
+) -> Result<(i32, i32), String> {
+    let (_, fp, pass_by_stack) = count_args(node);
+    let stack = pass_by_stack.iter().filter(|&&x| x).count() as i32;
+
+    if (*depth + stack) % 2 == 1 {
+        result.push_str("  sub $8, %rsp\n");
+        *depth += 1;
+    }
+
+    push_args2(
+        node,
+        true,
+        &pass_by_stack,
+        0,
+        result,
+        files,
+        current_fn,
+        depth,
+    )?;
+    push_args2(
+        node,
+        false,
+        &pass_by_stack,
+        0,
+        result,
+        files,
+        current_fn,
+        depth,
+    )?;
+
+    let adjusted_stack = if stack % 2 == 1 { stack + 1 } else { stack };
+    Ok((adjusted_stack, fp))
 }
 
 const I8: usize = 0;
@@ -558,34 +648,36 @@ fn gen_expr(
         NodeKind::FuncCall => {
             let argreg = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
 
-            if let Some(args) = node.args.as_ref() {
-                push_args(args, result, files, current_fn, depth)?;
-            }
+            let (stack_args, fp) = if let Some(args) = node.args.as_ref() {
+                push_args(args, result, files, current_fn, depth)?
+            } else {
+                (0, 0)
+            };
 
             gen_expr(node.lhs.as_ref().unwrap(), result, files, current_fn, depth)?;
 
             let mut gp = 0;
-            let mut fp = 0;
+            let mut fp_count = 0;
             let mut arg = node.args.as_ref();
             while let Some(arg_node) = arg {
                 if crate::is_flonum(arg_node.ty.as_ref().unwrap()) {
-                    popf(result, depth, fp);
-                    fp += 1;
-                } else {
-                    result.push_str(&format!("  pop {}\n", argreg[gp]));
+                    if fp_count < FP_MAX {
+                        popf(result, depth, fp_count);
+                        fp_count += 1;
+                    }
+                } else if gp < GP_MAX {
+                    result.push_str(&format!("  pop {}\n", argreg[gp as usize]));
                     *depth -= 1;
                     gp += 1;
                 }
                 arg = arg_node.next.as_ref();
             }
 
-            if *depth % 2 == 0 {
-                result.push_str("  call *%rax\n");
-            } else {
-                result.push_str("  sub $8, %rsp\n");
-                result.push_str("  call *%rax\n");
-                result.push_str("  add $8, %rsp\n");
-            }
+            result.push_str("  mov %rax, %r10\n");
+            result.push_str(&format!("  mov ${}, %rax\n", fp));
+            result.push_str("  call *%r10\n");
+            result.push_str(&format!("  add ${}, %rsp\n", stack_args * 8));
+            *depth -= stack_args;
 
             let ty = node.ty.as_ref().unwrap();
             match ty.kind {
