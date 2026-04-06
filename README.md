@@ -106,7 +106,7 @@ cargo run
 - [x] Add usual arithmetic conversion for function pointer
 - [x] Add va_arg()
 - [x] Support passed-on-stack arguments
-- [ ] Support passed-on-stack parameters
+- [x] Support passed-on-stack parameters
 - [ ] Allow struct parameter
 - [ ] Allow struct argument
 - [ ] Allow to call a fucntion returning a struct
