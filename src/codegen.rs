@@ -146,31 +146,107 @@ fn popf(result: &mut String, depth: &mut i32, reg: i32) {
     *depth -= 1;
 }
 
-fn count_args(node: &Node) -> (i32, i32, Vec<bool>) {
-    let mut gp = 0;
-    let mut fp = 0;
+fn has_flonum(ty: &Type, lo: i64, hi: i64, offset: i64) -> bool {
+    match ty.kind {
+        TypeKind::Struct | TypeKind::Union => {
+            let mut mem = ty.members.as_ref();
+            while let Some(m) = mem {
+                if !has_flonum(&m.ty, lo, hi, offset + m.offset) {
+                    return false;
+                }
+                mem = m.next.as_ref();
+            }
+            true
+        }
+        TypeKind::Array => {
+            let base_ty = ty.base.as_ref().unwrap().borrow().clone();
+            for i in 0..ty.array_len {
+                if !has_flonum(&base_ty, lo, hi, offset + base_ty.size * i) {
+                    return false;
+                }
+            }
+            true
+        }
+        _ => offset < lo || hi <= offset || crate::is_flonum(ty),
+    }
+}
+
+fn has_flonum1(ty: &Type) -> bool {
+    has_flonum(ty, 0, 8, 0)
+}
+
+fn has_flonum2(ty: &Type) -> bool {
+    has_flonum(ty, 8, 16, 0)
+}
+
+fn push_struct(ty: &Type, result: &mut String, depth: &mut i32) {
+    let sz = {
+        let mut s = ty.size;
+        s = (s + 7) / 8 * 8;
+        s
+    };
+    result.push_str(&format!("  sub ${}, %rsp\n", sz));
+    *depth += (sz / 8) as i32;
+
+    for i in 0..ty.size {
+        result.push_str(&format!("  mov {}(%rax), %r10b\n", i));
+        result.push_str(&format!("  mov %r10b, {}(%rsp)\n", i));
+    }
+}
+
+fn count_args(node: &Node) -> (i32, i32, Vec<bool>, i32) {
+    let mut gp: i32 = 0;
+    let mut fp: i32 = 0;
+    let mut stack: i32 = 0;
     let mut pass_by_stack = Vec::new();
 
     let mut arg: Option<&Node> = Some(node);
     while let Some(arg_node) = arg {
-        if crate::is_flonum(arg_node.ty.as_ref().unwrap()) {
-            if fp >= FP_MAX {
-                pass_by_stack.push(true);
-            } else {
-                pass_by_stack.push(false);
+        let ty = arg_node.ty.as_ref().unwrap();
+        match ty.kind {
+            TypeKind::Struct | TypeKind::Union => {
+                if ty.size > 16 {
+                    pass_by_stack.push(true);
+                    let sz = ((ty.size + 7) / 8) as i32;
+                    stack += sz;
+                } else {
+                    let fp1 = has_flonum1(ty);
+                    let fp2 = if ty.size > 8 { has_flonum2(ty) } else { false };
+                    if (fp + fp1 as i32 + fp2 as i32) < FP_MAX
+                        && (gp + !fp1 as i32 + !fp2 as i32) < GP_MAX
+                    {
+                        fp += fp1 as i32 + fp2 as i32;
+                        gp += !fp1 as i32 + !fp2 as i32;
+                        pass_by_stack.push(false);
+                    } else {
+                        pass_by_stack.push(true);
+                        let sz = ((ty.size + 7) / 8) as i32;
+                        stack += sz;
+                    }
+                }
             }
-            fp += 1;
-        } else {
-            if gp >= GP_MAX {
-                pass_by_stack.push(true);
-            } else {
-                pass_by_stack.push(false);
+            TypeKind::Float | TypeKind::Double => {
+                if fp >= FP_MAX {
+                    pass_by_stack.push(true);
+                    stack += 1;
+                } else {
+                    pass_by_stack.push(false);
+                }
+                fp += 1;
             }
-            gp += 1;
+            _ => {
+                if gp >= GP_MAX {
+                    pass_by_stack.push(true);
+                    stack += 1;
+                } else {
+                    pass_by_stack.push(false);
+                }
+                gp += 1;
+            }
         }
         arg = arg_node.next.as_deref();
     }
-    (gp, fp, pass_by_stack)
+    (gp, fp, pass_by_stack, stack)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -204,11 +280,17 @@ fn push_args2(
     }
 
     gen_expr(node, result, files, current_fn, depth)?;
-    if crate::is_flonum(node.ty.as_ref().unwrap()) {
-        pushf(result, depth);
-    } else {
-        result.push_str("  push %rax\n");
-        *depth += 1;
+    match node.ty.as_ref().unwrap().kind {
+        TypeKind::Struct | TypeKind::Union => {
+            push_struct(node.ty.as_ref().unwrap(), result, depth);
+        }
+        TypeKind::Float | TypeKind::Double => {
+            pushf(result, depth);
+        }
+        _ => {
+            result.push_str("  push %rax\n");
+            *depth += 1;
+        }
     }
     Ok(())
 }
@@ -220,12 +302,13 @@ fn push_args(
     current_fn: &str,
     depth: &mut i32,
 ) -> Result<(i32, i32), String> {
-    let (_, fp, pass_by_stack) = count_args(node);
-    let stack = pass_by_stack.iter().filter(|&&x| x).count() as i32;
+    let (_, fp, pass_by_stack, stack) = count_args(node);
 
+    let mut pad = 0;
     if (*depth + stack) % 2 == 1 {
         result.push_str("  sub $8, %rsp\n");
         *depth += 1;
+        pad = 1;
     }
 
     push_args2(
@@ -249,8 +332,7 @@ fn push_args(
         depth,
     )?;
 
-    let adjusted_stack = if stack % 2 == 1 { stack + 1 } else { stack };
-    Ok((adjusted_stack, fp))
+    Ok((stack + pad, fp))
 }
 
 const I8: usize = 0;
@@ -646,7 +728,7 @@ fn gen_expr(
             return Ok(());
         }
         NodeKind::FuncCall => {
-            let argreg = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
+            let argreg64 = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
 
             let (stack_args, fp) = if let Some(args) = node.args.as_ref() {
                 push_args(args, result, files, current_fn, depth)?
@@ -660,15 +742,51 @@ fn gen_expr(
             let mut fp_count = 0;
             let mut arg = node.args.as_ref();
             while let Some(arg_node) = arg {
-                if crate::is_flonum(arg_node.ty.as_ref().unwrap()) {
-                    if fp_count < FP_MAX {
-                        popf(result, depth, fp_count);
-                        fp_count += 1;
+                let ty = arg_node.ty.as_ref().unwrap();
+                match ty.kind {
+                    TypeKind::Struct | TypeKind::Union => {
+                        if ty.size > 16 {
+                            arg = arg_node.next.as_ref();
+                            continue;
+                        }
+                        let fp1 = has_flonum1(ty);
+                        let fp2 = has_flonum2(ty);
+                        if (fp_count + fp1 as i32 + fp2 as i32) < FP_MAX
+                            && (gp + !fp1 as i32 + !fp2 as i32) < GP_MAX
+                        {
+                            if fp1 {
+                                popf(result, depth, fp_count);
+                                fp_count += 1;
+                            } else {
+                                result.push_str(&format!("  pop {}\n", argreg64[gp as usize]));
+                                *depth -= 1;
+                                gp += 1;
+                            }
+                            if ty.size > 8 {
+                                if fp2 {
+                                    popf(result, depth, fp_count);
+                                    fp_count += 1;
+                                } else {
+                                    result.push_str(&format!("  pop {}\n", argreg64[gp as usize]));
+                                    *depth -= 1;
+                                    gp += 1;
+                                }
+                            }
+                        }
                     }
-                } else if gp < GP_MAX {
-                    result.push_str(&format!("  pop {}\n", argreg[gp as usize]));
-                    *depth -= 1;
-                    gp += 1;
+                    TypeKind::Float | TypeKind::Double => {
+                        if fp_count < FP_MAX {
+                            popf(result, depth, fp_count);
+                            fp_count += 1;
+                        }
+                    }
+                    _ => {
+                        if gp < GP_MAX {
+                            result.push_str(&format!("  pop {}\n", argreg64[gp as usize]));
+                            *depth -= 1;
+                            gp += 1;
+                        }
+                    }
                 }
                 arg = arg_node.next.as_ref();
             }
@@ -1325,24 +1443,71 @@ pub fn emit_assembly() -> Result<String, String> {
         let mut fp = 0;
 
         for var in func.params.iter_mut() {
-            if crate::is_flonum(&var.ty) {
-                if fp < FP_MAX {
-                    fp += 1;
-                    continue;
-                }
-            } else if gp < GP_MAX {
-                gp += 1;
-                continue;
-            }
-
-            top = align_to(top, 8);
-            var.offset = top;
-
+            var.offset = 0;
             if let Some(local_var) = func.locals.iter_mut().find(|l| l.name == var.name) {
-                local_var.offset = top;
+                local_var.offset = 0;
             }
+        }
 
-            top += var.ty.size;
+        for var in func.params.iter_mut() {
+            let ty = &var.ty;
+            match ty.kind {
+                TypeKind::Struct | TypeKind::Union => {
+                    if ty.size > 16 {
+                        top = align_to(top, 8);
+                        var.offset = top;
+                        if let Some(local_var) = func.locals.iter_mut().find(|l| l.name == var.name)
+                        {
+                            local_var.offset = top;
+                        }
+                        top += ty.size;
+                    } else {
+                        let fp1 = has_flonum1(ty);
+                        let fp2 = if ty.size > 8 { has_flonum2(ty) } else { false };
+                        if (fp + fp1 as i32 + fp2 as i32) < FP_MAX
+                            && (gp + !fp1 as i32 + !fp2 as i32) < GP_MAX
+                        {
+                            fp += fp1 as i32 + fp2 as i32;
+                            gp += !fp1 as i32 + !fp2 as i32;
+                        } else {
+                            top = align_to(top, 8);
+                            var.offset = top;
+                            if let Some(local_var) =
+                                func.locals.iter_mut().find(|l| l.name == var.name)
+                            {
+                                local_var.offset = top;
+                            }
+                            top += ty.size;
+                        }
+                    }
+                }
+                TypeKind::Float | TypeKind::Double => {
+                    if fp < FP_MAX {
+                        fp += 1;
+                    } else {
+                        top = align_to(top, 8);
+                        var.offset = top;
+                        if let Some(local_var) = func.locals.iter_mut().find(|l| l.name == var.name)
+                        {
+                            local_var.offset = top;
+                        }
+                        top += ty.size;
+                    }
+                }
+                _ => {
+                    if gp < GP_MAX {
+                        gp += 1;
+                    } else {
+                        top = align_to(top, 8);
+                        var.offset = top;
+                        if let Some(local_var) = func.locals.iter_mut().find(|l| l.name == var.name)
+                        {
+                            local_var.offset = top;
+                        }
+                        top += ty.size;
+                    }
+                }
+            }
         }
 
         for var in func.locals.iter_mut() {
@@ -1350,7 +1515,16 @@ pub fn emit_assembly() -> Result<String, String> {
                 continue;
             }
 
-            bottom += var.ty.size;
+            let size = if matches!(var.ty.kind, TypeKind::Struct | TypeKind::Union)
+                && var.ty.size <= 16
+                && func.params.iter().any(|p| p.name == var.name)
+            {
+                16
+            } else {
+                var.ty.size
+            };
+
+            bottom += size;
             bottom = align_to(bottom, var.align);
             var.offset = -bottom;
         }
@@ -1421,12 +1595,39 @@ pub fn emit_assembly() -> Result<String, String> {
                 continue;
             }
 
-            if crate::is_flonum(&var.ty) {
-                store_fp(fp, var.offset, var.ty.size, &mut result);
-                fp += 1;
-            } else {
-                store_gp(gp, var.offset, var.ty.size, &mut result);
-                gp += 1;
+            let ty = &var.ty;
+            match ty.kind {
+                TypeKind::Struct | TypeKind::Union => {
+                    if ty.size > 16 {
+                        continue;
+                    }
+                    let fp1 = has_flonum1(ty);
+                    let fp2 = if ty.size > 8 { has_flonum2(ty) } else { false };
+                    if fp1 {
+                        store_fp(fp, var.offset, 8, &mut result);
+                        fp += 1;
+                    } else {
+                        store_gp(gp, var.offset, 8, &mut result);
+                        gp += 1;
+                    }
+                    if ty.size > 8 {
+                        if fp2 {
+                            store_fp(fp, var.offset + 8, 8, &mut result);
+                            fp += 1;
+                        } else {
+                            store_gp(gp, var.offset + 8, 8, &mut result);
+                            gp += 1;
+                        }
+                    }
+                }
+                TypeKind::Float | TypeKind::Double => {
+                    store_fp(fp, var.offset, ty.size, &mut result);
+                    fp += 1;
+                }
+                _ => {
+                    store_gp(gp, var.offset, ty.size, &mut result);
+                    gp += 1;
+                }
             }
         }
 
