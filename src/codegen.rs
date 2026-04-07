@@ -1252,7 +1252,12 @@ fn store_gp(r: usize, offset: i64, sz: i64, result: &mut String) {
         2 => result.push_str(&format!("  mov {}, {}(%rbp)\n", argreg16[r], offset)),
         4 => result.push_str(&format!("  mov {}, {}(%rbp)\n", argreg32[r], offset)),
         8 => result.push_str(&format!("  mov {}, {}(%rbp)\n", argreg64[r], offset)),
-        _ => unreachable!(),
+        _ => {
+            for i in 0..sz {
+                result.push_str(&format!("  mov {}, {}(%rbp)\n", argreg8[r], offset + i));
+                result.push_str(&format!("  shr $8, {}\n", argreg64[r]));
+            }
+        }
     }
 }
 
@@ -1623,18 +1628,18 @@ pub fn emit_assembly() -> Result<String, String> {
                     let fp1 = has_flonum1(ty);
                     let fp2 = if ty.size > 8 { has_flonum2(ty) } else { false };
                     if fp1 {
-                        store_fp(fp, var.offset, 8, &mut result);
+                        store_fp(fp, var.offset, 8.min(ty.size), &mut result);
                         fp += 1;
                     } else {
-                        store_gp(gp, var.offset, 8, &mut result);
+                        store_gp(gp, var.offset, 8.min(ty.size), &mut result);
                         gp += 1;
                     }
                     if ty.size > 8 {
                         if fp2 {
-                            store_fp(fp, var.offset + 8, 8, &mut result);
+                            store_fp(fp, var.offset + 8, ty.size - 8, &mut result);
                             fp += 1;
                         } else {
-                            store_gp(gp, var.offset + 8, 8, &mut result);
+                            store_gp(gp, var.offset + 8, ty.size - 8, &mut result);
                             gp += 1;
                         }
                     }
