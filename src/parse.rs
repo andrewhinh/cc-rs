@@ -4757,14 +4757,9 @@ pub fn funcall(
         }
 
         if let Some(pt) = param_ty {
-            if pt.kind == TypeKind::Struct || pt.kind == TypeKind::Union {
-                return Err(error_tok(
-                    files,
-                    &tok,
-                    "passing struct or union is not supported yet",
-                ));
+            if pt.kind != TypeKind::Struct && pt.kind != TypeKind::Union {
+                arg = new_cast(arg, pt.as_ref().clone());
             }
-            arg = new_cast(arg, pt.as_ref().clone());
             param_ty = pt.next.clone();
         } else if arg.ty.as_ref().unwrap().kind == TypeKind::Float {
             arg = new_cast(arg, Type::new_double());

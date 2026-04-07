@@ -109,7 +109,7 @@ cargo run
 - [x] Add va_arg()
 - [x] Support passed-on-stack arguments
 - [x] Support passed-on-stack parameters
-- [ ] Allow struct parameter
+- [x] Allow struct parameter
 - [ ] Allow struct argument
 - [ ] Allow to call a fucntion returning a struct
 - [ ] Allow to define a function returning a struct
