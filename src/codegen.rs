@@ -46,6 +46,13 @@ fn gen_addr(
             gen_expr(node.lhs.as_ref().unwrap(), result, files, current_fn, depth)?;
             gen_addr(node.rhs.as_ref().unwrap(), result, files, current_fn, depth)?;
         }
+        NodeKind::FuncCall => {
+            if node.ret_buffer.is_some() {
+                gen_expr(node, result, files, current_fn, depth)?;
+                return Ok(());
+            }
+            return Err(error_at(files, node.file_no, node.tok_loc, "not an lvalue"));
+        }
         _ => return Err(error_at(files, node.file_no, node.tok_loc, "not an lvalue")),
     }
     Ok(())
@@ -194,11 +201,19 @@ fn push_struct(ty: &Type, result: &mut String, depth: &mut i32) {
     }
 }
 
-fn count_args(node: &Node) -> (i32, i32, Vec<bool>, i32) {
+fn count_args(
+    node: &Node,
+    ret_buffer: Option<&Obj>,
+    ret_ty_size: Option<i64>,
+) -> (i32, i32, Vec<bool>, i32) {
     let mut gp: i32 = 0;
     let mut fp: i32 = 0;
     let mut stack: i32 = 0;
     let mut pass_by_stack = Vec::new();
+
+    if ret_buffer.is_some() && ret_ty_size.unwrap_or(0) > 16 {
+        gp += 1;
+    }
 
     let mut arg: Option<&Node> = Some(node);
     while let Some(arg_node) = arg {
@@ -301,8 +316,10 @@ fn push_args(
     files: &[File],
     current_fn: &str,
     depth: &mut i32,
+    ret_buffer: Option<&Obj>,
+    ret_ty_size: Option<i64>,
 ) -> Result<(i32, i32), String> {
-    let (_, fp, pass_by_stack, stack) = count_args(node);
+    let (_, fp, pass_by_stack, stack) = count_args(node, ret_buffer, ret_ty_size);
 
     let mut pad = 0;
     if (*depth + stack) % 2 == 1 {
@@ -331,6 +348,14 @@ fn push_args(
         current_fn,
         depth,
     )?;
+
+    if let Some(var) = ret_buffer
+        && ret_ty_size.unwrap_or(0) > 16
+    {
+        result.push_str(&format!("  lea {}(%rbp), %rax\n", var.offset));
+        result.push_str("  push %rax\n");
+        *depth += 1;
+    }
 
     Ok((stack + pad, fp))
 }
@@ -594,6 +619,50 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
     }
 }
 
+fn copy_ret_buffer(var: &Obj, result: &mut String) {
+    let ty = &var.ty;
+    let mut gp: i32 = 0;
+    let mut fp: i32 = 0;
+
+    if has_flonum1(ty) {
+        assert!(ty.size == 4 || ty.size >= 8);
+        if ty.size == 4 {
+            result.push_str(&format!("  movss %%xmm0, {}(%rbp)\n", var.offset));
+        } else {
+            result.push_str(&format!("  movsd %%xmm0, {}(%rbp)\n", var.offset));
+        }
+        fp += 1;
+    } else {
+        for i in 0..std::cmp::min(8, ty.size as usize) {
+            result.push_str(&format!("  mov %al, {}(%rbp)\n", var.offset + i as i64));
+            result.push_str("  shr $8, %rax\n");
+        }
+        gp += 1;
+    }
+
+    if ty.size > 8 {
+        if has_flonum2(ty) {
+            assert!(ty.size == 12 || ty.size == 16);
+            if ty.size == 12 {
+                result.push_str(&format!("  movss %%xmm{}, {}(%rbp)\n", fp, var.offset + 8));
+            } else {
+                result.push_str(&format!("  movsd %%xmm{}, {}(%rbp)\n", fp, var.offset + 8));
+            }
+        } else {
+            let reg1 = if gp == 0 { "%al" } else { "%dl" };
+            let reg2 = if gp == 0 { "%rax" } else { "%rdx" };
+            for i in 8..std::cmp::min(16, ty.size as usize) {
+                result.push_str(&format!(
+                    "  mov {}, {}(%rbp)\n",
+                    reg1,
+                    var.offset + i as i64
+                ));
+                result.push_str(&format!("  shr $8, {}\n", reg2));
+            }
+        }
+    }
+}
+
 fn gen_expr(
     node: &Node,
     result: &mut String,
@@ -730,16 +799,47 @@ fn gen_expr(
         NodeKind::FuncCall => {
             let argreg64 = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
 
+            let ret_buffer = node.ret_buffer.as_ref().map(|b| b.as_ref());
+            let ret_ty_size = node.ty.as_ref().map(|t| t.size);
+
             let (stack_args, fp) = if let Some(args) = node.args.as_ref() {
-                push_args(args, result, files, current_fn, depth)?
+                push_args(
+                    args,
+                    result,
+                    files,
+                    current_fn,
+                    depth,
+                    ret_buffer,
+                    ret_ty_size,
+                )?
             } else {
-                (0, 0)
+                let mut pad = 0;
+                if let Some(var) = ret_buffer
+                    && ret_ty_size.unwrap_or(0) > 16
+                {
+                    if *depth % 2 == 1 {
+                        result.push_str("  sub $8, %rsp\n");
+                        *depth += 1;
+                        pad = 1;
+                    }
+                    result.push_str(&format!("  lea {}(%rbp), %rax\n", var.offset));
+                    result.push_str("  push %rax\n");
+                    *depth += 1;
+                }
+                (pad, 0)
             };
 
             gen_expr(node.lhs.as_ref().unwrap(), result, files, current_fn, depth)?;
 
             let mut gp = 0;
             let mut fp_count = 0;
+
+            if ret_buffer.is_some() && node.ty.as_ref().unwrap().size > 16 {
+                result.push_str(&format!("  pop {}\n", argreg64[gp as usize]));
+                *depth -= 1;
+                gp += 1;
+            }
+
             let mut arg = node.args.as_ref();
             while let Some(arg_node) = arg {
                 let ty = arg_node.ty.as_ref().unwrap();
@@ -818,6 +918,14 @@ fn gen_expr(
                 }
                 _ => {}
             }
+
+            if let Some(var) = ret_buffer
+                && node.ty.as_ref().unwrap().size <= 16
+            {
+                copy_ret_buffer(var, result);
+                result.push_str(&format!("  lea {}(%rbp), %rax\n", var.offset));
+            }
+
             return Ok(());
         }
         NodeKind::StmtExpr => {
@@ -1278,6 +1386,11 @@ fn fix_var_offsets(node: &mut Node, locals: &[Obj]) {
         && let Some(lv) = locals.iter().find(|l| l.unique_id == var.unique_id)
     {
         var.offset = lv.offset;
+    }
+    if let Some(ret_buffer) = &mut node.ret_buffer
+        && let Some(lv) = locals.iter().find(|l| l.unique_id == ret_buffer.unique_id)
+    {
+        ret_buffer.offset = lv.offset;
     }
     if let Some(lhs) = &mut node.lhs {
         fix_var_offsets(lhs, locals);
