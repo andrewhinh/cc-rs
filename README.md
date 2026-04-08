@@ -112,7 +112,7 @@ cargo run
 - [x] Allow struct parameter
 - [x] Allow struct argument
 - [x] Allow to call a fucntion returning a struct
-- [ ] Allow to define a function returning a struct
+- [x] Allow to define a function returning a struct
 - [ ] Allow variadic function to take more than 6 parameters
 - [ ] Add va_copy()
 - [ ] Dereferencing a function shouldn't do anything

@@ -2568,6 +2568,16 @@ pub fn function(
     local_scope_stack.push(Vec::new());
     tag_scope_stack.push(Vec::new());
 
+    let rty = ty.return_ty.as_ref().unwrap();
+    if (rty.kind == TypeKind::Struct || rty.kind == TypeKind::Union) && rty.size > 16 {
+        new_lvar(
+            String::new(),
+            pointer_to((**rty).clone()),
+            &mut locals,
+            &mut local_scope_stack,
+        );
+    }
+
     if let Some(params) = &ty.params {
         create_param_lvars(files, params, &mut locals, &mut local_scope_stack)?;
     }
@@ -2779,7 +2789,9 @@ pub fn stmt(
         let tok = skip(files, &tok, ";")?;
         if let Some(ret_ty) = return_ty {
             add_type(&mut expr_node);
-            expr_node = new_cast(expr_node, ret_ty.clone());
+            if ret_ty.kind != TypeKind::Struct && ret_ty.kind != TypeKind::Union {
+                expr_node = new_cast(expr_node, ret_ty.clone());
+            }
         }
         let node = new_unary(NodeKind::Return, expr_node, tok_loc, file_no, line_no);
         return Ok((node, tok));
