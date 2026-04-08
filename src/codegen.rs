@@ -12,7 +12,7 @@ fn gen_addr(
     node: &Node,
     result: &mut String,
     files: &[File],
-    current_fn: &str,
+    current_fn: &Obj,
     depth: &mut i32,
 ) -> Result<(), String> {
     match node.kind {
@@ -272,7 +272,7 @@ fn push_args2(
     pos: usize,
     result: &mut String,
     files: &[File],
-    current_fn: &str,
+    current_fn: &Obj,
     depth: &mut i32,
 ) -> Result<(), String> {
     if let Some(next) = node.next.as_ref() {
@@ -314,7 +314,7 @@ fn push_args(
     node: &Node,
     result: &mut String,
     files: &[File],
-    current_fn: &str,
+    current_fn: &Obj,
     depth: &mut i32,
     ret_buffer: Option<&Obj>,
     ret_ty_size: Option<i64>,
@@ -627,9 +627,9 @@ fn copy_ret_buffer(var: &Obj, result: &mut String) {
     if has_flonum1(ty) {
         assert!(ty.size == 4 || ty.size >= 8);
         if ty.size == 4 {
-            result.push_str(&format!("  movss %%xmm0, {}(%rbp)\n", var.offset));
+            result.push_str(&format!("  movss %xmm0, {}(%rbp)\n", var.offset));
         } else {
-            result.push_str(&format!("  movsd %%xmm0, {}(%rbp)\n", var.offset));
+            result.push_str(&format!("  movsd %xmm0, {}(%rbp)\n", var.offset));
         }
         fp += 1;
     } else {
@@ -644,9 +644,9 @@ fn copy_ret_buffer(var: &Obj, result: &mut String) {
         if has_flonum2(ty) {
             assert!(ty.size == 12 || ty.size == 16);
             if ty.size == 12 {
-                result.push_str(&format!("  movss %%xmm{}, {}(%rbp)\n", fp, var.offset + 8));
+                result.push_str(&format!("  movss %xmm{}, {}(%rbp)\n", fp, var.offset + 8));
             } else {
-                result.push_str(&format!("  movsd %%xmm{}, {}(%rbp)\n", fp, var.offset + 8));
+                result.push_str(&format!("  movsd %xmm{}, {}(%rbp)\n", fp, var.offset + 8));
             }
         } else {
             let reg1 = if gp == 0 { "%al" } else { "%dl" };
@@ -663,11 +663,63 @@ fn copy_ret_buffer(var: &Obj, result: &mut String) {
     }
 }
 
+fn copy_struct_reg(ty: &Type, result: &mut String) {
+    let mut gp: i32 = 0;
+    let mut fp: i32 = 0;
+
+    result.push_str("  mov %rax, %rdi\n");
+
+    if has_flonum1(ty) {
+        assert!(ty.size == 4 || ty.size >= 8);
+        if ty.size == 4 {
+            result.push_str("  movss (%rdi), %xmm0\n");
+        } else {
+            result.push_str("  movsd (%rdi), %xmm0\n");
+        }
+        fp += 1;
+    } else {
+        result.push_str("  mov $0, %rax\n");
+        for i in (0..std::cmp::min(8, ty.size as usize)).rev() {
+            result.push_str("  shl $8, %rax\n");
+            result.push_str(&format!("  mov {}(%rdi), %al\n", i));
+        }
+        gp += 1;
+    }
+
+    if ty.size > 8 {
+        if has_flonum2(ty) {
+            assert!(ty.size == 12 || ty.size == 16);
+            if ty.size == 12 {
+                result.push_str(&format!("  movss 8(%rdi), %xmm{}\n", fp));
+            } else {
+                result.push_str(&format!("  movsd 8(%rdi), %xmm{}\n", fp));
+            }
+        } else {
+            let reg1 = if gp == 0 { "%al" } else { "%dl" };
+            let reg2 = if gp == 0 { "%rax" } else { "%rdx" };
+            result.push_str(&format!("  mov $0, {}\n", reg2));
+            for i in (8..std::cmp::min(16, ty.size as usize)).rev() {
+                result.push_str(&format!("  shl $8, {}\n", reg2));
+                result.push_str(&format!("  mov {}(%rdi), {}\n", i, reg1));
+            }
+        }
+    }
+}
+
+fn copy_struct_mem(ty: &Type, param_offset: i64, result: &mut String) {
+    result.push_str(&format!("  mov {}(%rbp), %rdi\n", param_offset));
+
+    for i in 0..ty.size {
+        result.push_str(&format!("  mov {}(%rax), %dl\n", i));
+        result.push_str(&format!("  mov %dl, {}(%rdi)\n", i));
+    }
+}
+
 fn gen_expr(
     node: &Node,
     result: &mut String,
     files: &[File],
-    current_fn: &str,
+    current_fn: &Obj,
     depth: &mut i32,
 ) -> Result<(), String> {
     result.push_str(&format!("  .loc {} {}\n", node.file_no, node.line_no));
@@ -919,10 +971,10 @@ fn gen_expr(
                 _ => {}
             }
 
-            if let Some(var) = ret_buffer
-                && node.ty.as_ref().unwrap().size <= 16
-            {
-                copy_ret_buffer(var, result);
+            if let Some(var) = ret_buffer {
+                if node.ty.as_ref().unwrap().size <= 16 {
+                    copy_ret_buffer(var, result);
+                }
                 result.push_str(&format!("  lea {}(%rbp), %rax\n", var.offset));
             }
 
@@ -1171,7 +1223,7 @@ fn gen_stmt(
     node: &Node,
     result: &mut String,
     files: &[File],
-    current_fn: &str,
+    current_fn: &Obj,
     depth: &mut i32,
 ) -> Result<(), String> {
     result.push_str(&format!("  .loc {} {}\n", node.file_no, node.line_no));
@@ -1286,8 +1338,18 @@ fn gen_stmt(
         NodeKind::Return => {
             if let Some(lhs) = node.lhs.as_ref() {
                 gen_expr(lhs, result, files, current_fn, depth)?;
+
+                let ty = lhs.ty.as_ref().unwrap();
+                if ty.kind == TypeKind::Struct || ty.kind == TypeKind::Union {
+                    if ty.size <= 16 {
+                        copy_struct_reg(ty, result);
+                    } else {
+                        let param = &current_fn.params[0];
+                        copy_struct_mem(ty, param.offset, result);
+                    }
+                }
             }
-            result.push_str(&format!("  jmp .L.return.{}\n", current_fn));
+            result.push_str(&format!("  jmp .L.return.{}\n", current_fn.name));
         }
         NodeKind::ExprStmt => {
             gen_expr(node.lhs.as_ref().unwrap(), result, files, current_fn, depth)?;
@@ -1560,11 +1622,12 @@ pub fn emit_assembly() -> Result<String, String> {
         let mut gp = 0;
         let mut fp = 0;
 
+        for var in func.locals.iter_mut() {
+            var.offset = 0;
+        }
+
         for var in func.params.iter_mut() {
             var.offset = 0;
-            if let Some(local_var) = func.locals.iter_mut().find(|l| l.name == var.name) {
-                local_var.offset = 0;
-            }
         }
 
         for var in func.params.iter_mut() {
@@ -1754,7 +1817,7 @@ pub fn emit_assembly() -> Result<String, String> {
             func.body.as_ref().unwrap(),
             &mut result,
             &files,
-            &func.name,
+            func,
             &mut depth,
         )?;
         assert!(depth == 0, "depth should be 0 after function body");
