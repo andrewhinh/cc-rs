@@ -542,6 +542,7 @@ pub struct Node {
     pub func_ty: Option<Type>,
     pub args: Option<Box<Node>>,
     pub pass_by_stack: bool,
+    pub ret_buffer: Option<Box<Obj>>,
     pub var: Option<Box<Obj>>,
     pub val: i64,
     pub fval: f64,

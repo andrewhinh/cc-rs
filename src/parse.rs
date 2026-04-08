@@ -188,6 +188,7 @@ pub fn new_node(kind: NodeKind, tok_loc: usize, file_no: usize, line_no: usize) 
         func_ty: None,
         args: None,
         pass_by_stack: false,
+        ret_buffer: None,
         var: None,
         val: 0,
         fval: 0.0,
@@ -2220,6 +2221,7 @@ pub fn declaration(
         func_ty: None,
         args: None,
         pass_by_stack: false,
+        ret_buffer: None,
         var: None,
         val: 0,
         fval: 0.0,
@@ -2660,6 +2662,7 @@ pub fn compound_stmt(
         func_ty: None,
         args: None,
         pass_by_stack: false,
+        ret_buffer: None,
         var: None,
         val: 0,
         fval: 0.0,
@@ -4729,6 +4732,7 @@ pub fn funcall(
         func_ty: None,
         args: None,
         pass_by_stack: false,
+        ret_buffer: None,
         var: None,
         val: 0,
         fval: 0.0,
@@ -4777,8 +4781,17 @@ pub fn funcall(
 
     let mut node = new_unary(NodeKind::FuncCall, fn_node, tok_loc, file_no, line_no);
     node.func_ty = Some(ty);
-    node.ty = Some(return_ty);
+    node.ty = Some(return_ty.clone());
     node.args = head.next;
+
+    if return_ty.kind == TypeKind::Struct || return_ty.kind == TypeKind::Union {
+        let mut var = new_var(String::new(), return_ty);
+        var.is_local = true;
+        var.offset = 0;
+        locals.push(var.clone());
+        node.ret_buffer = Some(Box::new(var));
+    }
+
     Ok((node, tok))
 }
 

@@ -111,7 +111,7 @@ cargo run
 - [x] Support passed-on-stack parameters
 - [x] Allow struct parameter
 - [x] Allow struct argument
-- [ ] Allow to call a fucntion returning a struct
+- [x] Allow to call a fucntion returning a struct
 - [ ] Allow to define a function returning a struct
 - [ ] Allow variadic function to take more than 6 parameters
 - [ ] Add va_copy()
