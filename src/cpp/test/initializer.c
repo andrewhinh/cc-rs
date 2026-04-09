@@ -27,8 +27,6 @@ struct {int a[2];} g40[2] = {{1, 2}, 3, 4};
 struct {int a[2];} g41[2] = {1, 2, 3, 4};
 char g43[][4] = {'f', 'o', 'o', 0, 'b', 'a', 'r', 0};
 char *g44 = {"foo"};
-union { int a; char b[4]; } g50 = {.b[2]=0x12};
-union { int a; } g51[2] = {};
 
 typedef char T60[];
 T60 g60 = {1, 2, 3};
@@ -182,82 +180,6 @@ int main() {
   ASSERT(7, sizeof(g66));
   ASSERT(0, strcmp(g65.b, "oo"));
   ASSERT(0, strcmp(g66.b, "oobar"));
-
-  ASSERT(4, ({ int x[3]={1, 2, 3, [0]=4, 5}; x[0]; }));
-  ASSERT(5, ({ int x[3]={1, 2, 3, [0]=4, 5}; x[1]; }));
-  ASSERT(3, ({ int x[3]={1, 2, 3, [0]=4, 5}; x[2]; }));
-
-  ASSERT(10, ({ int x[2][3]={1,2,3,4,5,6,[0][1]=7,8,[0]=9,[0]=10,11,[1][0]=12}; x[0][0]; }));
-  ASSERT(11, ({ int x[2][3]={1,2,3,4,5,6,[0][1]=7,8,[0]=9,[0]=10,11,[1][0]=12}; x[0][1]; }));
-  ASSERT(8, ({ int x[2][3]={1,2,3,4,5,6,[0][1]=7,8,[0]=9,[0]=10,11,[1][0]=12}; x[0][2]; }));
-  ASSERT(12, ({ int x[2][3]={1,2,3,4,5,6,[0][1]=7,8,[0]=9,[0]=10,11,[1][0]=12}; x[1][0]; }));
-  ASSERT(5, ({ int x[2][3]={1,2,3,4,5,6,[0][1]=7,8,[0]=9,[0]=10,11,[1][0]=12}; x[1][1]; }));
-  ASSERT(6, ({ int x[2][3]={1,2,3,4,5,6,[0][1]=7,8,[0]=9,[0]=10,11,[1][0]=12}; x[1][2]; }));
-
-  ASSERT(7, ({ int x[2][3]={1,2,3,4,5,6,[0]={7,8},9,10}; x[0][0]; }));
-  ASSERT(8, ({ int x[2][3]={1,2,3,4,5,6,[0]={7,8},9,10}; x[0][1]; }));
-  ASSERT(3, ({ int x[2][3]={1,2,3,4,5,6,[0]={7,8},9,10}; x[0][2]; }));
-  ASSERT(9, ({ int x[2][3]={1,2,3,4,5,6,[0]={7,8},9,10}; x[1][0]; }));
-  ASSERT(10, ({ int x[2][3]={1,2,3,4,5,6,[0]={7,8},9,10}; x[1][1]; }));
-  ASSERT(6, ({ int x[2][3]={1,2,3,4,5,6,[0]={7,8},9,10}; x[1][2]; }));
-
-  ASSERT(7, ((int[10]){ [3]=7 })[3]);
-  ASSERT(0, ((int[10]){ [3]=7 })[4]);
-
-  ASSERT(10, ({ char x[]={[10-3]=1,2,3}; sizeof(x); }));
-  ASSERT(20, ({ char x[][2]={[8][1]=1,2}; sizeof(x); }));
-
-  ASSERT(3, sizeof(g60));
-  ASSERT(6, sizeof(g61));
-
-  ASSERT(4, sizeof(g65));
-  ASSERT(7, sizeof(g66));
-  ASSERT(0, strcmp(g65.b, "oo"));
-  ASSERT(0, strcmp(g66.b, "oobar"));
-
-  ASSERT(7, ((int[10]){ [3] 7 })[3]);
-  ASSERT(0, ((int[10]){ [3] 7 })[4]);
-
-  ASSERT(4, ({ struct { int a,b; } x={1,2,.b=3,.a=4}; x.a; }));
-  ASSERT(3, ({ struct { int a,b; } x={1,2,.b=3,.a=4}; x.b; }));
-
-  ASSERT(1, ({ struct { struct { int a,b; } c; } x={.c=1,2}; x.c.a; }));
-  ASSERT(2, ({ struct { struct { int a,b; } c; } x={.c=1,2}; x.c.b; }));
-
-  ASSERT(0, ({ struct { struct { int a,b; } c; } x={.c.b=1}; x.c.a; }));
-  ASSERT(1, ({ struct { struct { int a,b; } c; } x={.c.b=1}; x.c.b; }));
-
-  ASSERT(1, ({ struct { int a[2]; } x={.a=1,2}; x.a[0]; }));
-  ASSERT(2, ({ struct { int a[2]; } x={.a=1,2}; x.a[1]; }));
-
-  ASSERT(0, ({ struct { int a[2]; } x={.a[1]=1}; x.a[0]; }));
-  ASSERT(1, ({ struct { int a[2]; } x={.a[1]=1}; x.a[1]; }));
-
-  ASSERT(3, ({ struct { int a,b; } x[]={[1].b=1,2,[0]=3,4,}; x[0].a; }));
-  ASSERT(4, ({ struct { int a,b; } x[]={[1].b=1,2,[0]=3,4,}; x[0].b; }));
-  ASSERT(0, ({ struct { int a,b; } x[]={[1].b=1,2,[0]=3,4,}; x[1].a; }));
-  ASSERT(1, ({ struct { int a,b; } x[]={[1].b=1,2,[0]=3,4,}; x[1].b; }));
-  ASSERT(2, ({ struct { int a,b; } x[]={[1].b=1,2,[0]=3,4,}; x[2].a; }));
-  ASSERT(0, ({ struct { int a,b; } x[]={[1].b=1,2,[0]=3,4,}; x[2].b; }));
-
-  ASSERT(1, ({ typedef struct { int a,b; } T; T x={1,2}; T y[]={x}; y[0].a; }));
-  ASSERT(2, ({ typedef struct { int a,b; } T; T x={1,2}; T y[]={x}; y[0].b; }));
-  ASSERT(0, ({ typedef struct { int a,b; } T; T x={1,2}; T y[]={x, [0].b=3}; y[0].a; }));
-  ASSERT(3, ({ typedef struct { int a,b; } T; T x={1,2}; T y[]={x, [0].b=3}; y[0].b; }));
-
-  ASSERT(5, ((struct { int a,b,c; }){ .c=5 }).c);
-  ASSERT(0, ((struct { int a,b,c; }){ .c=5 }).a);
-
-  ASSERT(0x00ff, ({ union { unsigned short a; char b[2]; } x={.b[0]=0xff}; x.a; }));
-  ASSERT(0xff00, ({ union { unsigned short a; char b[2]; } x={.b[1]=0xff}; x.a; }));
-
-  ASSERT(0x00120000, g50.a);
-  ASSERT(0, g51[0].a);
-  ASSERT(0, g51[1].a);
-
-  ASSERT(1, ({ struct { struct { int a; struct { int b; }; }; int c; } x={1,2,3,.b=4,5}; x.a; }));
-  ASSERT(4, ({ struct { struct { int a; struct { int b; }; }; int c; } x={1,2,3,.b=4,5}; x.b; }));
-  ASSERT(5, ({ struct { struct { int a; struct { int b; }; }; int c; } x={1,2,3,.b=4,5}; x.c; }));
 
   printf("OK\n");
   return 0;

@@ -8,5 +8,3 @@ int strcmp(char *p, char *q);
 int strncmp(char *p, char *q, long n);
 int memcmp(char *p, char *q, long n);
 void exit(int n);
-int vsprintf();
-long strlen(char *s);

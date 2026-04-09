@@ -54,7 +54,6 @@ typedef struct {
   bool is_typedef;
   bool is_static;
   bool is_extern;
-  bool is_inline;
   int align;
 } VarAttr;
 
@@ -75,10 +74,6 @@ struct Initializer {
   // If it's an initializer for an aggregate type (e.g. array or struct),
   // `children` has initializers for its children.
   Initializer **children;
-
-  // Only one member can be initialized for a union.
-  // `mem` is used to clarify which member is initialized.
-  Member *mem;
 };
 
 // For local variable initializer.
@@ -118,12 +113,9 @@ static bool is_typename(Token *tok);
 static Type *declspec(Token **rest, Token *tok, VarAttr *attr);
 static Type *typename(Token **rest, Token *tok);
 static Type *enum_specifier(Token **rest, Token *tok);
-static Type *typeof_specifier(Token **rest, Token *tok);
 static Type *type_suffix(Token **rest, Token *tok, Type *ty);
 static Type *declarator(Token **rest, Token *tok, Type *ty);
 static Node *declaration(Token **rest, Token *tok, Type *basety, VarAttr *attr);
-static void array_initializer2(Token **rest, Token *tok, Initializer *init, int i);
-static void struct_initializer2(Token **rest, Token *tok, Initializer *init, Member *mem);
 static void initializer2(Token **rest, Token *tok, Initializer *init);
 static Initializer *initializer(Token **rest, Token *tok, Type *ty, Type **new_ty);
 static Node *lvar_initializer(Token **rest, Token *tok, Obj *var);
@@ -151,7 +143,6 @@ static Node *new_add(Node *lhs, Node *rhs, Token *tok);
 static Node *new_sub(Node *lhs, Node *rhs, Token *tok);
 static Node *mul(Token **rest, Token *tok);
 static Node *cast(Token **rest, Token *tok);
-static Member *get_struct_member(Type *ty, Token *tok);
 static Type *struct_decl(Token **rest, Token *tok);
 static Type *union_decl(Token **rest, Token *tok);
 static Node *postfix(Token **rest, Token *tok);
@@ -162,10 +153,6 @@ static Token *parse_typedef(Token *tok, Type *basety);
 static bool is_function(Token *tok);
 static Token *function(Token *tok, Type *basety, VarAttr *attr);
 static Token *global_variable(Token *tok, Type *basety, VarAttr *attr);
-
-static int align_down(int n, int align) {
-  return align_to(n - align + 1, align);
-}
 
 static void enter_scope(void) {
   Scope *sc = calloc(1, sizeof(Scope));
@@ -364,10 +351,10 @@ static void push_tag_scope(Token *tok, Type *ty) {
 }
 
 // declspec = ("void" | "_Bool" | "char" | "short" | "int" | "long"
-//             | "typedef" | "static" | "extern" | "inline"
+//             | "typedef" | "static" | "extern"
 //             | "signed" | "unsigned"
 //             | struct-decl | union-decl | typedef-name
-//             | enum-specifier | typeof-specifier
+//             | enum-specifier
 //             | "const" | "volatile" | "auto" | "register" | "restrict"
 //             | "__restrict" | "__restrict__" | "_Noreturn")+
 //
@@ -406,8 +393,7 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
 
   while (is_typename(tok)) {
     // Handle storage class specifiers.
-    if (equal(tok, "typedef") || equal(tok, "static") || equal(tok, "extern") ||
-        equal(tok, "inline")) {
+    if (equal(tok, "typedef") || equal(tok, "static") || equal(tok, "extern")) {
       if (!attr)
         error_tok(tok, "storage class specifier is not allowed in this context");
 
@@ -415,13 +401,11 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
         attr->is_typedef = true;
       else if (equal(tok, "static"))
         attr->is_static = true;
-      else if (equal(tok, "extern"))
-        attr->is_extern = true;
       else
-        attr->is_inline = true;
+        attr->is_extern = true;
 
-      if (attr->is_typedef && attr->is_static + attr->is_extern + attr->is_inline > 1)
-        error_tok(tok, "typedef may not be used together with static, extern or inline");
+      if (attr->is_typedef && attr->is_static + attr->is_extern > 1)
+        error_tok(tok, "typedef may not be used together with static or extern");
       tok = tok->next;
       continue;
     }
@@ -448,8 +432,7 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
 
     // Handle user-defined types.
     Type *ty2 = find_typedef(tok);
-    if (equal(tok, "struct") || equal(tok, "union") || equal(tok, "enum") ||
-        equal(tok, "typeof") || ty2) {
+    if (equal(tok, "struct") || equal(tok, "union") || equal(tok, "enum") || ty2) {
       if (counter)
         break;
 
@@ -459,8 +442,6 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
         ty = union_decl(&tok, tok->next);
       } else if (equal(tok, "enum")) {
         ty = enum_specifier(&tok, tok->next);
-      } else if (equal(tok, "typeof")) {
-        ty = typeof_specifier(&tok, tok->next);
       } else {
         ty = ty2;
         tok = tok->next;
@@ -772,22 +753,6 @@ static Type *enum_specifier(Token **rest, Token *tok) {
   return ty;
 }
 
-// typeof-specifier = "(" (expr | typename) ")"
-static Type *typeof_specifier(Token **rest, Token *tok) {
-  tok = skip(tok, "(");
-
-  Type *ty;
-  if (is_typename(tok)) {
-    ty = typename(&tok, tok);
-  } else {
-    Node *node = expr(&tok, tok);
-    add_type(node);
-    ty = node->ty;
-  }
-  *rest = skip(tok, ")");
-  return ty;
-}
-
 // declaration = declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
 static Node *declaration(Token **rest, Token *tok, Type *basety, VarAttr *attr) {
   Node head = {};
@@ -850,156 +815,21 @@ static void string_initializer(Token **rest, Token *tok, Initializer *init) {
     *init = *new_initializer(array_of(init->ty->base, tok->ty->array_len), false);
 
   int len = MIN(init->ty->array_len, tok->ty->array_len);
-
-  switch (init->ty->base->size) {
-  case 1: {
-    char *str = tok->str;
-    for (int i = 0; i < len; i++)
-      init->children[i]->expr = new_num(str[i], tok);
-    break;
-  }
-  case 2: {
-    uint16_t *str = (uint16_t *)tok->str;
-    for (int i = 0; i < len; i++)
-      init->children[i]->expr = new_num(str[i], tok);
-    break;
-  }
-  case 4: {
-    uint32_t *str = (uint32_t *)tok->str;
-    for (int i = 0; i < len; i++)
-      init->children[i]->expr = new_num(str[i], tok);
-    break;
-  }
-  default:
-    unreachable();
-  }
-
+  for (int i = 0; i < len; i++)
+    init->children[i]->expr = new_num(tok->str[i], tok);
   *rest = tok->next;
 }
 
-// array-designator = "[" const-expr "]"
-//
-// C99 added the designated initializer to the language, which allows
-// programmers to move the "cursor" of an initializer to any element.
-// The syntax looks like this:
-//
-//   int x[10] = { 1, 2, [5]=3, 4, 5, 6, 7 };
-//
-// `[5]` moves the cursor to the 5th element, so the 5th element of x
-// is set to 3. Initialization then continues forward in order, so
-// 6th, 7th, 8th and 9th elements are initialized with 4, 5, 6 and 7,
-// respectively. Unspecified elements (in this case, 3rd and 4th
-// elements) are initialized with zero.
-//
-// Nesting is allowed, so the following initializer is valid:
-//
-//   int x[5][10] = { [5][8]=1, 2, 3 };
-//
-// It sets x[5][8], x[5][9] and x[6][0] to 1, 2 and 3, respectively.
-//
-// Use `.fieldname` to move the cursor for a struct initializer. E.g.
-//
-//   struct { int a, b, c; } x = { .c=5 };
-//
-// The above initializer sets x.c to 5.
-static int array_designator(Token **rest, Token *tok, Type *ty) {
-  Token *start = tok;
-  int i = const_expr(&tok, tok->next);
-  if (i >= ty->array_len)
-    error_tok(start, "array designator index exceeds array bounds");
-  *rest = skip(tok, "]");
-  return i;
-}
-
-// struct-designator = "." ident
-static Member *struct_designator(Token **rest, Token *tok, Type *ty) {
-  Token *start = tok;
-  tok = skip(tok, ".");
-  if (tok->kind != TK_IDENT)
-    error_tok(tok, "expected a field designator");
-
-  for (Member *mem = ty->members; mem; mem = mem->next) {
-    // Anonymous struct member
-    if (mem->ty->kind == TY_STRUCT && !mem->name) {
-      if (get_struct_member(mem->ty, tok)) {
-        *rest = start;
-        return mem;
-      }
-      continue;
-    }
-
-    // Regular struct member
-    if (mem->name->len == tok->len && !strncmp(mem->name->loc, tok->loc, tok->len)) {
-      *rest = tok->next;
-      return mem;
-    }
-  }
-
-  error_tok(tok, "struct has no such member");
-}
-
-// designation = ("[" const-expr "]" | "." ident)* "="? initializer
-static void designation(Token **rest, Token *tok, Initializer *init) {
-  if (equal(tok, "[")) {
-    if (init->ty->kind != TY_ARRAY)
-      error_tok(tok, "array index in non-array initializer");
-    int i = array_designator(&tok, tok, init->ty);
-    designation(&tok, tok, init->children[i]);
-    array_initializer2(rest, tok, init, i + 1);
-    return;
-  }
-
-  if (equal(tok, ".") && init->ty->kind == TY_STRUCT) {
-    Member *mem = struct_designator(&tok, tok, init->ty);
-    designation(&tok, tok, init->children[mem->idx]);
-    init->expr = NULL;
-    struct_initializer2(rest, tok, init, mem->next);
-    return;
-  }
-
-  if (equal(tok, ".") && init->ty->kind == TY_UNION) {
-    Member *mem = struct_designator(&tok, tok, init->ty);
-    init->mem = mem;
-    designation(rest, tok, init->children[mem->idx]);
-    return;
-  }
-
-  if (equal(tok, "."))
-    error_tok(tok, "field name not in struct or union initializer");
-
-  if (equal(tok, "="))
-    tok = tok->next;
-  initializer2(rest, tok, init);
-}
-
-// An array length can be omitted if an array has an initializer
-// (e.g. `int x[] = {1,2,3}`). If it's omitted, count the number
-// of initializer elements.
 static int count_array_init_elements(Token *tok, Type *ty) {
-  bool first = true;
-  Initializer *dummy = new_initializer(ty->base, true);
+  Initializer *dummy = new_initializer(ty->base, false);
+  int i = 0;
 
-  int i = 0, max = 0;
-
-  while (!consume_end(&tok, tok)) {
-    if (!first)
+  for (; !consume_end(&tok, tok); i++) {
+    if (i > 0)
       tok = skip(tok, ",");
-    first = false;
-
-    if (equal(tok, "[")) {
-      i = const_expr(&tok, tok->next);
-      if (equal(tok, "..."))
-        i = const_expr(&tok, tok->next);
-      tok = skip(tok, "]");
-      designation(&tok, tok, dummy);
-    } else {
-      initializer2(&tok, tok, dummy);
-    }
-
-    i++;
-    max = MAX(max, i);
+    initializer2(&tok, tok, dummy);
   }
-  return max;
+  return i;
 }
 
 // array-initializer1 = "{" initializer ("," initializer)* ","? "}"
@@ -1011,23 +841,9 @@ static void array_initializer1(Token **rest, Token *tok, Initializer *init) {
     *init = *new_initializer(array_of(init->ty->base, len), false);
   }
 
-  bool first = true;
-
-  if (init->is_flexible) {
-    int len = count_array_init_elements(tok, init->ty);
-    *init = *new_initializer(array_of(init->ty->base, len), false);
-  }
-
   for (int i = 0; !consume_end(rest, tok); i++) {
-    if (!first)
+    if (i > 0)
       tok = skip(tok, ",");
-    first = false;
-
-    if (equal(tok, "[")) {
-      i = array_designator(&tok, tok, init->ty);
-      designation(&tok, tok, init->children[i]);
-      continue;
-    }
 
     if (i < init->ty->array_len)
       initializer2(&tok, tok, init->children[i]);
@@ -1037,22 +853,15 @@ static void array_initializer1(Token **rest, Token *tok, Initializer *init) {
 }
 
 // array-initializer2 = initializer ("," initializer)*
-static void array_initializer2(Token **rest, Token *tok, Initializer *init, int i) {
+static void array_initializer2(Token **rest, Token *tok, Initializer *init) {
   if (init->is_flexible) {
     int len = count_array_init_elements(tok, init->ty);
     *init = *new_initializer(array_of(init->ty->base, len), false);
   }
 
-  for (; i < init->ty->array_len && !is_end(tok); i++) {
-    Token *start = tok;
+  for (int i = 0; i < init->ty->array_len && !is_end(tok); i++) {
     if (i > 0)
       tok = skip(tok, ",");
-
-    if (equal(tok, "[") || equal(tok, ".")) {
-      *rest = start;
-      return;
-    }
-
     initializer2(&tok, tok, init->children[i]);
   }
   *rest = tok;
@@ -1063,19 +872,10 @@ static void struct_initializer1(Token **rest, Token *tok, Initializer *init) {
   tok = skip(tok, "{");
 
   Member *mem = init->ty->members;
-  bool first = true;
 
   while (!consume_end(rest, tok)) {
-    if (!first)
+    if (mem != init->ty->members)
       tok = skip(tok, ",");
-    first = false;
-
-    if (equal(tok, ".")) {
-      mem = struct_designator(&tok, tok, init->ty);
-      designation(&tok, tok, init->children[mem->idx]);
-      mem = mem->next;
-      continue;
-    }
 
     if (mem) {
       initializer2(&tok, tok, init->children[mem->idx]);
@@ -1087,21 +887,13 @@ static void struct_initializer1(Token **rest, Token *tok, Initializer *init) {
 }
 
 // struct-initializer2 = initializer ("," initializer)*
-static void struct_initializer2(Token **rest, Token *tok, Initializer *init, Member *mem) {
+static void struct_initializer2(Token **rest, Token *tok, Initializer *init) {
   bool first = true;
 
-  for (; mem && !is_end(tok); mem = mem->next) {
-    Token *start = tok;
-
+  for (Member *mem = init->ty->members; mem && !is_end(tok); mem = mem->next) {
     if (!first)
       tok = skip(tok, ",");
     first = false;
-
-    if (equal(tok, "[") || equal(tok, ".")) {
-      *rest = start;
-      return;
-    }
-
     initializer2(&tok, tok, init->children[mem->idx]);
   }
   *rest = tok;
@@ -1109,18 +901,7 @@ static void struct_initializer2(Token **rest, Token *tok, Initializer *init, Mem
 
 static void union_initializer(Token **rest, Token *tok, Initializer *init) {
   // Unlike structs, union initializers take only one initializer,
-  // and that initializes the first union member by default.
-  // You can initialize other member using a designated initializer.
-  if (equal(tok, "{") && equal(tok->next, ".")) {
-    Member *mem = struct_designator(&tok, tok->next, init->ty);
-    init->mem = mem;
-    designation(&tok, tok, init->children[mem->idx]);
-    *rest = skip(tok, "}");
-    return;
-  }
-
-  init->mem = init->ty->members;
-
+  // and that initializes the first union member.
   if (equal(tok, "{")) {
     initializer2(&tok, tok->next, init->children[0]);
     consume(&tok, tok, ",");
@@ -1143,7 +924,7 @@ static void initializer2(Token **rest, Token *tok, Initializer *init) {
     if (equal(tok, "{"))
       array_initializer1(rest, tok, init);
     else
-      array_initializer2(rest, tok, init, 0);
+      array_initializer2(rest, tok, init);
     return;
   }
 
@@ -1163,7 +944,7 @@ static void initializer2(Token **rest, Token *tok, Initializer *init) {
       return;
     }
 
-    struct_initializer2(rest, tok, init, init->ty->members);
+    struct_initializer2(rest, tok, init);
     return;
   }
 
@@ -1257,9 +1038,8 @@ static Node *create_lvar_init(Initializer *init, Type *ty, InitDesg *desg, Token
   }
 
   if (ty->kind == TY_UNION) {
-    Member *mem = init->mem ? init->mem : ty->members;
-    InitDesg desg2 = {desg, 0, mem};
-    return create_lvar_init(init->children[mem->idx], mem->ty, &desg2, tok);
+    InitDesg desg2 = {desg, 0, ty->members};
+    return create_lvar_init(init->children[0], ty->members->ty, &desg2, tok);
   }
 
   if (!init->expr)
@@ -1294,18 +1074,6 @@ static Node *lvar_initializer(Token **rest, Token *tok, Obj *var) {
   return new_binary(ND_COMMA, lhs, rhs, tok);
 }
 
-static uint64_t read_buf(char *buf, int sz) {
-  if (sz == 1)
-    return *buf;
-  if (sz == 2)
-    return *(uint16_t *)buf;
-  if (sz == 4)
-    return *(uint32_t *)buf;
-  if (sz == 8)
-    return *(uint64_t *)buf;
-  unreachable();
-}
-
 static void write_buf(char *buf, uint64_t val, int sz) {
   if (sz == 1)
     *buf = val;
@@ -1329,32 +1097,14 @@ write_gvar_data(Relocation *cur, Initializer *init, Type *ty, char *buf, int off
   }
 
   if (ty->kind == TY_STRUCT) {
-    for (Member *mem = ty->members; mem; mem = mem->next) {
-      if (mem->is_bitfield) {
-        Node *expr = init->children[mem->idx]->expr;
-        if (!expr)
-          break;
-
-        char *loc = buf + offset + mem->offset;
-        uint64_t oldval = read_buf(loc, mem->ty->size);
-        uint64_t newval = eval(expr);
-        uint64_t mask = (1L << mem->bit_width) - 1;
-        uint64_t combined = oldval | ((newval & mask) << mem->bit_offset);
-        write_buf(loc, combined, mem->ty->size);
-      } else {
-        cur = write_gvar_data(cur, init->children[mem->idx], mem->ty, buf,
-                              offset + mem->offset);
-      }
-    }
+    for (Member *mem = ty->members; mem; mem = mem->next)
+      cur = write_gvar_data(cur, init->children[mem->idx], mem->ty, buf,
+                            offset + mem->offset);
     return cur;
   }
 
-  if (ty->kind == TY_UNION) {
-    if (!init->mem)
-      return cur;
-    return write_gvar_data(cur, init->children[init->mem->idx],
-                           init->mem->ty, buf, offset);
-  }
+  if (ty->kind == TY_UNION)
+    return write_gvar_data(cur, init->children[0], ty->members->ty, buf, offset);
 
   if (!init->expr)
     return cur;
@@ -1405,29 +1155,13 @@ static bool is_typename(Token *tok) {
     "void", "_Bool", "char", "short", "int", "long", "struct", "union",
     "typedef", "enum", "static", "extern", "_Alignas", "signed", "unsigned",
     "const", "volatile", "auto", "register", "restrict", "__restrict",
-    "__restrict__", "_Noreturn", "float", "double", "typeof", "inline",
+    "__restrict__", "_Noreturn", "float", "double",
   };
 
   for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
     if (equal(tok, kw[i]))
       return true;
   return find_typedef(tok);
-}
-
-// asm-stmt = "asm" ("volatile" | "inline")* "(" string-literal ")"
-static Node *asm_stmt(Token **rest, Token *tok) {
-  Node *node = new_node(ND_ASM, tok);
-  tok = tok->next;
-
-  while (equal(tok, "volatile") || equal(tok, "inline"))
-    tok = tok->next;
-
-  tok = skip(tok, "(");
-  if (tok->kind != TK_STR || tok->ty->base->kind != TY_CHAR)
-    error_tok(tok, "expected string literal");
-  node->asm_str = tok->str;
-  *rest = skip(tok->next, ")");
-  return node;
 }
 
 // stmt = "return" expr? ";"
@@ -1438,7 +1172,6 @@ static Node *asm_stmt(Token **rest, Token *tok) {
 //      | "for" "(" expr-stmt expr? ";" expr? ")" stmt
 //      | "while" "(" expr ")" stmt
 //      | "do" stmt "while" "(" expr ")" ";"
-//      | "asm" asm-stmt
 //      | "goto" ident ";"
 //      | "break" ";"
 //      | "continue" ";"
@@ -1593,9 +1326,6 @@ static Node *stmt(Token **rest, Token *tok) {
     *rest = skip(tok, ";");
     return node;
   }
-
-  if (equal(tok, "asm"))
-    return asm_stmt(rest, tok);
 
   if (equal(tok, "goto")) {
     Node *node = new_node(ND_GOTO, tok);
@@ -1864,42 +1594,13 @@ static double eval_double(Node *node) {
   error_tok(node->tok, "not a compile-time constant");
 }
 
-// Convert op= operators to expressions containing an assignment.
-//
-// In general, `A op= C` is converted to ``tmp = &A, *tmp = *tmp op B`.
-// However, if a given expression is of form `A.x op= C`, the input is
-// converted to `tmp = &A, (*tmp).x = (*tmp).x op C` to handle assignments
-// to bitfields.
+// Convert `A op= B` to `tmp = &A, *tmp = *tmp op B`
+// where tmp is a fresh pointer variable.
 static Node *to_assign(Node *binary) {
   add_type(binary->lhs);
   add_type(binary->rhs);
   Token *tok = binary->tok;
 
-  // Convert `A.x op= C` to `tmp = &A, (*tmp).x = (*tmp).x op C`.
-  if (binary->lhs->kind == ND_MEMBER) {
-    Obj *var = new_lvar("", pointer_to(binary->lhs->lhs->ty));
-
-    Node *expr1 = new_binary(ND_ASSIGN, new_var_node(var, tok),
-                             new_unary(ND_ADDR, binary->lhs->lhs, tok), tok);
-
-    Node *expr2 = new_unary(ND_MEMBER,
-                            new_unary(ND_DEREF, new_var_node(var, tok), tok),
-                            tok);
-    expr2->member = binary->lhs->member;
-
-    Node *expr3 = new_unary(ND_MEMBER,
-                            new_unary(ND_DEREF, new_var_node(var, tok), tok),
-                            tok);
-    expr3->member = binary->lhs->member;
-
-    Node *expr4 = new_binary(ND_ASSIGN, expr2,
-                             new_binary(binary->kind, expr3, binary->rhs, tok),
-                             tok);
-
-    return new_binary(ND_COMMA, expr1, expr4, tok);
-  }
-
-  // Convert `A op= C` to ``tmp = &A, *tmp = *tmp op B`.
   Obj *var = new_lvar("", pointer_to(binary->lhs->ty));
 
   Node *expr1 = new_binary(ND_ASSIGN, new_var_node(var, tok),
@@ -1960,25 +1661,13 @@ static Node *assign(Token **rest, Token *tok) {
   return node;
 }
 
-// conditional = logor ("?" expr? ":" conditional)?
+// conditional = logor ("?" expr ":" conditional)?
 static Node *conditional(Token **rest, Token *tok) {
   Node *cond = logor(&tok, tok);
 
   if (!equal(tok, "?")) {
     *rest = tok;
     return cond;
-  }
-
-  if (equal(tok->next, ":")) {
-    // [GNU] Compile `a ?: b` as `tmp = a, tmp ? tmp : b`.
-    add_type(cond);
-    Obj *var = new_lvar("", cond->ty);
-    Node *lhs = new_binary(ND_ASSIGN, new_var_node(var, tok), cond, tok);
-    Node *rhs = new_node(ND_COND, tok);
-    rhs->cond = new_var_node(var, tok);
-    rhs->then = new_var_node(var, tok);
-    rhs->els = conditional(rest, tok->next->next);
-    return new_binary(ND_COMMA, lhs, rhs, tok);
   }
 
   Node *node = new_node(ND_COND, tok);
@@ -2255,25 +1944,11 @@ static Node *unary(Token **rest, Token *tok) {
   if (equal(tok, "-"))
     return new_unary(ND_NEG, cast(rest, tok->next), tok);
 
-  if (equal(tok, "&")) {
-    Node *lhs = cast(rest, tok->next);
-    add_type(lhs);
-    if (lhs->kind == ND_MEMBER && lhs->member->is_bitfield)
-      error_tok(tok, "cannot take address of bitfield");
-    return new_unary(ND_ADDR, lhs, tok);
-  }
+  if (equal(tok, "&"))
+    return new_unary(ND_ADDR, cast(rest, tok->next), tok);
 
-  if (equal(tok, "*")) {
-    // [https://www.sigbus.info/n1570#6.5.3.2p4] This is an oddity
-    // in the C spec, but dereferencing a function shouldn't do
-    // anything. If foo is a function, `*foo`, `**foo` or `*****foo`
-    // are all equivalent to just `foo`.
-    Node *node = cast(rest, tok->next);
-    add_type(node);
-    if (node->ty->kind == TY_FUNC)
-      return node;
-    return new_unary(ND_DEREF, node, tok);
-  }
+  if (equal(tok, "*"))
+    return new_unary(ND_DEREF, cast(rest, tok->next), tok);
 
   if (equal(tok, "!"))
     return new_unary(ND_NOT, cast(rest, tok->next), tok);
@@ -2303,18 +1978,6 @@ static void struct_members(Token **rest, Token *tok, Type *ty) {
     Type *basety = declspec(&tok, tok, &attr);
     bool first = true;
 
-    // Anonymous struct member
-    if ((basety->kind == TY_STRUCT || basety->kind == TY_UNION) &&
-        consume(&tok, tok, ";")) {
-      Member *mem = calloc(1, sizeof(Member));
-      mem->ty = basety;
-      mem->idx = idx++;
-      mem->align = attr.align ? attr.align : mem->ty->align;
-      cur = cur->next = mem;
-      continue;
-    }
-
-    // Regular struct members
     while (!consume(&tok, tok, ";")) {
       if (!first)
         tok = skip(tok, ",");
@@ -2325,12 +1988,6 @@ static void struct_members(Token **rest, Token *tok, Type *ty) {
       mem->name = mem->ty->name;
       mem->idx = idx++;
       mem->align = attr.align ? attr.align : mem->ty->align;
-
-      if (consume(&tok, tok, ":")) {
-        mem->is_bitfield = true;
-        mem->bit_width = const_expr(&tok, tok);
-      }
-
       cur = cur->next = mem;
     }
   }
@@ -2400,32 +2057,16 @@ static Type *struct_decl(Token **rest, Token *tok) {
     return ty;
 
   // Assign offsets within the struct to members.
-  int bits = 0;
-
+  int offset = 0;
   for (Member *mem = ty->members; mem; mem = mem->next) {
-    if (mem->is_bitfield && mem->bit_width == 0) {
-      // Zero-width anonymous bitfield has a special meaning.
-      // It affects only alignment.
-      bits = align_to(bits, mem->ty->size * 8);
-    } else if (mem->is_bitfield) {
-      int sz = mem->ty->size;
-      if (bits / (sz * 8) != (bits + mem->bit_width - 1) / (sz * 8))
-        bits = align_to(bits, sz * 8);
-
-      mem->offset = align_down(bits / 8, sz);
-      mem->bit_offset = bits % (sz * 8);
-      bits += mem->bit_width;
-    } else {
-      bits = align_to(bits, mem->align * 8);
-      mem->offset = bits / 8;
-      bits += mem->ty->size * 8;
-    }
+    offset = align_to(offset, mem->align);
+    mem->offset = offset;
+    offset += mem->ty->size;
 
     if (ty->align < mem->align)
       ty->align = mem->align;
   }
-
-  ty->size = align_to(bits, ty->align * 8) / 8;
+  ty->size = align_to(offset, ty->align);
   return ty;
 }
 
@@ -2450,55 +2091,21 @@ static Type *union_decl(Token **rest, Token *tok) {
   return ty;
 }
 
-// Find a struct member by name.
 static Member *get_struct_member(Type *ty, Token *tok) {
-  for (Member *mem = ty->members; mem; mem = mem->next) {
-    // Anonymous struct member
-    if ((mem->ty->kind == TY_STRUCT || mem->ty->kind == TY_UNION) &&
-        !mem->name) {
-      if (get_struct_member(mem->ty, tok))
-        return mem;
-      continue;
-    }
-
-    // Regular struct member
+  for (Member *mem = ty->members; mem; mem = mem->next)
     if (mem->name->len == tok->len &&
         !strncmp(mem->name->loc, tok->loc, tok->len))
       return mem;
-  }
-  return NULL;
+  error_tok(tok, "no such member");
 }
 
-// Create a node representing a struct member access, such as foo.bar
-// where foo is a struct and bar is a member name.
-//
-// C has a feature called "anonymous struct" which allows a struct to
-// have another unnamed struct as a member like this:
-//
-//   struct { struct { int a; }; int b; } x;
-//
-// The members of an anonymous struct belong to the outer struct's
-// member namespace. Therefore, in the above example, you can access
-// member "a" of the anonymous struct as "x.a".
-//
-// This function takes care of anonymous structs.
-static Node *struct_ref(Node *node, Token *tok) {
-  add_type(node);
-  if (node->ty->kind != TY_STRUCT && node->ty->kind != TY_UNION)
-    error_tok(node->tok, "not a struct nor a union");
+static Node *struct_ref(Node *lhs, Token *tok) {
+  add_type(lhs);
+  if (lhs->ty->kind != TY_STRUCT && lhs->ty->kind != TY_UNION)
+    error_tok(lhs->tok, "not a struct nor a union");
 
-  Type *ty = node->ty;
-
-  for (;;) {
-    Member *mem = get_struct_member(ty, tok);
-    if (!mem)
-      error_tok(tok, "no such member");
-    node = new_unary(ND_MEMBER, node, tok);
-    node->member = mem;
-    if (mem->name)
-      break;
-    ty = mem->ty;
-  }
+  Node *node = new_unary(ND_MEMBER, lhs, tok);
+  node->member = get_struct_member(lhs->ty, tok);
   return node;
 }
 
@@ -2641,57 +2248,12 @@ static Node *funcall(Token **rest, Token *tok, Node *fn) {
   return node;
 }
 
-// generic-selection = "(" assign "," generic-assoc ("," generic-assoc)* ")"
-//
-// generic-assoc = type-name ":" assign
-//               | "default" ":" assign
-static Node *generic_selection(Token **rest, Token *tok) {
-  Token *start = tok;
-  tok = skip(tok, "(");
-
-  Node *ctrl = assign(&tok, tok);
-  add_type(ctrl);
-
-  Type *t1 = ctrl->ty;
-  if (t1->kind == TY_FUNC)
-    t1 = pointer_to(t1);
-  else if (t1->kind == TY_ARRAY)
-    t1 = pointer_to(t1->base);
-
-  Node *ret = NULL;
-
-  while (!consume(rest, tok, ")")) {
-    tok = skip(tok, ",");
-
-    if (equal(tok, "default")) {
-      tok = skip(tok->next, ":");
-      Node *node = assign(&tok, tok);
-      if (!ret)
-        ret = node;
-      continue;
-    }
-
-    Type *t2 = typename(&tok, tok);
-    tok = skip(tok, ":");
-    Node *node = assign(&tok, tok);
-    if (is_compatible(t1, t2))
-      ret = node;
-  }
-
-  if (!ret)
-    error_tok(start, "controlling expression type not compatible with"
-              " any generic association type");
-  return ret;
-}
-
 // primary = "(" "{" stmt+ "}" ")"
 //         | "(" expr ")"
 //         | "sizeof" "(" type-name ")"
 //         | "sizeof" unary
 //         | "_Alignof" "(" type-name ")"
 //         | "_Alignof" unary
-//         | "_Generic" generic-selection
-//         | "__builtin_types_compatible_p" "(" type-name, type-name, ")"
 //         | "__builtin_reg_class" "(" type-name ")"
 //         | ident
 //         | str
@@ -2737,18 +2299,6 @@ static Node *primary(Token **rest, Token *tok) {
     return new_ulong(node->ty->align, tok);
   }
 
-  if (equal(tok, "_Generic"))
-    return generic_selection(rest, tok->next);
-
-  if (equal(tok, "__builtin_types_compatible_p")) {
-    tok = skip(tok->next, "(");
-    Type *t1 = typename(&tok, tok);
-    tok = skip(tok, ",");
-    Type *t2 = typename(&tok, tok);
-    *rest = skip(tok, ")");
-    return new_num(is_compatible(t1, t2), start);
-  }
-
   if (equal(tok, "__builtin_reg_class")) {
     tok = skip(tok->next, "(");
     Type *ty = typename(&tok, tok);
@@ -2765,14 +2315,6 @@ static Node *primary(Token **rest, Token *tok) {
     // Variable or enum constant
     VarScope *sc = find_var(tok);
     *rest = tok->next;
-
-    // For "static inline" function
-    if (sc && sc->var && sc->var->is_function) {
-      if (current_fn)
-        strarray_push(&current_fn->refs, sc->var->name);
-      else
-        sc->var->is_root = true;
-    }
 
     if (sc) {
       if (sc->var)
@@ -2855,29 +2397,6 @@ static void resolve_goto_labels(void) {
   gotos = labels = NULL;
 }
 
-static Obj *find_func(char *name) {
-  Scope *sc = scope;
-  while (sc->next)
-    sc = sc->next;
-
-  for (VarScope *sc2 = sc->vars; sc2; sc2 = sc2->next)
-    if (!strcmp(sc2->name, name) && sc2->var && sc2->var->is_function)
-      return sc2->var;
-  return NULL;
-}
-
-static void mark_live(Obj *var) {
-  if (!var->is_function || var->is_live)
-    return;
-  var->is_live = true;
-
-  for (int i = 0; i < var->refs.len; i++) {
-    Obj *fn = find_func(var->refs.data[i]);
-    if (fn)
-      mark_live(fn);
-  }
-}
-
 static Token *function(Token *tok, Type *basety, VarAttr *attr) {
   Type *ty = declarator(&tok, tok, basety);
   if (!ty->name)
@@ -2886,9 +2405,7 @@ static Token *function(Token *tok, Type *basety, VarAttr *attr) {
   Obj *fn = new_gvar(get_ident(ty->name), ty);
   fn->is_function = true;
   fn->is_definition = !consume(&tok, tok, ";");
-  fn->is_static = attr->is_static || (attr->is_inline && !attr->is_extern);
-  fn->is_inline = attr->is_inline;
-  fn->is_root = !(fn->is_static && fn->is_inline);
+  fn->is_static = attr->is_static;
 
   if (!fn->is_definition)
     return tok;
@@ -2947,8 +2464,6 @@ static Token *global_variable(Token *tok, Type *basety, VarAttr *attr) {
 
     if (equal(tok, "="))
       gvar_initializer(&tok, tok->next, var);
-    else if (!attr->is_extern)
-      var->is_tentative = true;
   }
   return tok;
 }
@@ -2962,33 +2477,6 @@ static bool is_function(Token *tok) {
   Type dummy = {};
   Type *ty = declarator(&tok, tok, &dummy);
   return ty->kind == TY_FUNC;
-}
-
-// Remove redundant tentative definitions.
-static void scan_globals(void) {
-  Obj head;
-  Obj *cur = &head;
-
-  for (Obj *var = globals; var; var = var->next) {
-    if (!var->is_tentative) {
-      cur = cur->next = var;
-      continue;
-    }
-
-    // Find another definition of the same identifier.
-    Obj *var2 = globals;
-    for (; var2; var2 = var2->next)
-      if (var != var2 && var2->is_definition && !strcmp(var->name, var2->name))
-        break;
-
-    // If there's another definition, the tentative definition
-    // is redundant
-    if (!var2)
-      cur = cur->next = var;
-  }
-
-  cur->next = NULL;
-  globals = head.next;
 }
 
 // program = (typedef | function-definition | global-variable)*
@@ -3014,12 +2502,5 @@ Obj *parse(Token *tok) {
     // Global variable
     tok = global_variable(tok, basety, &attr);
   }
-
-  for (Obj *var = globals; var; var = var->next)
-    if (var->is_root)
-      mark_live(var);
-
-  // Remove redundant tentative definitions.
-  scan_globals();
   return globals;
 }

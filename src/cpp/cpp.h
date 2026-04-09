@@ -9,21 +9,15 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdnoreturn.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
 
 #define MAX(x, y) ((x) < (y) ? (y) : (x))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
-
-#ifndef __GNUC__
-# define __attribute__(x)
-#endif
 
 typedef struct Type Type;
 typedef struct Node Node;
@@ -42,7 +36,7 @@ typedef struct {
 } StringArray;
 
 void strarray_push(StringArray *arr, char *s);
-char *format(char *fmt, ...) __attribute__((format(printf, 1, 2)));
+char *format(char *fmt, ...);
 
 //
 // tokenize.c
@@ -55,7 +49,6 @@ typedef enum {
   TK_KEYWORD, // Keywords
   TK_STR,     // String literals
   TK_NUM,     // Numeric literals
-  TK_PP_NUM,  // Preprocessing numbers
   TK_EOF,     // End-of-file markers
 } TokenKind;
 
@@ -63,10 +56,6 @@ typedef struct {
   char *name;
   int file_no;
   char *contents;
-
-  // For #line directive
-  char *display_name;
-  int line_delta;
 } File;
 
 // Token type
@@ -82,26 +71,23 @@ struct Token {
   char *str;        // String literal contents including terminating '\0'
 
   File *file;       // Source location
-  char *filename;   // Filename
   int line_no;      // Line number
-  int line_delta;   // Line number
   bool at_bol;      // True if this token is at beginning of line
   bool has_space;   // True if this token follows a space character
   Hideset *hideset; // For macro expansion
   Token *origin;    // If this is expanded from a macro, the original token
 };
 
-noreturn void error(char *fmt, ...) __attribute__((format(printf, 1, 2)));
-noreturn void error_at(char *loc, char *fmt, ...) __attribute__((format(printf, 2, 3)));
-noreturn void error_tok(Token *tok, char *fmt, ...) __attribute__((format(printf, 2, 3)));
-void warn_tok(Token *tok, char *fmt, ...) __attribute__((format(printf, 2, 3)));
+void error(char *fmt, ...);
+void error_at(char *loc, char *fmt, ...);
+void error_tok(Token *tok, char *fmt, ...);
+void warn_tok(Token *tok, char *fmt, ...);
 bool equal(Token *tok, char *op);
 Token *skip(Token *tok, char *op);
 bool consume(Token **rest, Token *tok, char *str);
-void convert_pp_tokens(Token *tok);
+void convert_keywords(Token *tok);
 File **get_input_files(void);
 File *new_file(char *name, int file_no, char *contents);
-Token *tokenize_string_literal(Token *tok, Type *basety);
 Token *tokenize(File *file);
 Token *tokenize_file(char *filename);
 
@@ -112,9 +98,6 @@ Token *tokenize_file(char *filename);
 // preprocess.c
 //
 
-void init_macros(void);
-void define_macro(char *name, char *buf);
-void undef_macro(char *name);
 Token *preprocess(Token *tok);
 
 //
@@ -140,22 +123,15 @@ struct Obj {
   bool is_static;
 
   // Global variable
-  bool is_tentative;
   char *init_data;
   Relocation *rel;
 
   // Function
-  bool is_inline;
   Obj *params;
   Node *body;
   Obj *locals;
   Obj *va_area;
   int stack_size;
-
-  // Static inline function
-  bool is_live;
-  bool is_root;
-  StringArray refs;
 };
 
 // Global variable can be initialized either by a constant expression
@@ -213,7 +189,6 @@ typedef enum {
   ND_NUM,       // Integer
   ND_CAST,      // Type cast
   ND_MEMZERO,   // Zero-clear a stack variable
-  ND_ASM,       // "asm"
 } NodeKind;
 
 // AST node type
@@ -258,9 +233,6 @@ struct Node {
   Node *case_next;
   Node *default_case;
 
-  // "asm" string literal
-  char *asm_str;
-
   // Variable
   Obj *var;
 
@@ -299,7 +271,6 @@ struct Type {
   int size;           // sizeof() value
   int align;          // alignment
   bool is_unsigned;   // unsigned or signed
-  Type *origin;       // for type compatibility check
 
   // Pointer-to or array-of type. We intentionally use the same member
   // to represent pointer/array duality in C.
@@ -338,11 +309,6 @@ struct Member {
   int idx;
   int align;
   int offset;
-
-  // Bitfield
-  bool is_bitfield;
-  int bit_offset;
-  int bit_width;
 };
 
 extern Type *ty_void;
@@ -364,7 +330,6 @@ extern Type *ty_double;
 bool is_integer(Type *ty);
 bool is_flonum(Type *ty);
 bool is_numeric(Type *ty);
-bool is_compatible(Type *t1, Type *t2);
 Type *copy_type(Type *ty);
 Type *pointer_to(Type *base);
 Type *func_type(Type *return_ty);
@@ -381,21 +346,10 @@ void codegen(Obj *prog, FILE *out);
 int align_to(int n, int align);
 
 //
-// unicode.c
-//
-
-int encode_utf8(char *buf, uint32_t c);
-uint32_t decode_utf8(char **new_pos, char *p);
-bool is_ident1(uint32_t c);
-bool is_ident2(uint32_t c);
-int display_width(char *p, int len);
-
-//
 // main.c
 //
 
 bool file_exists(char *path);
 
 extern StringArray include_paths;
-extern bool opt_fcommon;
 extern char *base_file;

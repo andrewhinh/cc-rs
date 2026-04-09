@@ -98,8 +98,6 @@ int main() {
 
   ASSERT(8, sizeof(long double));
 
-  ASSERT(1, sizeof(main));
-
   printf("OK\n");
   return 0;
 }

@@ -1,7 +1,6 @@
 #include "cpp.h"
 
 StringArray include_paths;
-bool opt_fcommon = true;
 
 static bool opt_E;
 static bool opt_S;
@@ -22,7 +21,7 @@ static void usage(int status) {
 }
 
 static bool take_arg(char *arg) {
-  char *x[] = {"-o", "-I", "-idirafter"};
+  char *x[] = {"-o", "-I"};
 
   for (int i = 0; i < sizeof(x) / sizeof(*x); i++)
     if (!strcmp(arg, x[i]))
@@ -41,14 +40,6 @@ static void add_default_include_paths(char *argv0) {
   strarray_push(&include_paths, "/usr/include");
 }
 
-static void define(char *str) {
-  char *eq = strchr(str, '=');
-  if (eq)
-    define_macro(strndup(str, eq - str), eq + 1);
-  else
-    define_macro(str, "1");
-}
-
 static void parse_args(int argc, char **argv) {
   // Make sure that all command line options that take an argument
   // have an argument.
@@ -56,8 +47,6 @@ static void parse_args(int argc, char **argv) {
     if (take_arg(argv[i]))
       if (!argv[++i])
         usage(1);
-
-  StringArray idirafter = {};
 
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "-###")) {
@@ -88,16 +77,6 @@ static void parse_args(int argc, char **argv) {
       continue;
     }
 
-    if (!strcmp(argv[i], "-fcommon")) {
-      opt_fcommon = true;
-      continue;
-    }
-
-    if (!strcmp(argv[i], "-fno-common")) {
-      opt_fcommon = false;
-      continue;
-    }
-
     if (!strcmp(argv[i], "-c")) {
       opt_c = true;
       continue;
@@ -113,26 +92,6 @@ static void parse_args(int argc, char **argv) {
       continue;
     }
 
-    if (!strcmp(argv[i], "-D")) {
-      define(argv[++i]);
-      continue;
-    }
-
-    if (!strncmp(argv[i], "-D", 2)) {
-      define(argv[i] + 2);
-      continue;
-    }
-
-    if (!strcmp(argv[i], "-U")) {
-      undef_macro(argv[++i]);
-      continue;
-    }
-
-    if (!strncmp(argv[i], "-U", 2)) {
-      undef_macro(argv[i] + 2);
-      continue;
-    }
-
     if (!strcmp(argv[i], "-cc1-input")) {
       base_file = argv[++i];
       continue;
@@ -142,26 +101,6 @@ static void parse_args(int argc, char **argv) {
       output_file = argv[++i];
       continue;
     }
-
-    if (!strcmp(argv[i], "-idirafter")) {
-      strarray_push(&idirafter, argv[i++]);
-      continue;
-    }
-
-    // These options are ignored for now.
-    if (!strncmp(argv[i], "-O", 2) ||
-        !strncmp(argv[i], "-W", 2) ||
-        !strncmp(argv[i], "-g", 2) ||
-        !strncmp(argv[i], "-std=", 5) ||
-        !strcmp(argv[i], "-ffreestanding") ||
-        !strcmp(argv[i], "-fno-builtin") ||
-        !strcmp(argv[i], "-fno-omit-frame-pointer") ||
-        !strcmp(argv[i], "-fno-stack-protector") ||
-        !strcmp(argv[i], "-fno-strict-aliasing") ||
-        !strcmp(argv[i], "-m64") ||
-        !strcmp(argv[i], "-mno-red-zone") ||
-        !strcmp(argv[i], "-w"))
-      continue;
 
     if (argv[i][0] == '-' && argv[i][1] != '\0')
       error("unknown argument: %s", argv[i]);
@@ -290,19 +229,9 @@ static void cc1(void) {
 
   Obj *prog = parse(tok);
 
-  // Open a temporary output buffer.
-  char *buf;
-  size_t buflen;
-  FILE *output_buf = open_memstream(&buf, &buflen);
-
   // Traverse the AST to emit assembly.
-  codegen(prog, output_buf);
-  fclose(output_buf);
-
-  // Write the asembly text to a file.
   FILE *out = open_file(output_file);
-  fwrite(buf, buflen, 1, out);
-  fclose(out);
+  codegen(prog, out);
 }
 
 static void assemble(char *input, char *output) {
@@ -395,7 +324,6 @@ static void run_linker(StringArray *inputs, char *output) {
 
 int main(int argc, char **argv) {
   atexit(cleanup);
-  init_macros();
   parse_args(argc, argv);
 
   if (opt_cc1) {

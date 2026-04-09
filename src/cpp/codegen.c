@@ -14,7 +14,6 @@ static Obj *current_fn;
 static void gen_expr(Node *node);
 static void gen_stmt(Node *node);
 
-__attribute__((format(printf, 1, 2)))
 static void println(char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
@@ -600,23 +599,10 @@ static void gen_expr(Node *node) {
     println("  neg %%rax");
     return;
   case ND_VAR:
+  case ND_MEMBER:
     gen_addr(node);
     load(node->ty);
     return;
-  case ND_MEMBER: {
-    gen_addr(node);
-    load(node->ty);
-
-    Member *mem = node->member;
-    if (mem->is_bitfield) {
-      println("  shl $%d, %%rax", 64 - mem->bit_width - mem->bit_offset);
-      if (mem->ty->is_unsigned)
-        println("  shr $%d, %%rax", 64 - mem->bit_width);
-      else
-        println("  sar $%d, %%rax", 64 - mem->bit_width);
-    }
-    return;
-  }
   case ND_DEREF:
     gen_expr(node->lhs);
     load(node->ty);
@@ -628,29 +614,6 @@ static void gen_expr(Node *node) {
     gen_addr(node->lhs);
     push();
     gen_expr(node->rhs);
-
-    if (node->lhs->kind == ND_MEMBER && node->lhs->member->is_bitfield) {
-      println("  mov %%rax, %%r8");
-
-      // If the lhs is a bitfield, we need to read the current value
-      // from memory and merge it with a new value.
-      Member *mem = node->lhs->member;
-      println("  mov %%rax, %%rdi");
-      println("  and $%ld, %%rdi", (1L << mem->bit_width) - 1);
-      println("  shl $%d, %%rdi", mem->bit_offset);
-
-      println("  mov (%%rsp), %%rax");
-      load(mem->ty);
-
-      long mask = ((1L << mem->bit_width) - 1) << mem->bit_offset;
-      println("  mov $%ld, %%r9", ~mask);
-      println("  and %%r9, %%rax");
-      println("  or %%rdi, %%rax");
-      store(node->ty);
-      println("  mov %%r8, %%rax");
-      return;
-    }
-
     store(node->ty);
     return;
   case ND_STMT_EXPR:
@@ -1047,9 +1010,6 @@ static void gen_stmt(Node *node) {
   case ND_EXPR_STMT:
     gen_expr(node->lhs);
     return;
-  case ND_ASM:
-    println("  %s", node->asm_str);
-    return;
   }
 
   error_tok(node->tok, "invalid statement");
@@ -1106,15 +1066,8 @@ static void assign_lvar_offsets(Obj *prog) {
       if (var->offset)
         continue;
 
-      // AMD64 System V ABI has a special alignment rule for an array of
-      // length at least 16 bytes. We need to align such array to at least
-      // 16-byte boundaries. See p.14 of
-      // https://github.com/hjl-tools/x86-psABI/wiki/x86-64-psABI-draft.pdf.
-      int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
-        ? MAX(16, var->align) : var->align;
-
       bottom += var->ty->size;
-      bottom = align_to(bottom, align);
+      bottom = align_to(bottom, var->align);
       var->offset = -bottom;
     }
 
@@ -1132,14 +1085,7 @@ static void emit_data(Obj *prog) {
     else
       println("  .globl %s", var->name);
 
-    int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
-      ? MAX(16, var->align) : var->align;
-    println("  .align %d", align);
-
-    if (opt_fcommon && var->is_tentative) {
-      println("  .comm %s, %d, %d", var->name, var->ty->size, align);
-      continue;
-    }
+    println("  .align %d", var->align);
 
     if (var->init_data) {
       println("  .data");
@@ -1203,11 +1149,6 @@ static void store_gp(int r, int offset, int sz) {
 static void emit_text(Obj *prog) {
   for (Obj *fn = prog; fn; fn = fn->next) {
     if (!fn->is_function || !fn->is_definition)
-      continue;
-
-    // No code is emitted for "static inline" functions
-    // if no one is referencing them.
-    if (!fn->is_live)
       continue;
 
     if (fn->is_static)
@@ -1297,13 +1238,6 @@ static void emit_text(Obj *prog) {
     // Emit code
     gen_stmt(fn->body);
     assert(depth == 0);
-
-    // [https://www.sigbus.info/n1570#5.1.2.2.3p1] The C spec defines
-    // a special rule for the main function. Reaching the end of the
-    // main function is equivalent to returning 0, even though the
-    // behavior is undefined for the other functions.
-    if (strcmp(fn->name, "main") == 0)
-      println("  mov $0, %%rax");
 
     // Epilogue
     println(".L.return.%s:", fn->name);
