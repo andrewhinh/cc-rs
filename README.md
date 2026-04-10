@@ -115,7 +115,7 @@ cargo run
 - [x] Allow to define a function returning a struct
 - [x] Allow variadic function to take more than 6 parameters
 - [x] Add va_copy()
-- [ ] Dereferencing a function shouldn't do anything
+- [x] Dereferencing a function shouldn't do anything
 - [ ] Handle inline functions as static functions
 - [ ] Do not emit static inline functions if referenced by no one
 
