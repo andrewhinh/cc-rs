@@ -254,7 +254,7 @@ cargo run
 - [x] Add character literal
 - [x] Concatenate adjacent string literals
 - [x] Recognize wide character literal
-- [ ] Tokenize numeric tokens as pp-numbers
+- [x] Tokenize numeric tokens as pp-numbers
 - [x] Precompute line number for each token
 - [ ] Use hashmap for keyword lookup
 - [ ] Canonicalize newline character
