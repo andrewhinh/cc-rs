@@ -4417,6 +4417,9 @@ pub fn unary(
             tag_scope_stack,
         )?;
         add_type(&mut node);
+        if node.ty.as_ref().unwrap().kind == TypeKind::Func {
+            return Ok((node, tok));
+        }
         let lhs_ty = node.ty.as_ref().unwrap();
         if (lhs_ty.kind == TypeKind::Ptr || lhs_ty.kind == TypeKind::Array)
             && lhs_ty.base.as_ref().unwrap().borrow().kind == TypeKind::Void
