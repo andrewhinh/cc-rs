@@ -116,7 +116,7 @@ fn add_macro(
     macros_set(Some(Box::new(m)));
 }
 
-fn define_macro(name: &str, body: &str) {
+pub fn define_macro(name: &str, body: &str) {
     let file_no = get_file_no();
     let file = new_file("<built-in>".to_string(), file_no, body.to_string());
     add_input_file(file.clone());
@@ -159,7 +159,7 @@ fn line_macro(tmpl: &Token) -> Token {
     new_num_token(&files, tmpl.line_no as i64, &tmpl)
 }
 
-fn init_macros() {
+pub fn init_macros() {
     define_macro("_LP64", "1");
     define_macro("__C99_MACRO_WITH_VA_ARGS", "1");
     define_macro("__ELF__", "1");
@@ -1507,8 +1507,6 @@ fn preprocess2(_files: &[File], tok: Token) -> Result<Token, String> {
 }
 
 pub fn preprocess(tok: Token) -> Result<Token, String> {
-    macros_set(None);
-    init_macros();
     let files = get_input_files();
     let tok = preprocess2(&[], tok)?;
     let ci = cond_incl_get();

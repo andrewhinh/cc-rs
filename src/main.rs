@@ -6,8 +6,8 @@ use std::{
 };
 
 use cc_rs::{
-    Token, TokenKind, add_include_path, codegen::emit_assembly, get_input_files,
-    preprocess::preprocess, tokenize::tokenize_file,
+    Token, TokenKind, add_include_path, codegen::emit_assembly, define_macro, get_input_files,
+    init_macros, preprocess::preprocess, tokenize::tokenize_file,
 };
 use tempfile::NamedTempFile;
 
@@ -22,6 +22,7 @@ struct Args {
     output_file: Option<String>,
     input_paths: Vec<String>,
     include_paths: Vec<String>,
+    defines: Vec<String>,
 }
 
 fn usage(status: i32) {
@@ -55,6 +56,7 @@ fn parse_args() -> Args {
     let mut output_file: Option<String> = None;
     let mut input_paths: Vec<String> = Vec::new();
     let mut include_paths: Vec<String> = Vec::new();
+    let mut defines: Vec<String> = Vec::new();
     let mut i = 1;
 
     while i < args.len() {
@@ -143,6 +145,22 @@ fn parse_args() -> Args {
             continue;
         }
 
+        if args[i] == "-D" {
+            i += 1;
+            if i >= args.len() {
+                usage(1);
+            }
+            defines.push(args[i].clone());
+            i += 1;
+            continue;
+        }
+
+        if args[i].starts_with("-D") {
+            defines.push(args[i][2..].to_string());
+            i += 1;
+            continue;
+        }
+
         if args[i].starts_with('-') && args[i].len() > 1 {
             eprintln!("unknown argument: {}", args[i]);
             process::exit(1);
@@ -168,6 +186,7 @@ fn parse_args() -> Args {
         output_file,
         input_paths,
         include_paths,
+        defines,
     }
 }
 
@@ -392,8 +411,21 @@ fn run_linker(inputs: &[String], output: &str, opt_hash_hash_hash: bool) -> Resu
     run_subprocess(opt_hash_hash_hash, &args)
 }
 
+fn define(str: &str) {
+    if let Some(eq_pos) = str.find('=') {
+        define_macro(&str[..eq_pos], &str[eq_pos + 1..]);
+    } else {
+        define_macro(str, "1");
+    }
+}
+
 fn run() -> Result<(), String> {
+    init_macros();
     let args = parse_args();
+
+    for d in &args.defines {
+        define(d);
+    }
 
     if args.opt_cc1 {
         return cc1(&args);
