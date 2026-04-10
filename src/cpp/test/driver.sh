@@ -91,4 +91,12 @@ echo foo > $tmp/dir/i-option-test
 echo "#include \"i-option-test\"" | $compiler -I$tmp/dir -E - | grep -q foo
 check -I
 
+# -D
+echo foo | $compiler -Dfoo -E - | grep -q 1
+check -D
+
+# -D
+echo foo | $compiler -Dfoo=bar -E - | grep -q bar
+check -D
+
 echo OK
