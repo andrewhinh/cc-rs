@@ -3,8 +3,9 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::{
-    File, Token, TokenKind, add_input_file, const_expr, consume, equal, error_tok, get_file_no,
-    get_include_paths, get_input_files, new_file, skip, tokenize, tokenize_file, warn_tok,
+    File, Token, TokenKind, add_input_file, const_expr, consume, convert_pp_number, equal,
+    error_tok, get_file_no, get_include_paths, get_input_files, new_file, skip, tokenize,
+    tokenize_file, warn_tok,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1054,24 +1055,27 @@ fn replace_idents_with_zero(mut tok: Token) -> Token {
 fn eval_const_expr(files: &[File], tok: &Token) -> Result<(i64, Token), String> {
     let start = tok.clone();
     let (expr, rest) = read_const_expr(files, tok.next.as_ref().unwrap())?;
-    let expr = preprocess2(&[], expr)?;
+    let mut expr = preprocess2(&[], expr)?;
 
     if expr.kind == TokenKind::Eof {
         return Err(error_tok(files, &start, "no expression"));
     }
+
+    let files = get_input_files();
+    convert_pp_tokens(&files, &mut expr);
 
     let expr = replace_idents_with_zero(expr);
 
     let mut empty_tag_scope_stack: Vec<Vec<crate::TagScope>> = Vec::new();
     let mut empty_scope_stack: Vec<Vec<crate::VarScope>> = Vec::new();
     let (val, rest2) = const_expr(
-        files,
+        &files,
         &expr,
         &mut empty_tag_scope_stack,
         &mut empty_scope_stack,
     )?;
     if rest2.kind != TokenKind::Eof {
-        return Err(error_tok(files, &rest2, "extra token"));
+        return Err(error_tok(&files, &rest2, "extra token"));
     }
     Ok((val, rest))
 }
@@ -1086,7 +1090,7 @@ fn push_cond_incl(tok: &Token, included: bool) {
     cond_incl_set(Some(Box::new(ci)));
 }
 
-fn convert_keywords(files: &[File], tok: &mut Token) {
+fn convert_pp_tokens(files: &[File], tok: &mut Token) {
     let mut cur = tok;
     loop {
         if cur.kind == TokenKind::Ident {
@@ -1098,6 +1102,11 @@ fn convert_keywords(files: &[File], tok: &mut Token) {
             if is_keyword(&name) {
                 cur.kind = TokenKind::Keyword;
             }
+        } else if cur.kind == TokenKind::PpNum
+            && let Err(e) = convert_pp_number(files, cur)
+        {
+            eprintln!("{}", e);
+            std::process::exit(1);
         }
         if cur.next.is_none() {
             break;
@@ -1512,7 +1521,7 @@ pub fn preprocess(tok: Token) -> Result<Token, String> {
     }
     let mut tok = tok;
     let files = get_input_files();
-    convert_keywords(&files, &mut tok);
+    convert_pp_tokens(&files, &mut tok);
     join_adjacent_string_literals(&mut tok);
     Ok(tok)
 }

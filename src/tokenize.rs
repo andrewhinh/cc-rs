@@ -149,8 +149,9 @@ fn add_line_numbers(src: &str, tok: &mut Token) {
     }
 }
 
-fn read_int_literal(chars: &[char], pos: usize) -> Result<(i64, usize, Type), String> {
-    let mut p = pos;
+fn try_parse_int_literal(s: &str) -> Option<(i64, Type)> {
+    let chars: Vec<char> = s.chars().collect();
+    let mut p = 0;
 
     let base = if p + 2 < chars.len()
         && chars[p] == '0'
@@ -201,7 +202,7 @@ fn read_int_literal(chars: &[char], pos: usize) -> Result<(i64, usize, Type), St
         _ => unreachable!(),
     }
 
-    let val = i64::from_str_radix(&num_str, base).map_err(|_| "invalid digit".to_string())?;
+    let val = i64::from_str_radix(&num_str, base).ok()?;
 
     let mut l = false;
     let mut u = false;
@@ -226,6 +227,10 @@ fn read_int_literal(chars: &[char], pos: usize) -> Result<(i64, usize, Type), St
     } else if suffix_upper == "U" {
         p += suffix.len();
         u = true;
+    }
+
+    if p != s.len() {
+        return None;
     }
 
     let ty = if base == 10 {
@@ -268,93 +273,7 @@ fn read_int_literal(chars: &[char], pos: usize) -> Result<(i64, usize, Type), St
         Type::new_int()
     };
 
-    Ok((val, p, ty))
-}
-
-fn read_number(
-    chars: &[char],
-    pos: usize,
-    at_bol: bool,
-    has_space: bool,
-    file_no: usize,
-) -> Result<(Token, usize), String> {
-    let start = pos;
-
-    if chars[pos] == '.' {
-        let mut p = start + 1;
-        while p < chars.len() && chars[p].is_ascii_digit() {
-            p += 1;
-        }
-        if p < chars.len() && (chars[p] == 'e' || chars[p] == 'E') {
-            p += 1;
-            if p < chars.len() && (chars[p] == '+' || chars[p] == '-') {
-                p += 1;
-            }
-            while p < chars.len() && chars[p].is_ascii_digit() {
-                p += 1;
-            }
-        }
-        let num_str: String = chars[start..p].iter().collect();
-        let fval = parse_float(&num_str)?;
-
-        let ty = if p < chars.len() && (chars[p] == 'f' || chars[p] == 'F') {
-            p += 1;
-            Type::new_float()
-        } else if p < chars.len() && (chars[p] == 'l' || chars[p] == 'L') {
-            p += 1;
-            Type::new_double()
-        } else {
-            Type::new_double()
-        };
-
-        let mut tok = new_token(TokenKind::Num, start, p, at_bol, has_space, file_no);
-        tok.fval = fval;
-        tok.ty = Some(ty);
-        return Ok((tok, p));
-    }
-
-    let (val, end, ty) = read_int_literal(chars, pos)?;
-
-    if end < chars.len() && ['.', 'e', 'E', 'f', 'F', 'p', 'P'].contains(&chars[end]) {
-        let mut p = end;
-        if p < chars.len() && chars[p] == '.' {
-            p += 1;
-            while p < chars.len() && chars[p].is_ascii_digit() {
-                p += 1;
-            }
-        }
-        if p < chars.len() && (chars[p] == 'e' || chars[p] == 'E') {
-            p += 1;
-            if p < chars.len() && (chars[p] == '+' || chars[p] == '-') {
-                p += 1;
-            }
-            while p < chars.len() && chars[p].is_ascii_digit() {
-                p += 1;
-            }
-        }
-        let num_str: String = chars[start..p].iter().collect();
-        let fval = parse_float(&num_str)?;
-
-        let ty = if p < chars.len() && (chars[p] == 'f' || chars[p] == 'F') {
-            p += 1;
-            Type::new_float()
-        } else if p < chars.len() && (chars[p] == 'l' || chars[p] == 'L') {
-            p += 1;
-            Type::new_double()
-        } else {
-            Type::new_double()
-        };
-
-        let mut tok = new_token(TokenKind::Num, start, p, at_bol, has_space, file_no);
-        tok.fval = fval;
-        tok.ty = Some(ty);
-        return Ok((tok, p));
-    }
-
-    let mut tok = new_token(TokenKind::Num, start, end, at_bol, has_space, file_no);
-    tok.val = val;
-    tok.ty = Some(ty);
-    Ok((tok, end))
+    Some((val, ty))
 }
 
 fn parse_float(s: &str) -> Result<f64, String> {
@@ -411,6 +330,36 @@ fn parse_hex_float(s: &str) -> Result<f64, String> {
     }
 
     Ok(result)
+}
+
+pub fn convert_pp_number(files: &[File], tok: &mut Token) -> Result<(), String> {
+    let file = match files.iter().find(|f| f.file_no == tok.file_no) {
+        Some(f) => f,
+        None => return Err("file not found".to_string()),
+    };
+    let s: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
+
+    if let Some((val, ty)) = try_parse_int_literal(&s) {
+        tok.kind = TokenKind::Num;
+        tok.val = val;
+        tok.ty = Some(ty);
+        return Ok(());
+    }
+
+    let chars: Vec<char> = s.chars().collect();
+    let fval = parse_float(&s)?;
+
+    let ty =
+        if !chars.is_empty() && (chars[chars.len() - 1] == 'f' || chars[chars.len() - 1] == 'F') {
+            Type::new_float()
+        } else {
+            Type::new_double()
+        };
+
+    tok.kind = TokenKind::Num;
+    tok.fval = fval;
+    tok.ty = Some(ty);
+    Ok(())
 }
 
 static INPUT_FILES: Mutex<Vec<File>> = Mutex::new(Vec::new());
@@ -725,19 +674,27 @@ pub fn tokenize(file: &File) -> Token {
         if chars[pos].is_ascii_digit()
             || (chars[pos] == '.' && pos + 1 < chars.len() && chars[pos + 1].is_ascii_digit())
         {
-            match read_number(&chars, pos, at_bol, has_space, file_no) {
-                Ok((tok, end)) => {
-                    cur.next = Some(Box::new(tok));
-                    cur = cur.next.as_mut().unwrap();
-                    pos = end;
-                    at_bol = false;
-                    has_space = false;
-                }
-                Err(e) => {
-                    cur.next = Some(Box::new(make_error_token(file_no, pos, &e)));
-                    return *head.next.unwrap();
+            let start = pos;
+            pos += 1;
+            loop {
+                if pos + 1 < chars.len()
+                    && matches!(chars[pos], 'e' | 'E' | 'p' | 'P')
+                    && matches!(chars[pos + 1], '+' | '-')
+                {
+                    pos += 2;
+                } else if pos < chars.len()
+                    && (chars[pos].is_ascii_alphanumeric() || chars[pos] == '.')
+                {
+                    pos += 1;
+                } else {
+                    break;
                 }
             }
+            let tok = new_token(TokenKind::PpNum, start, pos, at_bol, has_space, file_no);
+            cur.next = Some(Box::new(tok));
+            cur = cur.next.as_mut().unwrap();
+            at_bol = false;
+            has_space = false;
             continue;
         }
 
