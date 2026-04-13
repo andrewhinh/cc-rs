@@ -124,6 +124,14 @@ pub fn define_macro(name: &str, body: &str) {
     add_macro(name.to_string(), true, None, false, tok, false, None);
 }
 
+pub fn undef_macro(name: &str) {
+    let file_no = get_file_no();
+    let file = new_file("<built-in>".to_string(), file_no, String::new());
+    add_input_file(file.clone());
+    let tok = tokenize(&file);
+    add_macro(name.to_string(), true, None, false, tok, true, None);
+}
+
 fn add_builtin(name: &str, handler: MacroHandler) {
     let file_no = get_file_no();
     let file = new_file("<built-in>".to_string(), file_no, String::new());
@@ -1482,7 +1490,7 @@ fn preprocess2(_files: &[File], tok: Token) -> Result<Token, String> {
             let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
             let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
             tok = skip_line(&files, *tok.next.unwrap());
-            add_macro(name, true, None, false, new_eof(&tok), true, None);
+            undef_macro(&name);
             continue;
         }
 

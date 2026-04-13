@@ -99,4 +99,8 @@ check -D
 echo foo | $compiler -Dfoo=bar -E - | grep -q bar
 check -D
 
+# -U
+echo foo | $compiler -Dfoo=bar -Ufoo -E - | grep -q foo
+check -U
+
 echo OK
