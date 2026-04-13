@@ -342,7 +342,7 @@ cargo run
 - [x] Run "ld" unless -c is given
 - [x] Add stdarg.h, stdbool.h, stddef.h, stdalign.h and float.h
 - [x] Add -D option
-- [ ] Add -U option
+- [x] Add -U option
 - [ ] Write to an in-memory buffer before writing to an actual output file
 - [ ] Ignore -O, -W and -g and other flags
 - [ ] Turn on -Wall compiler flag and fix compiler warnings

@@ -7,7 +7,7 @@ use std::{
 
 use cc_rs::{
     Token, TokenKind, add_include_path, codegen::emit_assembly, define_macro, get_input_files,
-    init_macros, preprocess::preprocess, tokenize::tokenize_file,
+    init_macros, preprocess::preprocess, tokenize::tokenize_file, undef_macro,
 };
 use tempfile::NamedTempFile;
 
@@ -23,6 +23,7 @@ struct Args {
     input_paths: Vec<String>,
     include_paths: Vec<String>,
     defines: Vec<String>,
+    undefines: Vec<String>,
 }
 
 fn usage(status: i32) {
@@ -57,6 +58,7 @@ fn parse_args() -> Args {
     let mut input_paths: Vec<String> = Vec::new();
     let mut include_paths: Vec<String> = Vec::new();
     let mut defines: Vec<String> = Vec::new();
+    let mut undefines: Vec<String> = Vec::new();
     let mut i = 1;
 
     while i < args.len() {
@@ -161,6 +163,22 @@ fn parse_args() -> Args {
             continue;
         }
 
+        if args[i] == "-U" {
+            i += 1;
+            if i >= args.len() {
+                usage(1);
+            }
+            undefines.push(args[i].clone());
+            i += 1;
+            continue;
+        }
+
+        if args[i].starts_with("-U") {
+            undefines.push(args[i][2..].to_string());
+            i += 1;
+            continue;
+        }
+
         if args[i].starts_with('-') && args[i].len() > 1 {
             eprintln!("unknown argument: {}", args[i]);
             process::exit(1);
@@ -187,6 +205,7 @@ fn parse_args() -> Args {
         input_paths,
         include_paths,
         defines,
+        undefines,
     }
 }
 
@@ -425,6 +444,10 @@ fn run() -> Result<(), String> {
 
     for d in &args.defines {
         define(d);
+    }
+
+    for u in &args.undefines {
+        undef_macro(u);
     }
 
     if args.opt_cc1 {

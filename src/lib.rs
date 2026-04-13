@@ -13,7 +13,7 @@ pub use parse::{
     add_type, const_expr, declspec, find_tag, find_typedef, function, global_variable, is_function,
     is_typename, parse_typedef, push_tag_scope,
 };
-pub use preprocess::{define_macro, init_macros, preprocess};
+pub use preprocess::{define_macro, init_macros, preprocess, undef_macro};
 pub use tokenize::{
     add_input_file, consume, convert_pp_number, equal, error_at, error_tok, get_file_no,
     get_input_files, new_file, skip, tokenize, tokenize_file, warn_tok,
