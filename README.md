@@ -224,7 +224,7 @@ cargo run
 - [x] Accept void as a parameter list
 - [x] Align global variables
 - [x] Add compound literals
-- [ ] Add bitfield
+- [x] Add bitfield
 - [ ] Support global struct bitfield initializer
 - [ ] Handle op=-style assignments to bitfields
 - [ ] Handle zero-width bitfield member

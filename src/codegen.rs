@@ -787,6 +787,18 @@ fn gen_expr(
         NodeKind::Member => {
             gen_addr(node, result, files, current_fn, depth)?;
             load(node.ty.as_ref().unwrap(), result);
+            let mem = node.member.as_ref().unwrap();
+            if mem.is_bitfield {
+                result.push_str(&format!(
+                    "  shl ${}, %rax\n",
+                    64 - mem.bit_width - mem.bit_offset
+                ));
+                if mem.ty.is_unsigned {
+                    result.push_str(&format!("  shr ${}, %rax\n", 64 - mem.bit_width));
+                } else {
+                    result.push_str(&format!("  sar ${}, %rax\n", 64 - mem.bit_width));
+                }
+            }
             return Ok(());
         }
         NodeKind::Addr => {
@@ -845,6 +857,30 @@ fn gen_expr(
             result.push_str("  push %rax\n");
             *depth += 1;
             gen_expr(node.rhs.as_ref().unwrap(), result, files, current_fn, depth)?;
+
+            if node.lhs.as_ref().unwrap().kind == NodeKind::Member
+                && node
+                    .lhs
+                    .as_ref()
+                    .unwrap()
+                    .member
+                    .as_ref()
+                    .unwrap()
+                    .is_bitfield
+            {
+                let mem = node.lhs.as_ref().unwrap().member.as_ref().unwrap();
+                let mask = ((1_i64 << mem.bit_width) - 1) << mem.bit_offset;
+
+                result.push_str("  mov %rax, %rdi\n");
+                result.push_str(&format!("  and ${}, %rdi\n", (1_i64 << mem.bit_width) - 1));
+                result.push_str(&format!("  shl ${}, %rdi\n", mem.bit_offset));
+                result.push_str("  mov (%rsp), %rax\n");
+                load(&mem.ty, result);
+                result.push_str(&format!("  mov ${}, %r9\n", !mask));
+                result.push_str("  and %r9, %rax\n");
+                result.push_str("  or %rdi, %rax\n");
+            }
+
             store(node.ty.as_ref().unwrap(), result, depth);
             return Ok(());
         }

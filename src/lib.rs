@@ -129,6 +129,9 @@ pub struct Member {
     pub idx: i64,
     pub align: i64,
     pub offset: i64,
+    pub is_bitfield: bool,
+    pub bit_offset: i64,
+    pub bit_width: i64,
 }
 
 #[derive(Debug, Clone)]

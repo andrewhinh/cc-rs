@@ -56,6 +56,10 @@ fn current_switch_set(node: Option<Box<Node>>) {
     CURRENT_SWITCH.with(|c| c.set(node));
 }
 
+fn align_down(n: i64, align: i64) -> i64 {
+    align_to(n - align + 1, align)
+}
+
 fn is_end(files: &[File], tok: &Token) -> bool {
     equal(files, tok, "}")
         || (equal(files, tok, ",") && tok.next.as_ref().is_some_and(|n| equal(files, n, "}")))
@@ -1068,7 +1072,7 @@ pub fn struct_members(
             } else {
                 mem_ty.align
             };
-            let mem = crate::Member {
+            let mut mem = crate::Member {
                 next: None,
                 ty: mem_ty.clone(),
                 tok: Some(Box::new(tok.clone())),
@@ -1076,7 +1080,20 @@ pub fn struct_members(
                 idx,
                 align: mem_align,
                 offset: 0,
+                is_bitfield: false,
+                bit_offset: 0,
+                bit_width: 0,
             };
+
+            let (is_bitfield, new_tok) = consume(files, &tok, ":");
+            if is_bitfield {
+                mem.is_bitfield = true;
+                let (bit_width, new_tok) =
+                    const_expr(files, &new_tok, tag_scope_stack, scope_stack)?;
+                mem.bit_width = bit_width;
+                tok = new_tok;
+            }
+
             idx += 1;
             members.push(mem);
         }
@@ -1194,38 +1211,35 @@ pub fn struct_decl(
         return Ok((ty, rest));
     }
 
-    let mut offset = 0;
-    let mut max_align = 1;
     {
-        let ty = ty_rc.borrow();
-        let mut current = ty.members.as_ref();
+        let mut ty = ty_rc.borrow_mut();
+        let mut bits = 0;
+        let mut max_align = ty.align;
+        let mut current = ty.members.as_mut();
         while let Some(mem) = current {
-            offset = align_to(offset, mem.align);
+            if mem.is_bitfield {
+                let sz = mem.ty.size;
+                if bits / (sz * 8) != (bits + mem.bit_width - 1) / (sz * 8) {
+                    bits = align_to(bits, sz * 8);
+                }
+
+                mem.offset = align_down(bits / 8, sz);
+                mem.bit_offset = bits % (sz * 8);
+                bits += mem.bit_width;
+            } else {
+                bits = align_to(bits, mem.align * 8);
+                mem.offset = bits / 8;
+                bits += mem.ty.size * 8;
+            }
+
             if max_align < mem.align {
                 max_align = mem.align;
             }
-            offset += mem.ty.size;
-            current = mem.next.as_ref();
-        }
-    }
-
-    let size = align_to(offset, max_align);
-    {
-        let mut ty = ty_rc.borrow_mut();
-        ty.align = max_align;
-        ty.size = size;
-    }
-
-    let mut offset = 0;
-    {
-        let mut ty = ty_rc.borrow_mut();
-        let mut current = ty.members.as_mut();
-        while let Some(mem) = current {
-            offset = align_to(offset, mem.align);
-            mem.offset = offset;
-            offset += mem.ty.size;
             current = mem.next.as_mut();
         }
+
+        ty.align = max_align;
+        ty.size = align_to(bits, max_align * 8) / 8;
     }
 
     let mut ty = ty_rc.borrow().clone();
