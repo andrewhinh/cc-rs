@@ -1696,6 +1696,16 @@ pub fn is_function(
     Ok(ty.kind == TypeKind::Func)
 }
 
+fn read_buf(buf: &[u8], offset: usize, sz: i64) -> u64 {
+    match sz {
+        1 => buf[offset] as u64,
+        2 => u16::from_le_bytes(buf[offset..offset + 2].try_into().unwrap()) as u64,
+        4 => u32::from_le_bytes(buf[offset..offset + 4].try_into().unwrap()) as u64,
+        8 => u64::from_le_bytes(buf[offset..offset + 8].try_into().unwrap()),
+        _ => unreachable!(),
+    }
+}
+
 fn write_buf(buf: &mut [u8], offset: usize, val: u64, sz: i64) {
     match sz {
         1 => buf[offset] = val as u8,
@@ -1742,14 +1752,28 @@ fn write_gvar_data(
     if ty.kind == TypeKind::Struct {
         let mut current = ty.members.as_ref();
         while let Some(mem) = current {
-            write_gvar_data(
-                files,
-                &init.children[mem.idx as usize],
-                &mem.ty,
-                buf,
-                offset + mem.offset as usize,
-                rel_head,
-            )?;
+            if mem.is_bitfield {
+                let child = &init.children[mem.idx as usize];
+                if child.expr.is_none() {
+                    break;
+                }
+                let mut expr = child.expr.as_ref().unwrap().clone();
+                let loc = offset + mem.offset as usize;
+                let oldval = read_buf(buf, loc, mem.ty.size);
+                let newval = eval(files, &mut expr)? as u64;
+                let mask = (1u64 << mem.bit_width) - 1;
+                let combined = oldval | ((newval & mask) << mem.bit_offset);
+                write_buf(buf, loc, combined, mem.ty.size);
+            } else {
+                write_gvar_data(
+                    files,
+                    &init.children[mem.idx as usize],
+                    &mem.ty,
+                    buf,
+                    offset + mem.offset as usize,
+                    rel_head,
+                )?;
+            }
             current = mem.next.as_ref();
         }
         return Ok(());
@@ -2223,6 +2247,14 @@ pub fn declaration(
     let mut first = true;
 
     loop {
+        if equal(files, &tok, ";") {
+            let tok_loc = tok.loc;
+            let file_no = tok.file_no;
+            let line_no = tok.line_no;
+            let mut node = new_node(NodeKind::Block, tok_loc, file_no, line_no);
+            node.body = head.next;
+            return Ok((node, *tok.next.as_ref().unwrap().clone()));
+        }
         if !first {
             tok = skip(files, &tok, ",")?;
         }

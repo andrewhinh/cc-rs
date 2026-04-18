@@ -225,7 +225,7 @@ cargo run
 - [x] Align global variables
 - [x] Add compound literals
 - [x] Add bitfield
-- [ ] Support global struct bitfield initializer
+- [x] Support global struct bitfield initializer
 - [ ] Handle op=-style assignments to bitfields
 - [ ] Handle zero-width bitfield member
 - [ ] Do not allow to obtain an address of a bitfield
