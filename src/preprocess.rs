@@ -148,23 +148,50 @@ fn add_builtin(name: &str, handler: MacroHandler) {
     );
 }
 
+fn detached_token(tok: &Token) -> Token {
+    Token {
+        kind: tok.kind,
+        next: None,
+        val: tok.val,
+        fval: tok.fval,
+        loc: tok.loc,
+        len: tok.len,
+        ty: tok.ty.clone(),
+        str: tok.str.clone(),
+        file_no: tok.file_no,
+        line_no: tok.line_no,
+        at_bol: tok.at_bol,
+        has_space: tok.has_space,
+        hideset: tok.hideset.clone(),
+        origin: None,
+    }
+}
+
+fn root_origin(tok: &Token) -> Token {
+    let mut cur = tok;
+    while let Some(origin) = cur.origin.as_deref() {
+        cur = origin;
+    }
+    detached_token(cur)
+}
+
 fn file_macro(tmpl: &Token) -> Token {
     let files = get_input_files();
-    let mut tmpl = tmpl.clone();
-    while let Some(ref origin) = tmpl.origin {
-        tmpl = *origin.clone();
+    let mut tmpl = tmpl;
+    while let Some(origin) = tmpl.origin.as_deref() {
+        tmpl = origin;
     }
     let file = files.iter().find(|f| f.file_no == tmpl.file_no).unwrap();
-    new_str_token(&files, &file.name, &tmpl)
+    new_str_token(&files, &file.name, tmpl)
 }
 
 fn line_macro(tmpl: &Token) -> Token {
     let files = get_input_files();
-    let mut tmpl = tmpl.clone();
-    while let Some(ref origin) = tmpl.origin {
-        tmpl = *origin.clone();
+    let mut tmpl = tmpl;
+    while let Some(origin) = tmpl.origin.as_deref() {
+        tmpl = origin;
     }
-    new_num_token(&files, tmpl.line_no as i64, &tmpl)
+    new_num_token(&files, tmpl.line_no as i64, tmpl)
 }
 
 pub fn init_macros() {
@@ -746,7 +773,7 @@ fn expand_macro(files: &[File], tok: &Token) -> Option<Token> {
 }
 
 fn set_origin(tok: &mut Token, origin: &Token) {
-    let origin_box = Box::new(origin.clone());
+    let origin_box = Box::new(root_origin(origin));
     let mut cur = tok;
     while cur.kind != TokenKind::Eof {
         cur.origin = Some(origin_box.clone());
