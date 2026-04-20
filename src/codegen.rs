@@ -869,16 +869,21 @@ fn gen_expr(
                     .is_bitfield
             {
                 let mem = node.lhs.as_ref().unwrap().member.as_ref().unwrap();
-                let mask = ((1_i64 << mem.bit_width) - 1) << mem.bit_offset;
+                let field_mask: u64 = ((1u64 << mem.bit_width as u32) - 1) << mem.bit_offset as u32;
+                let clear_mask = !field_mask;
 
+                result.push_str("  mov %rax, %r8\n");
                 result.push_str("  mov %rax, %rdi\n");
                 result.push_str(&format!("  and ${}, %rdi\n", (1_i64 << mem.bit_width) - 1));
                 result.push_str(&format!("  shl ${}, %rdi\n", mem.bit_offset));
                 result.push_str("  mov (%rsp), %rax\n");
                 load(&mem.ty, result);
-                result.push_str(&format!("  mov ${}, %r9\n", !mask));
+                result.push_str(&format!("  movabs $0x{:x}, %r9\n", clear_mask));
                 result.push_str("  and %r9, %rax\n");
                 result.push_str("  or %rdi, %rax\n");
+                store(node.ty.as_ref().unwrap(), result, depth);
+                result.push_str("  mov %r8, %rax\n");
+                return Ok(());
             }
 
             store(node.ty.as_ref().unwrap(), result, depth);

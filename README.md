@@ -228,7 +228,7 @@ cargo run
 - [x] Add compound literals
 - [x] Add bitfield
 - [x] Support global struct bitfield initializer
-- [ ] Handle op=-style assignments to bitfields
+- [x] Handle op=-style assignments to bitfields
 - [ ] Handle zero-width bitfield member
 - [ ] Do not allow to obtain an address of a bitfield
 - [ ] Make an array of at least 16 bytes long to have alignment of at least 16 bytes

@@ -1018,7 +1018,7 @@ fn lvar_initializer(
 
     let var_idx = locals
         .iter()
-        .position(|v| v.name == var_name)
+        .rposition(|v| v.name == var_name)
         .ok_or_else(|| format!("variable not found: {}", var_name))?;
     let old_ty = locals[var_idx].ty.clone();
     let (init, new_ty, tok) = initializer(
@@ -2347,7 +2347,7 @@ pub fn declaration(
         if let Some(a) = attr
             && a.align > 0
         {
-            let var_idx = locals.iter().position(|v| v.name == name).unwrap();
+            let var_idx = locals.iter().rposition(|v| v.name == name).unwrap();
             locals[var_idx].align = a.align;
         }
 
@@ -2376,7 +2376,7 @@ pub fn declaration(
             cur = cur.next.as_mut().unwrap();
         }
 
-        let var_idx = locals.iter().position(|v| v.name == name).unwrap();
+        let var_idx = locals.iter().rposition(|v| v.name == name).unwrap();
         if locals[var_idx].ty.size < 0 {
             return Err(error_tok(
                 files,
@@ -3635,6 +3635,68 @@ fn to_assign(
     let tok_loc = binary.tok_loc;
     let file_no = binary.file_no;
     let line_no = binary.line_no;
+
+    if binary.lhs.as_ref().unwrap().kind == NodeKind::Member {
+        let member_node = binary.lhs.as_ref().unwrap();
+        let struct_expr = member_node.lhs.as_ref().unwrap().as_ref().clone();
+        let member = member_node.member.as_ref().unwrap().as_ref().clone();
+
+        let struct_ty = struct_expr.ty.as_ref().unwrap().clone();
+        let var = new_lvar(String::new(), pointer_to(struct_ty), locals, scope_stack);
+
+        let expr1 = new_binary(
+            NodeKind::Assign,
+            new_var_node(var.clone(), tok_loc, file_no, line_no),
+            new_unary(NodeKind::Addr, struct_expr, tok_loc, file_no, line_no),
+            tok_loc,
+            file_no,
+            line_no,
+        );
+
+        let mut expr2 = new_unary(
+            NodeKind::Member,
+            new_unary(
+                NodeKind::Deref,
+                new_var_node(var.clone(), tok_loc, file_no, line_no),
+                tok_loc,
+                file_no,
+                line_no,
+            ),
+            tok_loc,
+            file_no,
+            line_no,
+        );
+        expr2.member = Some(Box::new(member.clone()));
+
+        let mut expr3 = new_unary(
+            NodeKind::Member,
+            new_unary(
+                NodeKind::Deref,
+                new_var_node(var, tok_loc, file_no, line_no),
+                tok_loc,
+                file_no,
+                line_no,
+            ),
+            tok_loc,
+            file_no,
+            line_no,
+        );
+        expr3.member = Some(Box::new(member));
+
+        let op_node = new_binary(
+            binary.kind,
+            expr3,
+            binary.rhs.as_ref().unwrap().as_ref().clone(),
+            tok_loc,
+            file_no,
+            line_no,
+        );
+
+        let expr4 = new_binary(NodeKind::Assign, expr2, op_node, tok_loc, file_no, line_no);
+
+        return new_binary(NodeKind::Comma, expr1, expr4, tok_loc, file_no, line_no);
+    }
+
     let lhs_ty = binary.lhs.as_ref().unwrap().ty.as_ref().unwrap().clone();
 
     let var = new_lvar(String::new(), pointer_to(lhs_ty), locals, scope_stack);
