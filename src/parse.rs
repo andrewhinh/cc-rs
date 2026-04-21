@@ -4530,10 +4530,11 @@ pub fn unary(
     }
 
     if equal(files, tok, "&") {
+        let amp_tok = tok;
         let tok_loc = tok.loc;
         let file_no = tok.file_no;
         let line_no = tok.line_no;
-        let (node, tok) = cast(
+        let (mut node, tok) = cast(
             files,
             tok.next.as_ref().unwrap(),
             locals,
@@ -4541,6 +4542,10 @@ pub fn unary(
             scope_stack,
             tag_scope_stack,
         )?;
+        add_type(&mut node);
+        if node.kind == NodeKind::Member && node.member.as_ref().is_some_and(|m| m.is_bitfield) {
+            return Err(error_tok(files, amp_tok, "cannot take address of bitfield"));
+        }
         return Ok((
             new_unary(NodeKind::Addr, node, tok_loc, file_no, line_no),
             tok,

@@ -230,7 +230,7 @@ cargo run
 - [x] Support global struct bitfield initializer
 - [x] Handle op=-style assignments to bitfields
 - [x] Handle zero-width bitfield member
-- [ ] Do not allow to obtain an address of a bitfield
+- [x] Do not allow to obtain an address of a bitfield
 - [ ] Make an array of at least 16 bytes long to have alignment of at least 16 bytes
 - [ ] Add anonymous struct and union
 - [ ] Add array designated initializer
