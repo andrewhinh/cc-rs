@@ -179,6 +179,27 @@ fn parse_args() -> Args {
             continue;
         }
 
+        let a = args[i].as_str();
+        if a.starts_with("-O")
+            || a.starts_with("-W")
+            || a.starts_with("-g")
+            || a.starts_with("-std=")
+            || matches!(
+                a,
+                "-ffreestanding"
+                    | "-fno-builtin"
+                    | "-fno-omit-frame-pointer"
+                    | "-fno-stack-protector"
+                    | "-fno-strict-aliasing"
+                    | "-m64"
+                    | "-mno-red-zone"
+                    | "-w"
+            )
+        {
+            i += 1;
+            continue;
+        }
+
         if args[i].starts_with('-') && args[i].len() > 1 {
             eprintln!("unknown argument: {}", args[i]);
             process::exit(1);
