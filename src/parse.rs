@@ -1217,7 +1217,10 @@ pub fn struct_decl(
         let mut max_align = ty.align;
         let mut current = ty.members.as_mut();
         while let Some(mem) = current {
-            if mem.is_bitfield {
+            if mem.is_bitfield && mem.bit_width == 0 {
+                // Zero-width anonymous bitfield: align to next storage unit (C).
+                bits = align_to(bits, mem.ty.size * 8);
+            } else if mem.is_bitfield {
                 let sz = mem.ty.size;
                 if bits / (sz * 8) != (bits + mem.bit_width - 1) / (sz * 8) {
                     bits = align_to(bits, sz * 8);
@@ -1752,7 +1755,7 @@ fn write_gvar_data(
     if ty.kind == TypeKind::Struct {
         let mut current = ty.members.as_ref();
         while let Some(mem) = current {
-            if mem.is_bitfield {
+            if mem.is_bitfield && mem.bit_width > 0 {
                 let child = &init.children[mem.idx as usize];
                 if child.expr.is_none() {
                     break;

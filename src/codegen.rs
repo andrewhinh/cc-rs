@@ -788,7 +788,7 @@ fn gen_expr(
             gen_addr(node, result, files, current_fn, depth)?;
             load(node.ty.as_ref().unwrap(), result);
             let mem = node.member.as_ref().unwrap();
-            if mem.is_bitfield {
+            if mem.is_bitfield && mem.bit_width > 0 {
                 result.push_str(&format!(
                     "  shl ${}, %rax\n",
                     64 - mem.bit_width - mem.bit_offset
@@ -858,32 +858,26 @@ fn gen_expr(
             *depth += 1;
             gen_expr(node.rhs.as_ref().unwrap(), result, files, current_fn, depth)?;
 
-            if node.lhs.as_ref().unwrap().kind == NodeKind::Member
-                && node
-                    .lhs
-                    .as_ref()
-                    .unwrap()
-                    .member
-                    .as_ref()
-                    .unwrap()
-                    .is_bitfield
-            {
+            if node.lhs.as_ref().unwrap().kind == NodeKind::Member {
                 let mem = node.lhs.as_ref().unwrap().member.as_ref().unwrap();
-                let field_mask: u64 = ((1u64 << mem.bit_width as u32) - 1) << mem.bit_offset as u32;
-                let clear_mask = !field_mask;
+                if mem.is_bitfield && mem.bit_width > 0 {
+                    let field_mask: u64 =
+                        ((1u64 << mem.bit_width as u32) - 1) << mem.bit_offset as u32;
+                    let clear_mask = !field_mask;
 
-                result.push_str("  mov %rax, %r8\n");
-                result.push_str("  mov %rax, %rdi\n");
-                result.push_str(&format!("  and ${}, %rdi\n", (1_i64 << mem.bit_width) - 1));
-                result.push_str(&format!("  shl ${}, %rdi\n", mem.bit_offset));
-                result.push_str("  mov (%rsp), %rax\n");
-                load(&mem.ty, result);
-                result.push_str(&format!("  movabs $0x{:x}, %r9\n", clear_mask));
-                result.push_str("  and %r9, %rax\n");
-                result.push_str("  or %rdi, %rax\n");
-                store(node.ty.as_ref().unwrap(), result, depth);
-                result.push_str("  mov %r8, %rax\n");
-                return Ok(());
+                    result.push_str("  mov %rax, %r8\n");
+                    result.push_str("  mov %rax, %rdi\n");
+                    result.push_str(&format!("  and ${}, %rdi\n", (1_i64 << mem.bit_width) - 1));
+                    result.push_str(&format!("  shl ${}, %rdi\n", mem.bit_offset));
+                    result.push_str("  mov (%rsp), %rax\n");
+                    load(&mem.ty, result);
+                    result.push_str(&format!("  movabs $0x{:x}, %r9\n", clear_mask));
+                    result.push_str("  and %r9, %rax\n");
+                    result.push_str("  or %rdi, %rax\n");
+                    store(node.ty.as_ref().unwrap(), result, depth);
+                    result.push_str("  mov %r8, %rax\n");
+                    return Ok(());
+                }
             }
 
             store(node.ty.as_ref().unwrap(), result, depth);
