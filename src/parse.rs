@@ -1246,7 +1246,12 @@ pub fn struct_decl(
         let mut max_align = ty.align;
         let mut current = ty.members.as_mut();
         while let Some(mem) = current {
-            if mem.is_bitfield {
+            if mem.is_bitfield && mem.bit_width == 0 {
+                // Zero-width anonymous bitfield has a special meaning.
+                // It affects only alignment.
+                let sz = mem.ty.size;
+                bits = align_to(bits, sz * 8);
+            } else if mem.is_bitfield {
                 let sz = mem.ty.size;
                 if bits / (sz * 8) != (bits + mem.bit_width - 1) / (sz * 8) {
                     bits = align_to(bits, sz * 8);
