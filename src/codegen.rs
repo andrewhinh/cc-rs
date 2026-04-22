@@ -1484,6 +1484,14 @@ fn align_to(n: i64, align: i64) -> i64 {
     (n + align - 1) / align * align
 }
 
+fn effective_var_align(var: &Obj) -> i64 {
+    if matches!(var.ty.kind, TypeKind::Array) && var.ty.size >= 16 {
+        var.align.max(16)
+    } else {
+        var.align
+    }
+}
+
 fn fix_var_offsets(node: &mut Node, locals: &[Obj]) {
     if let Some(var) = &mut node.var
         && let Some(lv) = locals.iter().find(|l| l.unique_id == var.unique_id)
@@ -1627,7 +1635,7 @@ pub fn emit_assembly() -> Result<String, String> {
 
         if let Some(init_data) = &var.init_data {
             result.push_str("  .data\n");
-            result.push_str(&format!("  .align {}\n", var.align));
+            result.push_str(&format!("  .align {}\n", effective_var_align(var)));
             result.push_str(&format!("{}:\n", var.name));
 
             let mut rel = var.rel.clone();
@@ -1648,7 +1656,7 @@ pub fn emit_assembly() -> Result<String, String> {
         }
 
         result.push_str("  .bss\n");
-        result.push_str(&format!("  .align {}\n", var.align));
+        result.push_str(&format!("  .align {}\n", effective_var_align(var)));
         result.push_str(&format!("{}:\n", var.name));
         result.push_str(&format!("  .zero {}\n", var.ty.size));
     }
@@ -1748,7 +1756,7 @@ pub fn emit_assembly() -> Result<String, String> {
             };
 
             bottom += size;
-            bottom = align_to(bottom, var.align);
+            bottom = align_to(bottom, effective_var_align(var));
             var.offset = -bottom;
         }
 
