@@ -232,7 +232,7 @@ cargo run
 - [x] Handle zero-width bitfield member
 - [x] Do not allow to obtain an address of a bitfield
 - [x] Make an array of at least 16 bytes long to have alignment of at least 16 bytes
-- [ ] Add anonymous struct and union
+- [x] Add anonymous struct and union
 - [ ] Add array designated initializer
 - [ ] Allow array designators to initialize incomplete arrays
 - [ ] [GNU] Allow to omit "=" in designated initializers

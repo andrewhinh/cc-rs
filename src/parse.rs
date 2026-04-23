@@ -1087,6 +1087,32 @@ pub fn struct_members(
         tok = new_tok;
         let mut first = true;
 
+        if (basety.kind == TypeKind::Struct || basety.kind == TypeKind::Union)
+            && equal(files, &tok, ";")
+        {
+            let mem_align = if attr.align > 0 {
+                attr.align
+            } else {
+                basety.align
+            };
+            let mem = crate::Member {
+                next: None,
+                ty: basety,
+                tok: None,
+                name: None,
+                idx,
+                align: mem_align,
+                offset: 0,
+                is_bitfield: false,
+                bit_offset: 0,
+                bit_width: 0,
+            };
+            idx += 1;
+            members.push(mem);
+            tok = skip(files, &tok, ";")?;
+            continue;
+        }
+
         while !equal(files, &tok, ";") {
             if !first {
                 tok = skip(files, &tok, ",")?;
@@ -1419,10 +1445,19 @@ pub fn enum_specifier(
     Ok((ty, tok))
 }
 
-pub fn get_struct_member(files: &[File], ty: &Type, tok: &Token) -> Result<crate::Member, String> {
-    let mut current = ty.members.as_ref();
-    while let Some(mem) = current {
-        if let Some(name) = &mem.name
+fn find_in_member_list(
+    files: &[File],
+    mut mem_ref: &crate::Member,
+    tok: &Token,
+) -> Option<crate::Member> {
+    loop {
+        if (mem_ref.ty.kind == TypeKind::Struct || mem_ref.ty.kind == TypeKind::Union)
+            && mem_ref.name.is_none()
+        {
+            if get_struct_member(files, &mem_ref.ty, tok).is_some() {
+                return Some(mem_ref.clone());
+            }
+        } else if let Some(name) = &mem_ref.name
             && name.len == tok.len
         {
             let file = files.iter().find(|f| f.file_no == name.file_no).unwrap();
@@ -1440,28 +1475,54 @@ pub fn get_struct_member(files: &[File], ty: &Type, tok: &Token) -> Result<crate
                 .take(tok.len)
                 .collect();
             if mem_name == tok_name {
-                return Ok(mem.as_ref().clone());
+                return Some(mem_ref.clone());
             }
         }
-        current = mem.next.as_ref();
+        mem_ref = mem_ref.next.as_deref()?;
     }
-    Err(error_tok(files, tok, "no such member"))
+}
+
+pub fn get_struct_member(files: &[File], ty: &Type, tok: &Token) -> Option<crate::Member> {
+    if let Some(head) = ty.members.as_deref() {
+        return find_in_member_list(files, head, tok);
+    }
+    if let Some(origin) = &ty.origin {
+        let canonical = origin.borrow();
+        if let Some(head) = canonical.members.as_deref() {
+            return find_in_member_list(files, head, tok);
+        }
+    }
+    None
 }
 
 pub fn struct_ref(files: &[File], lhs: Node, tok: &Token) -> Result<Node, String> {
-    let mut lhs = lhs;
-    add_type(&mut lhs);
+    let mut node = lhs;
+    add_type(&mut node);
 
-    if lhs.ty.as_ref().unwrap().kind != TypeKind::Struct
-        && lhs.ty.as_ref().unwrap().kind != TypeKind::Union
+    if node.ty.as_ref().unwrap().kind != TypeKind::Struct
+        && node.ty.as_ref().unwrap().kind != TypeKind::Union
     {
         return Err(error_tok(files, tok, "not a struct nor a union"));
     }
 
-    let member = get_struct_member(files, lhs.ty.as_ref().unwrap(), tok)?;
-    let mut node = new_unary(NodeKind::Member, lhs, tok.loc, tok.file_no, tok.line_no);
-    node.member = Some(Box::new(member));
-    Ok(node)
+    let mut ty = node.ty.as_ref().unwrap().clone();
+    loop {
+        let mem = get_struct_member(files, &ty, tok)
+            .ok_or_else(|| error_tok(files, tok, "no such member"))?;
+        let next_ty = if mem.name.is_none() {
+            Some(mem.ty.clone())
+        } else {
+            None
+        };
+        let mut new_node = new_unary(NodeKind::Member, node, tok.loc, tok.file_no, tok.line_no);
+        new_node.member = Some(Box::new(mem));
+        node = new_node;
+        if let Some(t) = next_ty {
+            ty = t;
+        } else {
+            return Ok(node);
+        }
+    }
 }
 
 pub fn declspec(
