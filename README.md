@@ -313,7 +313,7 @@ cargo run
 - [x] Add __func__
 - [x] [GNU] Add __FUNCTION__
 - [x] Add __DATE__ and __TIME__ macros
-- [ ] [GNU] Add __COUNTER__ macro
+- [x] [GNU] Add __COUNTER__ macro
 - [ ] Add #line
 - [ ] [GNU] Add line marker directive
 - [ ] [GNU] Add __TIMESTAMP__ macro

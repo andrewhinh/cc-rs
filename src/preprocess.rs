@@ -1,6 +1,7 @@
 use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::atomic::{AtomicI32, Ordering};
 
 use chrono::Local;
 
@@ -26,6 +27,12 @@ struct CondIncl {
 }
 
 type MacroHandler = fn(&Token) -> Token;
+
+static COUNTER: AtomicI32 = AtomicI32::new(0);
+
+pub fn reset_counter() {
+    COUNTER.store(0, Ordering::Relaxed);
+}
 
 #[derive(Debug, Clone)]
 struct MacroParam {
@@ -196,6 +203,12 @@ fn line_macro(tmpl: &Token) -> Token {
     new_num_token(&files, tmpl.line_no as i64, tmpl)
 }
 
+fn counter_macro(tmpl: &Token) -> Token {
+    let files = get_input_files();
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed) as i64;
+    new_num_token(&files, n, tmpl)
+}
+
 pub fn init_macros() {
     define_macro("_LP64", "1");
     define_macro("__C99_MACRO_WITH_VA_ARGS", "1");
@@ -241,6 +254,7 @@ pub fn init_macros() {
 
     add_builtin("__FILE__", file_macro);
     add_builtin("__LINE__", line_macro);
+    add_builtin("__COUNTER__", counter_macro);
 
     let now = Local::now();
     let date_s = now.format("%b %e %Y").to_string();
@@ -469,14 +483,18 @@ fn quote_string(str: &str) -> String {
 fn new_str_token(files: &[File], s: &str, tmpl: &Token) -> Token {
     let quoted = quote_string(s);
     let file = files.iter().find(|f| f.file_no == tmpl.file_no).unwrap();
-    let new_file = new_file(file.name.clone(), tmpl.file_no, quoted);
+    let file_no = get_file_no();
+    let new_file = new_file(file.name.clone(), file_no, quoted);
+    add_input_file(new_file.clone());
     tokenize(&new_file)
 }
 
 fn new_num_token(files: &[File], val: i64, tmpl: &Token) -> Token {
     let buf = format!("{}\n", val);
     let file = files.iter().find(|f| f.file_no == tmpl.file_no).unwrap();
-    let new_file = new_file(file.name.clone(), tmpl.file_no, buf);
+    let file_no = get_file_no();
+    let new_file = new_file(file.name.clone(), file_no, buf);
+    add_input_file(new_file.clone());
     tokenize(&new_file)
 }
 

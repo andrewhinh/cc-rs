@@ -1,6 +1,6 @@
 use crate::File;
 use crate::get_input_files;
-use crate::preprocess::preprocess;
+use crate::preprocess::{preprocess, reset_counter};
 use crate::tokenize::tokenize_file;
 use crate::{
     Node, NodeKind, Obj, TagScope, TokenKind, Type, TypeKind, VarAttr, VarScope, error_at,
@@ -1567,6 +1567,7 @@ pub fn emit_assembly() -> Result<String, String> {
     let base_file =
         std::env::var("CC_RS_BASE_FILE").map_err(|_| "base file not set".to_string())?;
     let tok = tokenize_file(&base_file).ok_or("cannot open input file")?;
+    reset_counter();
     let mut tok = preprocess(tok)?;
 
     let mut globals: Vec<Obj> = Vec::new();
