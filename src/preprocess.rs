@@ -2,6 +2,8 @@ use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::Path;
 
+use chrono::Local;
+
 use crate::{
     File, Token, TokenKind, add_input_file, const_expr, consume, convert_pp_number, equal,
     error_tok, get_file_no, get_include_paths, get_input_files, new_file, skip, tokenize,
@@ -239,6 +241,12 @@ pub fn init_macros() {
 
     add_builtin("__FILE__", file_macro);
     add_builtin("__LINE__", line_macro);
+
+    let now = Local::now();
+    let date_s = now.format("%b %e %Y").to_string();
+    let time_s = now.format("%H:%M:%S").to_string();
+    define_macro("__DATE__", &format!("\"{date_s}\""));
+    define_macro("__TIME__", &format!("\"{time_s}\""));
 }
 
 fn read_macro_params(

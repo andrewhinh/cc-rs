@@ -7,6 +7,11 @@ license = "MIT/Apache-2.0"
 repository = "https://github.com/andrewhinh/cc-rs"
 
 [dependencies]
+chrono = { version = "0.4.44", default-features = false, features = [
+    "clock",
+    "now",
+    "std",
+] }
 glob = "0.3"
 tempfile = "3"
 
