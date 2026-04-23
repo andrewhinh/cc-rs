@@ -80,7 +80,7 @@ cargo run
 - [x] Add switch-case
 - [x] Add return that doesn't take any value
 - [x] Add do ... while
-- [ ] Make "main" to implicitly return 0
+- [x] Make "main" to implicitly return 0
 - [ ] [GNU] Support labels-as-values
 - [ ] [GNU] Treat labels-as-values as compile-time constant
 

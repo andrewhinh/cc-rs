@@ -1890,6 +1890,10 @@ pub fn emit_assembly() -> Result<String, String> {
         )?;
         assert!(depth == 0, "depth should be 0 after function body");
 
+        if func.name == "main" {
+            result.push_str("  movq $0, %rax\n");
+        }
+
         result.push_str(&format!(".L.return.{}:\n", func.name));
         result.push_str("  mov %rbp, %rsp\n");
         result.push_str("  pop %rbp\n");
