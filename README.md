@@ -259,7 +259,7 @@ cargo run
 - [ ] Use hashmap for keyword lookup
 - [x] Canonicalize newline character
 - [x] Add \u and \U escape sequences
-- [ ] Accept multibyte character as wide character literal
+- [x] Accept multibyte character as wide character literal
 - [ ] Add UTF-16 character literal
 - [ ] Add UTF-32 character literal
 - [ ] Add UTF-8 string literal

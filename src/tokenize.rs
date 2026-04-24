@@ -10,6 +10,77 @@ pub fn get_file_no() -> usize {
     FILE_NO.fetch_add(1, Ordering::SeqCst) + 1
 }
 
+fn char_index_to_byte_offset(s: &str, char_index: usize) -> usize {
+    s.chars().take(char_index).map(|c| c.len_utf8()).sum()
+}
+
+fn byte_offset_and_line_at(s: &str, char_index: usize) -> (usize, usize) {
+    let mut b = 0;
+    let mut line = 1;
+    for (i, c) in s.chars().enumerate() {
+        if i >= char_index {
+            break;
+        }
+        if c == '\n' {
+            line += 1;
+        }
+        b += c.len_utf8();
+    }
+    (b, line)
+}
+
+fn read_wide_escaped_char(chars: &[char], pos: usize) -> Result<(i64, usize), String> {
+    if pos < chars.len() && ('0'..='7').contains(&chars[pos]) {
+        let mut c: u32 = u32::from((chars[pos] as u8) - b'0');
+        let mut n = 1;
+        if pos + 1 < chars.len() && ('0'..='7').contains(&chars[pos + 1]) {
+            c = (c << 3) + u32::from((chars[pos + 1] as u8) - b'0');
+            n = 2;
+            if pos + 2 < chars.len() && ('0'..='7').contains(&chars[pos + 2]) {
+                c = (c << 3) + u32::from((chars[pos + 2] as u8) - b'0');
+                n = 3;
+            }
+        }
+        return Ok((c as i32 as i64, n));
+    }
+
+    if pos >= chars.len() {
+        return Ok((0, 0));
+    }
+
+    if chars[pos] == 'x' {
+        let mut c: u32 = 0;
+        let mut consumed: usize = 0;
+        let mut i = pos + 1;
+        while i < chars.len() {
+            if let Some(digit) = chars[i].to_digit(16) {
+                c = (c << 4) + digit;
+                consumed += 1;
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        if consumed == 0 {
+            return Err("invalid hex escape sequence".to_string());
+        }
+        return Ok((c as i32 as i64, 1 + consumed));
+    }
+
+    let v = match chars[pos] {
+        'a' => 0x07i64,
+        'b' => 0x08,
+        't' => 0x09,
+        'n' => 0x0A,
+        'v' => 0x0B,
+        'f' => 0x0C,
+        'r' => 0x0D,
+        'e' => 0x1B,
+        other => other as u8 as i64,
+    };
+    Ok((v, 1))
+}
+
 pub fn new_token(
     kind: TokenKind,
     start: usize,
@@ -227,10 +298,12 @@ fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
     None
 }
 
-fn add_line_numbers(src: &str, tok: &mut Token) {
-    let mut p = 0;
-    let mut n = 1;
-    let mut cur = tok;
+fn add_line_numbers(src: &str, first: &mut Token) {
+    let chars: Vec<char> = src.chars().collect();
+    let max_p = chars.len();
+    let mut p: usize = 0;
+    let mut n: usize = 1;
+    let mut cur: &mut Token = first;
 
     loop {
         if p == cur.loc {
@@ -240,7 +313,10 @@ fn add_line_numbers(src: &str, tok: &mut Token) {
             }
             cur = cur.next.as_mut().unwrap();
         }
-        if src.as_bytes().get(p) == Some(&b'\n') {
+        if p >= max_p {
+            break;
+        }
+        if chars[p] == '\n' {
             n += 1;
         }
         p += 1;
@@ -707,9 +783,9 @@ pub fn tokenize(file: &File) -> Token {
                     )));
                     return *head.next.unwrap();
                 }
-                match read_escaped_char(&chars, pos) {
-                    Ok((escaped, consumed)) => {
-                        c = (escaped as u32) as i64;
+                match read_wide_escaped_char(&chars, pos) {
+                    Ok((v, consumed)) => {
+                        c = v;
                         pos += consumed;
                     }
                     Err(e) => {
@@ -718,7 +794,7 @@ pub fn tokenize(file: &File) -> Token {
                     }
                 }
             } else {
-                c = (chars[pos] as u32) as i64;
+                c = (chars[pos] as u32 as i32) as i64;
                 pos += 1;
             }
             if pos >= chars.len() || chars[pos] != '\'' {
@@ -773,7 +849,7 @@ pub fn tokenize(file: &File) -> Token {
                     }
                 }
             } else {
-                c = (chars[pos] as u8) as i8 as i64;
+                c = ((chars[pos] as u32) as u8 as i8) as i64;
                 pos += 1;
             }
             if pos >= chars.len() || chars[pos] != '\'' {
@@ -922,19 +998,20 @@ pub fn error_tok(files: &[File], tok: &Token, msg: &str) -> String {
     let src = &file.contents;
     let filename = &file.name;
 
-    let mut line_start = tok.loc;
+    let b = char_index_to_byte_offset(src, tok.loc);
+    let mut line_start = b;
     while line_start > 0 && src.as_bytes()[line_start - 1] != b'\n' {
         line_start -= 1;
     }
 
-    let mut line_end = tok.loc;
+    let mut line_end = b;
     while line_end < src.len() && src.as_bytes()[line_end] != b'\n' {
         line_end += 1;
     }
 
     let line = &src[line_start..line_end];
     let indent = format!("{filename}:{}: ", tok.line_no).len();
-    let pos = tok.loc - line_start + indent;
+    let pos = b - line_start + indent;
 
     format!(
         "{filename}:{}: {line}\n{:width$}^ {msg}\n",
@@ -949,20 +1026,21 @@ pub fn error_at(files: &[File], file_no: usize, loc: usize, msg: &str) -> String
     let src = &file.contents;
     let filename = &file.name;
 
-    let mut line_start = loc;
+    let (b, line_no) = byte_offset_and_line_at(src, loc);
+
+    let mut line_start = b;
     while line_start > 0 && src.as_bytes()[line_start - 1] != b'\n' {
         line_start -= 1;
     }
 
-    let mut line_end = loc;
+    let mut line_end = b;
     while line_end < src.len() && src.as_bytes()[line_end] != b'\n' {
         line_end += 1;
     }
 
-    let line_no = src[..loc].matches('\n').count() + 1;
     let line = &src[line_start..line_end];
     let indent = format!("{filename}:{line_no}: ").len();
-    let pos = loc - line_start + indent;
+    let pos = b - line_start + indent;
 
     format!(
         "{filename}:{line_no}: {line}\n{:width$}^ {msg}\n",
