@@ -258,7 +258,7 @@ cargo run
 - [x] Precompute line number for each token
 - [ ] Use hashmap for keyword lookup
 - [x] Canonicalize newline character
-- [ ] Add \u and \U escape sequences
+- [x] Add \u and \U escape sequences
 - [ ] Accept multibyte character as wide character literal
 - [ ] Add UTF-16 character literal
 - [ ] Add UTF-32 character literal

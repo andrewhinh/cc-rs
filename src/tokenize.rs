@@ -94,6 +94,104 @@ fn read_escaped_char(chars: &[char], pos: usize) -> Result<(char, usize), String
     Ok((c, 1))
 }
 
+fn encode_utf8(c: u32, buf: &mut [u8; 4]) -> usize {
+    if c <= 0x7F {
+        buf[0] = c as u8;
+        return 1;
+    }
+    if c <= 0x7FF {
+        buf[0] = 0b1100_0000 | ((c >> 6) as u8);
+        buf[1] = 0b1000_0000 | ((c & 0b11_1111) as u8);
+        return 2;
+    }
+    if c <= 0xFFFF {
+        buf[0] = 0b1110_0000 | ((c >> 12) as u8);
+        buf[1] = 0b1000_0000 | (((c >> 6) & 0b11_1111) as u8);
+        buf[2] = 0b1000_0000 | ((c & 0b11_1111) as u8);
+        return 3;
+    }
+    buf[0] = 0b1111_0000 | ((c >> 18) as u8);
+    buf[1] = 0b1000_0000 | (((c >> 12) & 0b11_1111) as u8);
+    buf[2] = 0b1000_0000 | (((c >> 6) & 0b11_1111) as u8);
+    buf[3] = 0b1000_0000 | ((c & 0b11_1111) as u8);
+    4
+}
+
+fn from_hex(b: u8) -> u32 {
+    match b {
+        b'0'..=b'9' => u32::from(b - b'0'),
+        b'a'..=b'f' => 10 + u32::from(b - b'a'),
+        b'A'..=b'F' => 10 + u32::from(b - b'A'),
+        _ => 0,
+    }
+}
+
+fn read_universal_char(s: &[u8], len: usize) -> u32 {
+    if s.len() < len {
+        return 0;
+    }
+    let mut c: u32 = 0;
+    for &b in s.iter().take(len) {
+        if !b.is_ascii_hexdigit() {
+            return 0;
+        }
+        c = (c << 4) | from_hex(b);
+    }
+    c
+}
+
+fn convert_universal_chars(contents: &mut String) {
+    let b = std::mem::take(contents).into_bytes();
+    let mut p: usize = 0;
+    let mut out: Vec<u8> = Vec::with_capacity(b.len());
+    let mut enc = [0u8; 4];
+    while p < b.len() {
+        if p + 1 < b.len() && b[p] == b'\\' && b[p + 1] == b'u' {
+            let c = if p + 6 <= b.len() {
+                read_universal_char(&b[p + 2..p + 6], 4)
+            } else {
+                0
+            };
+            if c != 0 {
+                p += 6;
+                let n = encode_utf8(c, &mut enc);
+                out.extend_from_slice(&enc[..n]);
+            } else {
+                out.push(b[p]);
+                p += 1;
+            }
+        } else if p + 1 < b.len() && b[p] == b'\\' && b[p + 1] == b'U' {
+            let c = if p + 10 <= b.len() {
+                read_universal_char(&b[p + 2..p + 10], 8)
+            } else {
+                0
+            };
+            if c != 0 {
+                p += 10;
+                let n = encode_utf8(c, &mut enc);
+                out.extend_from_slice(&enc[..n]);
+            } else {
+                out.push(b[p]);
+                p += 1;
+            }
+        } else if b[p] == b'\\' && p + 1 < b.len() {
+            out.push(b[p]);
+            p += 1;
+            out.push(b[p]);
+            p += 1;
+        } else {
+            out.push(b[p]);
+            p += 1;
+        }
+    }
+    *contents = String::from_utf8(out).expect("convert_universal_chars");
+}
+
+fn push_char_utf8(str_content: &mut Vec<u8>, c: char) {
+    let mut buf = [0u8; 4];
+    str_content.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+}
+
 fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
     let remaining: String = chars[pos..].iter().collect();
     if remaining.starts_with("<<=") || remaining.starts_with(">>=") || remaining.starts_with("...")
@@ -463,6 +561,7 @@ fn read_file(path: &str) -> Option<String> {
     }
     canonicalize_newline(&mut contents);
     remove_backslash_newline(&mut contents);
+    convert_universal_chars(&mut contents);
     Some(contents)
 }
 
@@ -552,7 +651,7 @@ pub fn tokenize(file: &File) -> Token {
                     }
                     match read_escaped_char(&chars, pos) {
                         Ok((escaped, consumed)) => {
-                            str_content.push(escaped as u8);
+                            push_char_utf8(&mut str_content, escaped);
                             pos += consumed;
                         }
                         Err(e) => {
@@ -562,7 +661,7 @@ pub fn tokenize(file: &File) -> Token {
                     }
                     continue;
                 } else {
-                    str_content.push(chars[pos] as u8);
+                    push_char_utf8(&mut str_content, chars[pos]);
                 }
                 pos += 1;
             }
@@ -610,7 +709,7 @@ pub fn tokenize(file: &File) -> Token {
                 }
                 match read_escaped_char(&chars, pos) {
                     Ok((escaped, consumed)) => {
-                        c = (escaped as u8) as i8 as i64;
+                        c = (escaped as u32) as i64;
                         pos += consumed;
                     }
                     Err(e) => {
@@ -619,7 +718,7 @@ pub fn tokenize(file: &File) -> Token {
                     }
                 }
             } else {
-                c = (chars[pos] as u8) as i8 as i64;
+                c = (chars[pos] as u32) as i64;
                 pos += 1;
             }
             if pos >= chars.len() || chars[pos] != '\'' {
