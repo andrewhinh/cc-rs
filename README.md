@@ -257,7 +257,7 @@ cargo run
 - [x] Tokenize numeric tokens as pp-numbers
 - [x] Precompute line number for each token
 - [ ] Use hashmap for keyword lookup
-- [ ] Canonicalize newline character
+- [x] Canonicalize newline character
 - [ ] Add \u and \U escape sequences
 - [ ] Accept multibyte character as wide character literal
 - [ ] Add UTF-16 character literal

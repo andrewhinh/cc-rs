@@ -390,6 +390,30 @@ pub fn tokenize_file(path: &str) -> Option<Token> {
     Some(tokenize(&file))
 }
 
+fn canonicalize_newline(contents: &mut String) {
+    let mut b = std::mem::take(contents).into_bytes();
+    let mut i = 0;
+    let mut j = 0;
+    let blen = b.len();
+    while i < blen {
+        if b[i] == b'\r' && i + 1 < blen && b[i + 1] == b'\n' {
+            i += 2;
+            b[j] = b'\n';
+            j += 1;
+        } else if b[i] == b'\r' {
+            i += 1;
+            b[j] = b'\n';
+            j += 1;
+        } else {
+            b[j] = b[i];
+            i += 1;
+            j += 1;
+        }
+    }
+    b.truncate(j);
+    *contents = String::from_utf8(b).expect("canonicalize_newline preserves UTF-8");
+}
+
 fn remove_backslash_newline(contents: &mut String) {
     let bytes = unsafe { contents.as_bytes_mut() };
     let mut i = 0;
@@ -437,6 +461,7 @@ fn read_file(path: &str) -> Option<String> {
     if !contents.is_empty() && !contents.ends_with('\n') {
         contents.push('\n');
     }
+    canonicalize_newline(&mut contents);
     remove_backslash_newline(&mut contents);
     Some(contents)
 }
