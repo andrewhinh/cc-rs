@@ -761,7 +761,8 @@ pub fn tokenize(file: &File) -> Token {
             continue;
         }
 
-        if pos + 1 < chars.len() && chars[pos] == 'L' && chars[pos + 1] == '\'' {
+        if pos + 1 < chars.len() && matches!((chars[pos], chars[pos + 1]), ('L' | 'u', '\'')) {
+            let utf16 = chars[pos] == 'u';
             let start = pos;
             pos += 2;
             if pos >= chars.len() {
@@ -807,8 +808,13 @@ pub fn tokenize(file: &File) -> Token {
             }
             pos += 1;
             let mut tok = new_token(TokenKind::Num, start, pos, at_bol, has_space, file_no);
-            tok.val = c;
-            tok.ty = Some(Type::new_int());
+            if utf16 {
+                tok.val = c & 0xffff;
+                tok.ty = Some(Type::new_ushort());
+            } else {
+                tok.val = c;
+                tok.ty = Some(Type::new_int());
+            }
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
             at_bol = false;
