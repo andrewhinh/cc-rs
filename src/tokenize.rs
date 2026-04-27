@@ -269,6 +269,46 @@ fn push_char_utf8(str_content: &mut Vec<u8>, c: char) {
     str_content.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
 }
 
+fn c_str_unclosed(lit_start: usize) -> (usize, String) {
+    (lit_start, "unclosed string literal".to_string())
+}
+
+fn parse_c_string_body(
+    chars: &[char],
+    lit_start: usize,
+    pos: &mut usize,
+) -> Result<Vec<u8>, (usize, String)> {
+    let mut str_content: Vec<u8> = Vec::new();
+    while *pos < chars.len() && chars[*pos] != '"' {
+        if chars[*pos] == '\n' || chars[*pos] == '\0' {
+            return Err(c_str_unclosed(lit_start));
+        }
+        if chars[*pos] == '\\' {
+            *pos += 1;
+            if *pos >= chars.len() {
+                return Err(c_str_unclosed(lit_start));
+            }
+            match read_escaped_char(chars, *pos) {
+                Ok((escaped, consumed)) => {
+                    push_char_utf8(&mut str_content, escaped);
+                    *pos += consumed;
+                }
+                Err(e) => {
+                    return Err((*pos, e));
+                }
+            }
+            continue;
+        }
+        push_char_utf8(&mut str_content, chars[*pos]);
+        *pos += 1;
+    }
+    if *pos >= chars.len() {
+        return Err(c_str_unclosed(lit_start));
+    }
+    *pos += 1;
+    Ok(str_content)
+}
+
 fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
     let remaining: String = chars[pos..].iter().collect();
     if remaining.starts_with("<<=") || remaining.starts_with(">>=") || remaining.starts_with("...")
@@ -708,60 +748,28 @@ pub fn tokenize(file: &File) -> Token {
             continue;
         }
 
-        if chars[pos] == '"' {
+        if chars[pos] == '"'
+            || (pos + 2 < chars.len()
+                && chars[pos] == 'u'
+                && chars[pos + 1] == '8'
+                && chars[pos + 2] == '"')
+        {
             let start = pos;
-            pos += 1;
-            let mut str_content: Vec<u8> = Vec::new();
-            while pos < chars.len() && chars[pos] != '"' {
-                if chars[pos] == '\n' || chars[pos] == '\0' {
-                    cur.next = Some(Box::new(make_error_token(
-                        file_no,
-                        start,
-                        "unclosed string literal",
-                    )));
+            pos += if chars[pos] == '"' { 1 } else { 3 };
+            match parse_c_string_body(&chars, start, &mut pos) {
+                Ok(str_content) => {
+                    let mut tok = new_token(TokenKind::Str, start, pos, at_bol, has_space, file_no);
+                    let len = str_content.len() + 1;
+                    tok.ty = Some(Type::new_array(Type::new_char(), len as i64));
+                    tok.str = Some(str_content);
+                    cur.next = Some(Box::new(tok));
+                    cur = cur.next.as_mut().unwrap();
+                }
+                Err((at, e)) => {
+                    cur.next = Some(Box::new(make_error_token(file_no, at, &e)));
                     return *head.next.unwrap();
                 }
-                if chars[pos] == '\\' {
-                    pos += 1;
-                    if pos >= chars.len() {
-                        cur.next = Some(Box::new(make_error_token(
-                            file_no,
-                            start,
-                            "unclosed string literal",
-                        )));
-                        return *head.next.unwrap();
-                    }
-                    match read_escaped_char(&chars, pos) {
-                        Ok((escaped, consumed)) => {
-                            push_char_utf8(&mut str_content, escaped);
-                            pos += consumed;
-                        }
-                        Err(e) => {
-                            cur.next = Some(Box::new(make_error_token(file_no, pos, &e)));
-                            return *head.next.unwrap();
-                        }
-                    }
-                    continue;
-                } else {
-                    push_char_utf8(&mut str_content, chars[pos]);
-                }
-                pos += 1;
             }
-            if pos >= chars.len() {
-                cur.next = Some(Box::new(make_error_token(
-                    file_no,
-                    start,
-                    "unclosed string literal",
-                )));
-                return *head.next.unwrap();
-            }
-            pos += 1;
-            let mut tok = new_token(TokenKind::Str, start, pos, at_bol, has_space, file_no);
-            let len = str_content.len() + 1;
-            tok.ty = Some(Type::new_array(Type::new_char(), len as i64));
-            tok.str = Some(str_content);
-            cur.next = Some(Box::new(tok));
-            cur = cur.next.as_mut().unwrap();
             at_bol = false;
             has_space = false;
             continue;
