@@ -263,7 +263,7 @@ cargo run
 - [x] Add UTF-16 character literal
 - [x] Add UTF-32 character literal
 - [x] Add UTF-8 string literal
-- [ ] Add UTF-16 string literal
+- [x] Add UTF-16 string literal
 - [ ] Add UTF-32 string literal
 - [ ] Add wide string literal
 - [ ] Add UTF-16 string literal initializer

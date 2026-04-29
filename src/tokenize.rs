@@ -171,6 +171,58 @@ fn read_escaped_char(chars: &[char], pos: usize) -> Result<(char, usize), String
     Ok((c, 1))
 }
 
+fn read_escaped_c_value(chars: &[char], pos: usize) -> Result<(i32, usize), String> {
+    if pos < chars.len() && chars[pos] >= '0' && chars[pos] <= '7' {
+        let mut c = (chars[pos] as i32) - (b'0' as i32);
+        let mut consumed = 1;
+        if pos + 1 < chars.len() && chars[pos + 1] >= '0' && chars[pos + 1] <= '7' {
+            c = (c << 3) + (chars[pos + 1] as i32) - (b'0' as i32);
+            consumed = 2;
+            if pos + 2 < chars.len() && chars[pos + 2] >= '0' && chars[pos + 2] <= '7' {
+                c = (c << 3) + (chars[pos + 2] as i32) - (b'0' as i32);
+                consumed = 3;
+            }
+        }
+        return Ok((c, consumed));
+    }
+
+    if pos >= chars.len() {
+        return Ok((0, 0));
+    }
+
+    if chars[pos] == 'x' {
+        let mut c: i32 = 0;
+        let mut consumed = 0;
+        let mut i = pos + 1;
+        while i < chars.len() {
+            if let Some(d) = chars[i].to_digit(16) {
+                c = (c << 4) + d as i32;
+                consumed += 1;
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        if consumed == 0 {
+            return Err("invalid hex escape sequence".to_string());
+        }
+        return Ok((c, consumed + 1));
+    }
+
+    let c = match chars[pos] {
+        'a' => 7,
+        'b' => 8,
+        't' => 9,
+        'n' => 10,
+        'v' => 11,
+        'f' => 12,
+        'r' => 13,
+        'e' => 27,
+        ch => u32::from(ch) as i32,
+    };
+    Ok((c, 1))
+}
+
 fn encode_utf8(c: u32, buf: &mut [u8; 4]) -> usize {
     if c <= 0x7F {
         buf[0] = c as u8;
@@ -288,9 +340,9 @@ fn parse_c_string_body(
             if *pos >= chars.len() {
                 return Err(c_str_unclosed(lit_start));
             }
-            match read_escaped_char(chars, *pos) {
-                Ok((escaped, consumed)) => {
-                    push_char_utf8(&mut str_content, escaped);
+            match read_escaped_c_value(chars, *pos) {
+                Ok((v, consumed)) => {
+                    str_content.push(v as u8);
                     *pos += consumed;
                 }
                 Err(e) => {
@@ -307,6 +359,49 @@ fn parse_c_string_body(
     }
     *pos += 1;
     Ok(str_content)
+}
+
+fn push_utf16(out: &mut Vec<u16>, c: u32) {
+    if let Some(ch) = char::from_u32(c) {
+        let mut buf = [0u16; 2];
+        out.extend_from_slice(ch.encode_utf16(&mut buf));
+    }
+}
+
+fn parse_utf16_string_body(
+    chars: &[char],
+    lit_start: usize,
+    pos: &mut usize,
+) -> Result<Vec<u16>, (usize, String)> {
+    let mut out: Vec<u16> = Vec::new();
+    while *pos < chars.len() && chars[*pos] != '"' {
+        if chars[*pos] == '\n' || chars[*pos] == '\0' {
+            return Err(c_str_unclosed(lit_start));
+        }
+        if chars[*pos] == '\\' {
+            *pos += 1;
+            if *pos >= chars.len() {
+                return Err(c_str_unclosed(lit_start));
+            }
+            match read_escaped_c_value(chars, *pos) {
+                Ok((v, consumed)) => {
+                    out.push(v as u16);
+                    *pos += consumed;
+                }
+                Err(e) => {
+                    return Err((*pos, e));
+                }
+            }
+            continue;
+        }
+        push_utf16(&mut out, u32::from(chars[*pos]));
+        *pos += 1;
+    }
+    if *pos >= chars.len() {
+        return Err(c_str_unclosed(lit_start));
+    }
+    *pos += 1;
+    Ok(out)
 }
 
 fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
@@ -748,14 +843,58 @@ pub fn tokenize(file: &File) -> Token {
             continue;
         }
 
-        if chars[pos] == '"'
-            || (pos + 2 < chars.len()
-                && chars[pos] == 'u'
-                && chars[pos + 1] == '8'
-                && chars[pos + 2] == '"')
+        if pos + 2 < chars.len()
+            && chars[pos] == 'u'
+            && chars[pos + 1] == '8'
+            && chars[pos + 2] == '"'
         {
             let start = pos;
-            pos += if chars[pos] == '"' { 1 } else { 3 };
+            pos += 3;
+            match parse_c_string_body(&chars, start, &mut pos) {
+                Ok(str_content) => {
+                    let mut tok = new_token(TokenKind::Str, start, pos, at_bol, has_space, file_no);
+                    let len = str_content.len() + 1;
+                    tok.ty = Some(Type::new_array(Type::new_char(), len as i64));
+                    tok.str = Some(str_content);
+                    cur.next = Some(Box::new(tok));
+                    cur = cur.next.as_mut().unwrap();
+                }
+                Err((at, e)) => {
+                    cur.next = Some(Box::new(make_error_token(file_no, at, &e)));
+                    return *head.next.unwrap();
+                }
+            }
+            at_bol = false;
+            has_space = false;
+            continue;
+        }
+
+        if pos + 1 < chars.len() && chars[pos] == 'u' && chars[pos + 1] == '"' {
+            let start = pos;
+            pos += 2;
+            match parse_utf16_string_body(&chars, start, &mut pos) {
+                Ok(units) => {
+                    let mut tok = new_token(TokenKind::Str, start, pos, at_bol, has_space, file_no);
+                    let n = units.len();
+                    let bytes: Vec<u8> = units.iter().copied().flat_map(u16::to_le_bytes).collect();
+                    tok.str = Some(bytes);
+                    tok.ty = Some(Type::new_array(Type::new_ushort(), (n + 1) as i64));
+                    cur.next = Some(Box::new(tok));
+                    cur = cur.next.as_mut().unwrap();
+                }
+                Err((at, e)) => {
+                    cur.next = Some(Box::new(make_error_token(file_no, at, &e)));
+                    return *head.next.unwrap();
+                }
+            }
+            at_bol = false;
+            has_space = false;
+            continue;
+        }
+
+        if chars[pos] == '"' {
+            let start = pos;
+            pos += 1;
             match parse_c_string_body(&chars, start, &mut pos) {
                 Ok(str_content) => {
                     let mut tok = new_token(TokenKind::Str, start, pos, at_bol, has_space, file_no);
