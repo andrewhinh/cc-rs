@@ -905,7 +905,12 @@ pub fn tokenize(file: &File) -> Token {
             continue;
         }
 
-        if pos + 1 < chars.len() && chars[pos] == 'U' && chars[pos + 1] == '"' {
+        if pos + 1 < chars.len() && matches!((chars[pos], chars[pos + 1]), ('L' | 'U', '"')) {
+            let elem_ty = if chars[pos] == 'L' {
+                Type::new_int()
+            } else {
+                Type::new_uint()
+            };
             let start = pos;
             pos += 2;
             match parse_utf32_string_body(&chars, start, &mut pos) {
@@ -913,7 +918,7 @@ pub fn tokenize(file: &File) -> Token {
                     let mut tok = new_token(TokenKind::Str, start, pos, at_bol, has_space, file_no);
                     let n = units.len();
                     tok.str = Some(units.iter().copied().flat_map(u32::to_le_bytes).collect());
-                    tok.ty = Some(Type::new_array(Type::new_uint(), (n + 1) as i64));
+                    tok.ty = Some(Type::new_array(elem_ty, (n + 1) as i64));
                     cur.next = Some(Box::new(tok));
                     cur = cur.next.as_mut().unwrap();
                 }
