@@ -391,20 +391,15 @@ pub fn new_anon_gvar(ty: Type) -> Obj {
     var
 }
 
-fn is_ushort_array_base(b: &Type) -> bool {
-    b.kind == TypeKind::Short && b.is_unsigned && b.size == 2
-}
-
 pub fn new_string_literal(str_content: &[u8], ty: Type) -> Obj {
-    let is_utf16 =
-        ty.kind == TypeKind::Array && is_ushort_array_base(&ty.base.as_ref().unwrap().borrow());
+    let suffix = if ty.kind == TypeKind::Array {
+        ty.base.as_ref().unwrap().borrow().size as usize
+    } else {
+        1
+    };
     let mut var = new_anon_gvar(ty);
     let mut init_data: Vec<u8> = str_content.to_vec();
-    if is_utf16 {
-        init_data.extend_from_slice(&[0, 0]);
-    } else {
-        init_data.push(0);
-    }
+    init_data.resize(init_data.len() + suffix, 0);
     var.init_data = Some(init_data);
     var
 }

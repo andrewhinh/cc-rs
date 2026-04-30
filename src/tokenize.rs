@@ -404,6 +404,42 @@ fn parse_utf16_string_body(
     Ok(out)
 }
 
+fn parse_utf32_string_body(
+    chars: &[char],
+    lit_start: usize,
+    pos: &mut usize,
+) -> Result<Vec<u32>, (usize, String)> {
+    let mut out: Vec<u32> = Vec::new();
+    while *pos < chars.len() && chars[*pos] != '"' {
+        if chars[*pos] == '\n' || chars[*pos] == '\0' {
+            return Err(c_str_unclosed(lit_start));
+        }
+        if chars[*pos] == '\\' {
+            *pos += 1;
+            if *pos >= chars.len() {
+                return Err(c_str_unclosed(lit_start));
+            }
+            match read_escaped_c_value(chars, *pos) {
+                Ok((v, consumed)) => {
+                    out.push(v as u32);
+                    *pos += consumed;
+                }
+                Err(e) => {
+                    return Err((*pos, e));
+                }
+            }
+            continue;
+        }
+        out.push(u32::from(chars[*pos]));
+        *pos += 1;
+    }
+    if *pos >= chars.len() {
+        return Err(c_str_unclosed(lit_start));
+    }
+    *pos += 1;
+    Ok(out)
+}
+
 fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
     let remaining: String = chars[pos..].iter().collect();
     if remaining.starts_with("<<=") || remaining.starts_with(">>=") || remaining.starts_with("...")
@@ -869,6 +905,28 @@ pub fn tokenize(file: &File) -> Token {
             continue;
         }
 
+        if pos + 1 < chars.len() && chars[pos] == 'U' && chars[pos + 1] == '"' {
+            let start = pos;
+            pos += 2;
+            match parse_utf32_string_body(&chars, start, &mut pos) {
+                Ok(units) => {
+                    let mut tok = new_token(TokenKind::Str, start, pos, at_bol, has_space, file_no);
+                    let n = units.len();
+                    tok.str = Some(units.iter().copied().flat_map(u32::to_le_bytes).collect());
+                    tok.ty = Some(Type::new_array(Type::new_uint(), (n + 1) as i64));
+                    cur.next = Some(Box::new(tok));
+                    cur = cur.next.as_mut().unwrap();
+                }
+                Err((at, e)) => {
+                    cur.next = Some(Box::new(make_error_token(file_no, at, &e)));
+                    return *head.next.unwrap();
+                }
+            }
+            at_bol = false;
+            has_space = false;
+            continue;
+        }
+
         if pos + 1 < chars.len() && chars[pos] == 'u' && chars[pos + 1] == '"' {
             let start = pos;
             pos += 2;
@@ -876,8 +934,7 @@ pub fn tokenize(file: &File) -> Token {
                 Ok(units) => {
                     let mut tok = new_token(TokenKind::Str, start, pos, at_bol, has_space, file_no);
                     let n = units.len();
-                    let bytes: Vec<u8> = units.iter().copied().flat_map(u16::to_le_bytes).collect();
-                    tok.str = Some(bytes);
+                    tok.str = Some(units.iter().copied().flat_map(u16::to_le_bytes).collect());
                     tok.ty = Some(Type::new_array(Type::new_ushort(), (n + 1) as i64));
                     cur.next = Some(Box::new(tok));
                     cur = cur.next.as_mut().unwrap();
