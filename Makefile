@@ -11,6 +11,9 @@ TEST_TIMEOUT ?= 120
 CC_RS := ./target/release/cc-rs
 STAGE2_CC_RS := ./target/release/cc-rs
 TESTS := $(TEST_SRCS:.c=.exe)
+CC_RS_S := $(CC_RS) -S
+STAGE2_CC_RS_S := $(STAGE2_CC_RS) -S
+CPP_INCLUDES := -Isrc/cpp/include -Isrc/cpp/test
 
 help:
 	@echo "conn        sync and connect to instance [instance-id] [CMD=...] [SYNC=0]"
@@ -72,7 +75,7 @@ stage2/cpp: $(SRCS:src/cpp/%.c=stage2/%.s)
 
 stage2/%.s: src/cpp/%.c target/release/cc-rs
 	@mkdir -p stage2
-	./target/debug/cc-rs -o $@ $<
+	$(STAGE2_CC_RS_S) $(CPP_INCLUDES) -o $@ $<
 
 target/debug/cc-rs: $(RUST_SRCS)
 	cargo build
@@ -81,24 +84,27 @@ target/release/cc-rs: $(RUST_SRCS)
 	cargo build --release
 
 test-stage2: stage2/cpp
+	@mkdir -p stage2/test
 	@for i in $(TEST_SRCS); do \
+		name=$$(basename $${i%.c}); \
 		echo $$i; \
-		./stage2/cpp -Isrc/cpp/include -Isrc/cpp/test -o stage2/test/$$(basename $${i%.c}).s $$i; \
-		gcc -no-pie -o stage2/test/$$(basename $${i%.c}).exe stage2/test/$$(basename $${i%.c}).s -xc src/cpp/test/common; \
-		./stage2/test/$$(basename $${i%.c}).exe || exit 1; \
+		timeout $(TEST_TIMEOUT)s ./stage2/cpp -S $(CPP_INCLUDES) -o stage2/test/$$name.s $$i || exit 1; \
+		timeout $(TEST_TIMEOUT)s gcc -no-pie -o stage2/test/$$name.exe stage2/test/$$name.s -xc src/cpp/test/common || exit 1; \
+		timeout $(TEST_TIMEOUT)s ./stage2/test/$$name.exe || exit 1; \
 		echo; \
 	done
-	bash src/cpp/test/driver.sh ./stage2/cpp
+	timeout $(TEST_TIMEOUT)s bash src/cpp/test/driver.sh ./stage2/cpp
 
 test-all: test test-stage2
 
 test: target/release/cc-rs
 	@echo "Running basic tests..."
 	@for i in $(TEST_SRCS); do \
+		name=$$(basename $${i%.c}); \
 		echo $$i; \
-		./target/debug/cc-rs -Isrc/cpp/include -Isrc/cpp/test -o /tmp/$$(basename $${i%.c}).s $$i; \
-		gcc -no-pie -o /tmp/$$(basename $${i%.c}) /tmp/$$(basename $${i%.c}).s -xc src/cpp/test/common; \
-		/tmp/$$(basename $${i%.c}) || exit 1; \
+		timeout $(TEST_TIMEOUT)s $(CC_RS) -S $(CPP_INCLUDES) -o /tmp/$$name.s $$i; \
+		timeout $(TEST_TIMEOUT)s gcc -no-pie -o /tmp/$$name /tmp/$$name.s -xc src/cpp/test/common; \
+		timeout $(TEST_TIMEOUT)s /tmp/$$name || exit 1; \
 		echo; \
 	done
 
