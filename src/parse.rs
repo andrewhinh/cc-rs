@@ -489,20 +489,40 @@ fn count_array_init_elements(
 }
 
 fn string_initializer(tok: &Token, init: &mut Initializer) -> Token {
+    let tok_ty = tok.ty.as_ref().unwrap();
+
     if init.is_flexible {
         let base_ty = init.ty.base.as_ref().unwrap().borrow().clone();
-        let str_len = tok.ty.as_ref().unwrap().array_len;
+        let str_len = tok_ty.array_len;
         let new_ty = Type::new_array(base_ty, str_len);
         *init = new_initializer(&new_ty, false);
     }
 
     let str_content = tok.str.as_ref().unwrap();
-    let str_len = tok.ty.as_ref().unwrap().array_len as usize;
+    let str_elems = tok_ty.array_len as usize;
     let array_len = init.ty.array_len as usize;
-    let len = array_len.min(str_len);
-    for (i, &c) in str_content.iter().take(len).enumerate() {
-        init.children[i].expr = Some(new_num(c as i64, tok.loc, tok.file_no, tok.line_no));
+    let elem_count = array_len.min(str_elems);
+    let elem_size = init.ty.base.as_ref().unwrap().borrow().size;
+
+    for i in 0..elem_count {
+        let v = match elem_size {
+            1 => str_content.get(i).copied().unwrap_or(0) as i64,
+            2 => str_content
+                .get(2 * i..2 * i + 2)
+                .map(|s| u16::from_le_bytes(s.try_into().unwrap()) as i64)
+                .unwrap_or(0),
+            4 => str_content
+                .get(4 * i..4 * i + 4)
+                .map(|s| {
+                    let w = u32::from_le_bytes(s.try_into().unwrap());
+                    (w as i32) as i64
+                })
+                .unwrap_or(0),
+            _ => unreachable!(),
+        };
+        init.children[i].expr = Some(new_num(v, tok.loc, tok.file_no, tok.line_no));
     }
+
     tok.next.as_ref().unwrap().as_ref().clone()
 }
 

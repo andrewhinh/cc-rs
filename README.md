@@ -266,7 +266,7 @@ cargo run
 - [x] Add UTF-16 string literal
 - [x] Add UTF-32 string literal
 - [x] Add wide string literal
-- [ ] Add UTF-16 string literal initializer
+- [x] Add UTF-16 string literal initializer
 - [ ] Add UTF-32 string literal initializer
 - [ ] Define __STDC_UTF_{16,32}__ macros
 - [ ] Allow multibyte UTF-8 character in identifier
