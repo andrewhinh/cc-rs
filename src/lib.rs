@@ -2,6 +2,7 @@ pub mod codegen;
 pub mod parse;
 pub mod preprocess;
 pub mod tokenize;
+mod unicode_ident;
 
 use std::cell::RefCell;
 use std::collections::HashSet;

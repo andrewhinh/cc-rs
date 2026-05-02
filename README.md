@@ -269,7 +269,7 @@ cargo run
 - [x] Add UTF-16 string literal initializer
 - [x] Add UTF-32 string literal initializer
 - [x] Define __STDC_UTF_{16,32}__ macros
-- [ ] Allow multibyte UTF-8 character in identifier
+- [x] Allow multibyte UTF-8 character in identifier
 - [ ] [GNU] Accept $ as an identifier character
 - [ ] Allow to concatenate regular string literals with L/u/U string literals
 - [ ] Skip UTF-8 BOM markers

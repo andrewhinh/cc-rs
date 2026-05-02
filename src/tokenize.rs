@@ -2,7 +2,10 @@ use std::collections::HashSet;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::{File, Token, TokenKind, Type};
+use crate::{
+    File, Token, TokenKind, Type,
+    unicode_ident::{is_ident1, is_ident2},
+};
 
 static FILE_NO: AtomicUsize = AtomicUsize::new(0);
 
@@ -1135,9 +1138,10 @@ pub fn tokenize(file: &File) -> Token {
             continue;
         }
 
-        if chars[pos].is_ascii_alphabetic() || chars[pos] == '_' {
+        if is_ident1(u32::from(chars[pos])) {
             let start = pos;
-            while pos < chars.len() && (chars[pos].is_ascii_alphanumeric() || chars[pos] == '_') {
+            pos += 1;
+            while pos < chars.len() && is_ident2(u32::from(chars[pos])) {
                 pos += 1;
             }
             let tok = new_token(TokenKind::Ident, start, pos, at_bol, has_space, file_no);
