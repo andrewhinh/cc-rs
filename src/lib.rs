@@ -17,7 +17,7 @@ pub use parse::{
 pub use preprocess::{define_macro, init_macros, preprocess, reset_counter, undef_macro};
 pub use tokenize::{
     add_input_file, consume, convert_pp_number, equal, error_at, error_tok, get_file_no,
-    get_input_files, new_file, skip, tokenize, tokenize_file, warn_tok,
+    get_input_files, new_file, skip, tokenize, tokenize_file, tokenize_string_literal, warn_tok,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

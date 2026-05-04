@@ -8,7 +8,7 @@ use chrono::Local;
 use crate::{
     File, Token, TokenKind, add_input_file, const_expr, consume, convert_pp_number, equal,
     error_tok, get_file_no, get_include_paths, get_input_files, new_file, skip, tokenize,
-    tokenize_file, warn_tok,
+    tokenize_file, tokenize_string_literal, warn_tok,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1178,7 +1178,131 @@ fn convert_pp_tokens(files: &[File], tok: &mut Token) {
     }
 }
 
-fn join_adjacent_string_literals(tok: &mut Token) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConcatLitKind {
+    Plain,
+    Utf8,
+    Utf16,
+    Utf32,
+    Wide,
+}
+
+fn concat_literal_kind(chars: &[char], loc: usize) -> ConcatLitKind {
+    if loc + 2 < chars.len() && chars[loc] == 'u' && chars[loc + 1] == '8' && chars[loc + 2] == '"'
+    {
+        ConcatLitKind::Utf8
+    } else if chars.get(loc).is_some_and(|c| *c == '"') {
+        ConcatLitKind::Plain
+    } else if loc + 1 < chars.len() && chars[loc] == 'u' && chars[loc + 1] == '"' {
+        ConcatLitKind::Utf16
+    } else if loc + 1 < chars.len() && chars[loc] == 'U' && chars[loc + 1] == '"' {
+        ConcatLitKind::Utf32
+    } else if loc + 1 < chars.len() && chars[loc] == 'L' && chars[loc + 1] == '"' {
+        ConcatLitKind::Wide
+    } else {
+        ConcatLitKind::Plain
+    }
+}
+
+fn array_base(ty: &crate::Type) -> crate::Type {
+    ty.base.as_ref().unwrap().borrow().clone()
+}
+
+fn file_chars_cached(files: &[File], file_no: usize, cf: &mut usize, cv: &mut Vec<char>) {
+    if *cf != file_no {
+        let f = files.iter().find(|f| f.file_no == file_no).unwrap();
+        cv.clear();
+        cv.extend(f.contents.chars());
+        *cf = file_no;
+    }
+}
+
+fn widen_adjacent_string_literals(files: &[File], head: &mut Token) -> Result<(), String> {
+    use std::ptr;
+
+    let mut curr: *mut Token = ptr::from_mut(head);
+    unsafe {
+        loop {
+            if (*curr).kind == TokenKind::Eof {
+                break;
+            }
+
+            let next_is_str = (*curr)
+                .next
+                .as_ref()
+                .is_some_and(|n| n.kind == TokenKind::Str);
+            let has_adjacent = (*curr).kind == TokenKind::Str && next_is_str;
+
+            if !has_adjacent {
+                match (*curr).next.as_deref_mut() {
+                    Some(n) => curr = ptr::from_mut(n),
+                    None => break,
+                }
+                continue;
+            }
+
+            let (basety, needs_widen) = classify_concat_run(&*curr, files)?;
+
+            let mut w = curr;
+            loop {
+                if (*w).kind != TokenKind::Str {
+                    curr = w;
+                    break;
+                }
+                if needs_widen && array_base((*w).ty.as_ref().unwrap()).size == 1 {
+                    tokenize_string_literal(files, &mut *w, &basety)?;
+                }
+                match (*w).next.as_deref_mut() {
+                    Some(n) => w = ptr::from_mut(n),
+                    None => {
+                        curr = w;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn classify_concat_run(first_str: &Token, files: &[File]) -> Result<(crate::Type, bool), String> {
+    let mut cf = usize::MAX;
+    let mut cv: Vec<char> = Vec::new();
+
+    file_chars_cached(files, first_str.file_no, &mut cf, &mut cv);
+    let mut kind = concat_literal_kind(cv.as_slice(), first_str.loc);
+    let mut basety = array_base(first_str.ty.as_ref().unwrap());
+
+    let mut narrow_piece = array_base(first_str.ty.as_ref().unwrap()).size == 1;
+
+    let mut scan = first_str.next.as_deref();
+    while let Some(t_ref) = scan {
+        if t_ref.kind != TokenKind::Str {
+            break;
+        }
+        file_chars_cached(files, t_ref.file_no, &mut cf, &mut cv);
+        let k = concat_literal_kind(cv.as_slice(), t_ref.loc);
+        if kind == ConcatLitKind::Plain {
+            kind = k;
+            basety = array_base(t_ref.ty.as_ref().unwrap());
+        } else if k != ConcatLitKind::Plain && k != kind {
+            return Err(error_tok(
+                files,
+                t_ref,
+                "unsupported non-standard concatenation of string literals",
+            ));
+        }
+        narrow_piece |= array_base(t_ref.ty.as_ref().unwrap()).size == 1;
+
+        scan = t_ref.next.as_deref();
+    }
+
+    let needs_widen = basety.size > 1 && narrow_piece;
+
+    Ok((basety, needs_widen))
+}
+
+fn merge_adjacent_string_literals(tok: &mut Token) {
     let mut tok1 = tok;
     loop {
         if tok1.kind == TokenKind::Eof {
@@ -1206,15 +1330,7 @@ fn join_adjacent_string_literals(tok: &mut Token) {
             tok2_file_no = tok2.file_no;
         }
 
-        let base_ty = tok1
-            .ty
-            .as_ref()
-            .unwrap()
-            .base
-            .as_ref()
-            .unwrap()
-            .borrow()
-            .clone();
+        let base_ty = array_base(tok1.ty.as_ref().unwrap());
 
         let mut len = tok1.ty.as_ref().unwrap().array_len;
         let mut t = tok1.next.as_ref().unwrap();
@@ -1239,6 +1355,12 @@ fn join_adjacent_string_literals(tok: &mut Token) {
         tok1.ty = Some(crate::Type::new_array(base_ty, len));
         tok1.next = Some(Box::new(t));
     }
+}
+
+fn join_adjacent_string_literals(files: &[File], tok: &mut Token) -> Result<(), String> {
+    widen_adjacent_string_literals(files, tok)?;
+    merge_adjacent_string_literals(tok);
+    Ok(())
 }
 
 fn append(tok1: Token, tok2: Token) -> Token {
@@ -1583,6 +1705,6 @@ pub fn preprocess(tok: Token) -> Result<Token, String> {
     let mut tok = tok;
     let files = get_input_files();
     convert_pp_tokens(&files, &mut tok);
-    join_adjacent_string_literals(&mut tok);
+    join_adjacent_string_literals(&files, &mut tok)?;
     Ok(tok)
 }

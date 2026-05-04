@@ -271,7 +271,7 @@ cargo run
 - [x] Define __STDC_UTF_{16,32}__ macros
 - [x] Allow multibyte UTF-8 character in identifier
 - [x] [GNU] Accept $ as an identifier character
-- [ ] Allow to concatenate regular string literals with L/u/U string literals
+- [x] Allow to concatenate regular string literals with L/u/U string literals
 - [ ] Skip UTF-8 BOM markers
 - [ ] Improve error message for multibyte characters
 

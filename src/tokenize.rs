@@ -443,6 +443,62 @@ fn parse_utf32_string_body(
     Ok(out)
 }
 
+fn string_literal_inner_start(chars: &[char], lit_start: usize) -> Result<usize, String> {
+    match chars.get(lit_start).copied() {
+        Some('"') => Ok(lit_start + 1),
+        Some('u')
+            if lit_start + 2 < chars.len()
+                && chars[lit_start + 1] == '8'
+                && chars[lit_start + 2] == '"' =>
+        {
+            Ok(lit_start + 3)
+        }
+        Some('u') if lit_start + 1 < chars.len() && chars[lit_start + 1] == '"' => {
+            Ok(lit_start + 2)
+        }
+        Some('L') | Some('U') if lit_start + 1 < chars.len() && chars[lit_start + 1] == '"' => {
+            Ok(lit_start + 2)
+        }
+        _ => Err("invalid string literal prefix".into()),
+    }
+}
+
+pub fn tokenize_string_literal(
+    files: &[File],
+    tok: &mut Token,
+    basety: &Type,
+) -> Result<(), String> {
+    debug_assert!(basety.size == 2 || basety.size == 4);
+    let chars: Vec<char> = files
+        .iter()
+        .find(|f| f.file_no == tok.file_no)
+        .unwrap()
+        .contents
+        .chars()
+        .collect();
+    let lit_start = tok.loc;
+    let inner = string_literal_inner_start(&chars, lit_start)
+        .map_err(|msg| error_at(files, tok.file_no, tok.loc, &msg))?;
+    let mut pos = inner;
+    if basety.size == 2 {
+        let units = parse_utf16_string_body(&chars, lit_start, &mut pos)
+            .map_err(|(loc, msg)| error_at(files, tok.file_no, loc, &msg))?;
+        let n = units.len();
+        tok.str = Some(units.into_iter().flat_map(u16::to_le_bytes).collect());
+        tok.ty = Some(Type::new_array(Type::new_ushort(), (n + 1) as i64));
+        tok.len = pos - lit_start;
+        return Ok(());
+    }
+
+    let units = parse_utf32_string_body(&chars, lit_start, &mut pos)
+        .map_err(|(loc, msg)| error_at(files, tok.file_no, loc, &msg))?;
+    let n = units.len();
+    tok.str = Some(units.into_iter().flat_map(u32::to_le_bytes).collect());
+    tok.ty = Some(Type::new_array(basety.clone(), (n + 1) as i64));
+    tok.len = pos - lit_start;
+    Ok(())
+}
+
 fn read_punct(chars: &[char], pos: usize) -> Option<usize> {
     let remaining: String = chars[pos..].iter().collect();
     if remaining.starts_with("<<=") || remaining.starts_with(">>=") || remaining.starts_with("...")
