@@ -7,6 +7,7 @@ const IDENT1_RANGES: &[(u32, u32)] = &[
     (b'_' as u32, b'_' as u32),
     (b'a' as u32, b'z' as u32),
     (b'A' as u32, b'Z' as u32),
+    (b'$' as u32, b'$' as u32),
     (0x00A8, 0x00A8),
     (0x00AA, 0x00AA),
     (0x00AD, 0x00AD),
