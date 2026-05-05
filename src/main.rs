@@ -282,9 +282,12 @@ fn print_tokens(tok: &Token, opt_o: Option<&String>) -> Result<(), String> {
     let mut out = open_output_file(opt_o);
     let files = get_input_files();
     let mut tok = tok;
+    let mut first = true;
 
     while tok.kind != TokenKind::Eof {
-        if tok.at_bol {
+        let emit_bol_nl = tok.at_bol && !first;
+        first = false;
+        if emit_bol_nl {
             writeln!(out).map_err(|e| format!("write error: {e}"))?;
         }
         if tok.has_space && !tok.at_bol {

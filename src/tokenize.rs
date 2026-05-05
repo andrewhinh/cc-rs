@@ -868,6 +868,10 @@ fn read_file(path: &str) -> Option<String> {
         std::fs::read_to_string(path).ok()?
     };
     let mut contents = contents;
+    const BOM: char = '\u{FEFF}';
+    if contents.starts_with(BOM) {
+        contents.drain(0..BOM.len_utf8());
+    }
     if !contents.is_empty() && !contents.ends_with('\n') {
         contents.push('\n');
     }
