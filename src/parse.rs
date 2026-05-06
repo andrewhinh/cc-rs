@@ -451,6 +451,31 @@ fn skip_excess_element(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn array_designator(
+    files: &[File],
+    tok: &Token,
+    ty: &Type,
+    tag_scope_stack: &mut [Vec<TagScope>],
+    scope_stack: &mut [Vec<VarScope>],
+) -> Result<(usize, Token), String> {
+    let start = tok.clone();
+    let expr_tok = tok
+        .next
+        .as_ref()
+        .ok_or_else(|| error_tok(files, tok, "premature end of input"))?;
+    let (idx, tok) = const_expr(files, expr_tok.as_ref(), tag_scope_stack, scope_stack)?;
+    if idx < 0 || idx >= ty.array_len {
+        return Err(error_tok(
+            files,
+            &start,
+            "array designator index exceeds array bounds",
+        ));
+    }
+    let tok = skip(files, &tok, "]")?;
+    Ok((idx as usize, tok))
+}
+
+#[allow(clippy::too_many_arguments)]
 fn count_array_init_elements(
     files: &[File],
     tok: &Token,
@@ -527,6 +552,34 @@ fn string_initializer(tok: &Token, init: &mut Initializer) -> Token {
 }
 
 #[allow(clippy::too_many_arguments)]
+fn materialize_flexible_array_initializer(
+    files: &[File],
+    tok: &Token,
+    init: &mut Initializer,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<(), String> {
+    if !init.is_flexible {
+        return Ok(());
+    }
+    let len = count_array_init_elements(
+        files,
+        tok,
+        &init.ty,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
+    let base_ty = init.ty.base.as_ref().unwrap().borrow().clone();
+    let new_ty = Type::new_array(base_ty, len);
+    *init = new_initializer(&new_ty, false);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 fn array_initializer1(
     files: &[File],
     tok: &Token,
@@ -538,29 +591,41 @@ fn array_initializer1(
 ) -> Result<Token, String> {
     let mut tok = skip(files, tok, "{")?;
 
-    if init.is_flexible {
-        let len = count_array_init_elements(
-            files,
-            &tok,
-            &init.ty,
-            locals,
-            globals,
-            scope_stack,
-            tag_scope_stack,
-        )?;
-        let base_ty = init.ty.base.as_ref().unwrap().borrow().clone();
-        let new_ty = Type::new_array(base_ty, len);
-        *init = new_initializer(&new_ty, false);
-    }
+    materialize_flexible_array_initializer(
+        files,
+        &tok,
+        init,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
 
     let mut i = 0;
+    let mut first = true;
     loop {
         let (is_end, new_tok) = consume_end(files, &tok);
         if is_end {
             return Ok(new_tok);
         }
-        if i > 0 {
+        if !first {
             tok = skip(files, &tok, ",")?;
+        }
+        first = false;
+
+        if equal(files, &tok, "[") {
+            let (idx, t) = array_designator(files, &tok, &init.ty, tag_scope_stack, scope_stack)?;
+            tok = designation(
+                files,
+                &t,
+                &mut init.children[idx],
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+            i = idx + 1;
+            continue;
         }
 
         if i < init.ty.array_len as usize {
@@ -589,30 +654,30 @@ fn array_initializer2(
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
+    start_idx: usize,
 ) -> Result<Token, String> {
-    if init.is_flexible {
-        let len = count_array_init_elements(
-            files,
-            tok,
-            &init.ty,
-            locals,
-            globals,
-            scope_stack,
-            tag_scope_stack,
-        )?;
-        let base_ty = init.ty.base.as_ref().unwrap().borrow().clone();
-        let new_ty = Type::new_array(base_ty, len);
-        *init = new_initializer(&new_ty, false);
-    }
+    materialize_flexible_array_initializer(
+        files,
+        tok,
+        init,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
 
     let mut tok = tok.clone();
-    for i in 0..init.ty.array_len as usize {
-        if is_end(files, &tok) {
-            break;
-        }
+    let mut i = start_idx;
+    while i < init.ty.array_len as usize && !is_end(files, &tok) {
+        let start = tok.clone();
         if i > 0 {
             tok = skip(files, &tok, ",")?;
         }
+
+        if equal(files, &tok, "[") {
+            return Ok(start);
+        }
+
         tok = initializer2(
             files,
             &tok,
@@ -622,8 +687,63 @@ fn array_initializer2(
             scope_stack,
             tag_scope_stack,
         )?;
+        i += 1;
     }
     Ok(tok)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn designation(
+    files: &[File],
+    tok: &Token,
+    init: &mut Initializer,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<Token, String> {
+    if equal(files, tok, "[") {
+        if init.ty.kind != TypeKind::Array {
+            return Err(error_tok(
+                files,
+                tok,
+                "array index in non-array initializer",
+            ));
+        }
+
+        let (i, tok) = array_designator(files, tok, &init.ty, tag_scope_stack, scope_stack)?;
+        let tok = designation(
+            files,
+            &tok,
+            &mut init.children[i],
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+
+        return array_initializer2(
+            files,
+            &tok,
+            init,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+            i + 1,
+        );
+    }
+
+    let tok = skip(files, tok, "=")?;
+    initializer2(
+        files,
+        &tok,
+        init,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -774,6 +894,7 @@ fn initializer2(
             globals,
             scope_stack,
             tag_scope_stack,
+            0,
         );
     }
 
