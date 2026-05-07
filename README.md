@@ -234,7 +234,7 @@ cargo run
 - [x] Make an array of at least 16 bytes long to have alignment of at least 16 bytes
 - [x] Add anonymous struct and union
 - [x] Add array designated initializer
-- [ ] Allow array designators to initialize incomplete arrays
+- [x] Allow array designators to initialize incomplete arrays
 - [ ] [GNU] Allow to omit "=" in designated initializers
 - [ ] Add struct designated initializer
 - [ ] Add union designated initializer

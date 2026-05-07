@@ -450,6 +450,19 @@ fn skip_excess_element(
     Ok(tok)
 }
 
+fn bracket_const_expr(
+    files: &[File],
+    lbracket: &Token,
+    tag_scope_stack: &mut [Vec<TagScope>],
+    scope_stack: &mut [Vec<VarScope>],
+) -> Result<(i64, Token), String> {
+    let expr_tok = lbracket
+        .next
+        .as_ref()
+        .ok_or_else(|| error_tok(files, lbracket, "premature end of input"))?;
+    const_expr(files, expr_tok.as_ref(), tag_scope_stack, scope_stack)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn array_designator(
     files: &[File],
@@ -459,12 +472,8 @@ fn array_designator(
     scope_stack: &mut [Vec<VarScope>],
 ) -> Result<(usize, Token), String> {
     let start = tok.clone();
-    let expr_tok = tok
-        .next
-        .as_ref()
-        .ok_or_else(|| error_tok(files, tok, "premature end of input"))?;
-    let (idx, tok) = const_expr(files, expr_tok.as_ref(), tag_scope_stack, scope_stack)?;
-    if idx < 0 || idx >= ty.array_len {
+    let (idx, tok) = bracket_const_expr(files, tok, tag_scope_stack, scope_stack)?;
+    if ty.array_len >= 0 && (idx < 0 || idx >= ty.array_len) {
         return Err(error_tok(
             files,
             &start,
@@ -486,31 +495,66 @@ fn count_array_init_elements(
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<i64, String> {
     let base_ty = ty.base.as_ref().unwrap().borrow().clone();
-    let dummy = new_initializer(&base_ty, false);
+    let mut dummy = new_initializer(&base_ty, true);
     let mut tok = tok.clone();
-    let mut i = 0;
+    let mut i = 0_i64;
+    let mut max = 0_i64;
+    let mut first = true;
 
     loop {
         let (is_end, _) = consume_end(files, &tok);
         if is_end {
             break;
         }
-        if i > 0 {
+        if !first {
             tok = skip(files, &tok, ",")?;
         }
-        let mut dummy = dummy.clone();
-        tok = initializer2(
-            files,
-            &tok,
-            &mut dummy,
-            locals,
-            globals,
-            scope_stack,
-            tag_scope_stack,
-        )?;
+        first = false;
+
+        if equal(files, &tok, "[") {
+            let (idx_val, mut t) = bracket_const_expr(
+                files,
+                &tok,
+                tag_scope_stack.as_mut_slice(),
+                scope_stack.as_mut_slice(),
+            )?;
+            i = idx_val;
+            if equal(files, &t, "...") {
+                let expr_tok2 = t
+                    .next
+                    .as_ref()
+                    .ok_or_else(|| error_tok(files, &t, "premature end of input"))?;
+                let (idx_hi, t2) =
+                    const_expr(files, expr_tok2.as_ref(), tag_scope_stack, scope_stack)?;
+                i = idx_hi;
+                t = t2;
+            }
+            t = skip(files, &t, "]")?;
+            tok = designation(
+                files,
+                &t,
+                &mut dummy,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+        } else {
+            tok = initializer2(
+                files,
+                &tok,
+                &mut dummy,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+        }
+
         i += 1;
+        max = max.max(i);
     }
-    Ok(i)
+    Ok(max)
 }
 
 fn string_initializer(tok: &Token, init: &mut Initializer) -> Token {
