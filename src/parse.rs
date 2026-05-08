@@ -778,7 +778,7 @@ fn designation(
         );
     }
 
-    let tok = skip(files, tok, "=")?;
+    let (_, tok) = consume(files, tok, "=");
     initializer2(
         files,
         &tok,

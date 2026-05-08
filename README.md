@@ -235,7 +235,7 @@ cargo run
 - [x] Add anonymous struct and union
 - [x] Add array designated initializer
 - [x] Allow array designators to initialize incomplete arrays
-- [ ] [GNU] Allow to omit "=" in designated initializers
+- [x] [GNU] Allow to omit "=" in designated initializers
 - [ ] Add struct designated initializer
 - [ ] Add union designated initializer
 - [ ] Handle struct designator for anonymous struct member
