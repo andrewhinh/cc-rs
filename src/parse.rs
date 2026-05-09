@@ -484,6 +484,61 @@ fn array_designator(
     Ok((idx as usize, tok))
 }
 
+fn struct_designator(files: &[File], dot_tok: &Token, ty: &Type) -> Result<(i64, Token), String> {
+    let tok = skip(files, dot_tok, ".")?;
+    if tok.kind != TokenKind::Ident {
+        return Err(error_tok(files, &tok, "expected a field designator"));
+    }
+    let ident_file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
+    let ident_bytes = ident_file.contents.as_bytes();
+    let ident_slice = &ident_bytes[tok.loc..tok.loc + tok.len];
+
+    let mut cur = ty.members.as_deref();
+    while let Some(mem) = cur {
+        if let Some(name) = mem.name.as_deref() {
+            let name_slice = if name.file_no == tok.file_no {
+                &ident_bytes[name.loc..name.loc + name.len]
+            } else {
+                let name_file = files.iter().find(|f| f.file_no == name.file_no).unwrap();
+                &name_file.contents.as_bytes()[name.loc..name.loc + name.len]
+            };
+            if name.len == tok.len && name_slice == ident_slice {
+                let after = tok.next.as_ref().unwrap().as_ref().clone();
+                return Ok((mem.idx, after));
+            }
+        }
+        cur = mem.next.as_deref();
+    }
+    Err(error_tok(files, &tok, "struct has no such member"))
+}
+
+fn member_by_field_idx(mut cur: Option<&crate::Member>, want: i64) -> Option<&crate::Member> {
+    while let Some(m) = cur {
+        if m.idx == want {
+            return Some(m);
+        }
+        cur = m.next.as_deref();
+    }
+    None
+}
+
+fn field_idx_successor(ty: &Type, field_idx: i64) -> Option<i64> {
+    let mut cur = ty.members.as_deref()?;
+    loop {
+        if cur.idx == field_idx {
+            return cur.next.as_ref().map(|b| b.idx);
+        }
+        cur = cur.next.as_deref()?;
+    }
+}
+
+#[derive(Clone, Copy)]
+enum StructInitPosTail {
+    FromBeginning,
+    FromFieldIdx(i64),
+    NoneLeftAfterDesignator,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn count_array_init_elements(
     files: &[File],
@@ -533,6 +588,16 @@ fn count_array_init_elements(
             tok = designation(
                 files,
                 &t,
+                &mut dummy,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+        } else if equal(files, &tok, ".") && dummy.ty.kind == TypeKind::Struct {
+            tok = designation(
+                files,
+                &tok,
                 &mut dummy,
                 locals,
                 globals,
@@ -718,7 +783,7 @@ fn array_initializer2(
             tok = skip(files, &tok, ",")?;
         }
 
-        if equal(files, &tok, "[") {
+        if equal(files, &tok, "[") || equal(files, &tok, ".") {
             return Ok(start);
         }
 
@@ -778,6 +843,41 @@ fn designation(
         );
     }
 
+    if equal(files, tok, ".") {
+        if init.ty.kind != TypeKind::Struct {
+            return Err(error_tok(
+                files,
+                tok,
+                "field name not in struct or union initializer",
+            ));
+        }
+        let (idx, tok_after) = struct_designator(files, tok, &init.ty)?;
+        let tok = designation(
+            files,
+            &tok_after,
+            &mut init.children[idx as usize],
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        init.expr = None;
+        let tail = match field_idx_successor(&init.ty, idx) {
+            Some(next_idx) => StructInitPosTail::FromFieldIdx(next_idx),
+            None => StructInitPosTail::NoneLeftAfterDesignator,
+        };
+        return struct_initializer2(
+            files,
+            &tok,
+            init,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+            tail,
+        );
+    }
+
     let (_, tok) = consume(files, tok, "=");
     initializer2(
         files,
@@ -802,7 +902,7 @@ fn struct_initializer1(
 ) -> Result<Token, String> {
     let mut tok = skip(files, tok, "{")?;
 
-    let mut mem = init.ty.members.as_ref();
+    let mut mem = init.ty.members.as_deref();
     let mut first = true;
 
     loop {
@@ -816,6 +916,22 @@ fn struct_initializer1(
         }
         first = false;
 
+        if equal(files, &tok, ".") {
+            let (idx, tok_after) = struct_designator(files, &tok, &init.ty)?;
+            tok = designation(
+                files,
+                &tok_after,
+                &mut init.children[idx as usize],
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+            let next_field = field_idx_successor(&init.ty, idx);
+            mem = next_field.and_then(|fid| member_by_field_idx(init.ty.members.as_deref(), fid));
+            continue;
+        }
+
         if let Some(m) = mem {
             tok = initializer2(
                 files,
@@ -826,7 +942,7 @@ fn struct_initializer1(
                 scope_stack,
                 tag_scope_stack,
             )?;
-            mem = m.next.as_ref();
+            mem = m.next.as_deref();
         } else {
             tok = skip_excess_element(files, &tok, locals, globals, scope_stack, tag_scope_stack)?;
         }
@@ -842,19 +958,32 @@ fn struct_initializer2(
     globals: &mut Vec<Obj>,
     scope_stack: &mut Vec<Vec<VarScope>>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
+    pos_tail: StructInitPosTail,
 ) -> Result<Token, String> {
     let mut tok = tok.clone();
     let mut first = true;
 
-    let mut mem = init.ty.members.as_ref();
+    let mut mem = match pos_tail {
+        StructInitPosTail::FromBeginning => init.ty.members.as_deref(),
+        StructInitPosTail::FromFieldIdx(want) => {
+            member_by_field_idx(init.ty.members.as_deref(), want).or(init.ty.members.as_deref())
+        }
+        StructInitPosTail::NoneLeftAfterDesignator => None,
+    };
     while let Some(m) = mem {
         if is_end(files, &tok) {
             break;
         }
+        let start = tok.clone();
         if !first {
             tok = skip(files, &tok, ",")?;
         }
         first = false;
+
+        if equal(files, &tok, "[") || equal(files, &tok, ".") {
+            return Ok(start);
+        }
+
         tok = initializer2(
             files,
             &tok,
@@ -864,7 +993,7 @@ fn struct_initializer2(
             scope_stack,
             tag_scope_stack,
         )?;
-        mem = m.next.as_ref();
+        mem = m.next.as_deref();
     }
     Ok(tok)
 }
@@ -972,6 +1101,7 @@ fn initializer2(
             globals,
             scope_stack,
             tag_scope_stack,
+            StructInitPosTail::FromBeginning,
         );
     }
 
