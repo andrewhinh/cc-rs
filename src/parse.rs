@@ -91,6 +91,7 @@ struct Initializer {
     expr: Option<Node>,
     children: Vec<Initializer>,
     is_flexible: bool,
+    union_mem: Option<crate::Member>,
 }
 
 #[derive(Debug, Clone)]
@@ -109,6 +110,7 @@ fn new_initializer(ty: &Type, is_flexible: bool) -> Initializer {
                 expr: None,
                 children: Vec::new(),
                 is_flexible: true,
+                union_mem: None,
             };
         }
         let mut children = Vec::with_capacity(ty.array_len as usize);
@@ -121,6 +123,7 @@ fn new_initializer(ty: &Type, is_flexible: bool) -> Initializer {
             expr: None,
             children,
             is_flexible: false,
+            union_mem: None,
         };
     }
 
@@ -138,6 +141,7 @@ fn new_initializer(ty: &Type, is_flexible: bool) -> Initializer {
                 expr: None,
                 children: Vec::new(),
                 is_flexible: false,
+                union_mem: None,
             };
             len
         ];
@@ -150,6 +154,7 @@ fn new_initializer(ty: &Type, is_flexible: bool) -> Initializer {
                     expr: None,
                     children: Vec::new(),
                     is_flexible: true,
+                    union_mem: None,
                 };
             } else {
                 children[mem.idx as usize] = new_initializer(&mem.ty, false);
@@ -162,6 +167,7 @@ fn new_initializer(ty: &Type, is_flexible: bool) -> Initializer {
             expr: None,
             children,
             is_flexible: false,
+            union_mem: None,
         };
     }
 
@@ -170,6 +176,7 @@ fn new_initializer(ty: &Type, is_flexible: bool) -> Initializer {
         expr: None,
         children: Vec::new(),
         is_flexible: false,
+        union_mem: None,
     }
 }
 
@@ -512,6 +519,18 @@ fn struct_designator(files: &[File], dot_tok: &Token, ty: &Type) -> Result<(i64,
     Err(error_tok(files, &tok, "struct has no such member"))
 }
 
+fn union_dot_designator(
+    files: &[File],
+    dot_tok: &Token,
+    ty: &Type,
+) -> Result<(usize, crate::Member, Token), String> {
+    let (idx, after) = struct_designator(files, dot_tok, ty)?;
+    let mem = member_by_field_idx(ty.members.as_deref(), idx)
+        .expect("struct_designator returned unknown field index")
+        .clone();
+    Ok((idx as usize, mem, after))
+}
+
 fn member_by_field_idx(mut cur: Option<&crate::Member>, want: i64) -> Option<&crate::Member> {
     while let Some(m) = cur {
         if m.idx == want {
@@ -844,38 +863,53 @@ fn designation(
     }
 
     if equal(files, tok, ".") {
-        if init.ty.kind != TypeKind::Struct {
-            return Err(error_tok(
+        if init.ty.kind == TypeKind::Struct {
+            let (idx, tok_after) = struct_designator(files, tok, &init.ty)?;
+            let tok = designation(
                 files,
-                tok,
-                "field name not in struct or union initializer",
-            ));
+                &tok_after,
+                &mut init.children[idx as usize],
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+            init.expr = None;
+            let tail = match field_idx_successor(&init.ty, idx) {
+                Some(next_idx) => StructInitPosTail::FromFieldIdx(next_idx),
+                None => StructInitPosTail::NoneLeftAfterDesignator,
+            };
+            return struct_initializer2(
+                files,
+                &tok,
+                init,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+                tail,
+            );
         }
-        let (idx, tok_after) = struct_designator(files, tok, &init.ty)?;
-        let tok = designation(
+
+        if init.ty.kind == TypeKind::Union {
+            let (idx, mem, tok_after) = union_dot_designator(files, tok, &init.ty)?;
+            init.union_mem = Some(mem);
+            return designation(
+                files,
+                &tok_after,
+                &mut init.children[idx],
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            );
+        }
+
+        return Err(error_tok(
             files,
-            &tok_after,
-            &mut init.children[idx as usize],
-            locals,
-            globals,
-            scope_stack,
-            tag_scope_stack,
-        )?;
-        init.expr = None;
-        let tail = match field_idx_successor(&init.ty, idx) {
-            Some(next_idx) => StructInitPosTail::FromFieldIdx(next_idx),
-            None => StructInitPosTail::NoneLeftAfterDesignator,
-        };
-        return struct_initializer2(
-            files,
-            &tok,
-            init,
-            locals,
-            globals,
-            scope_stack,
-            tag_scope_stack,
-            tail,
-        );
+            tok,
+            "field name not in struct or union initializer",
+        ));
     }
 
     let (_, tok) = consume(files, tok, "=");
@@ -1008,6 +1042,35 @@ fn union_initializer(
     scope_stack: &mut Vec<Vec<VarScope>>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
 ) -> Result<Token, String> {
+    if equal(files, tok, "{")
+        && let Some(next_box) = tok.next.as_ref()
+        && equal(files, next_box.as_ref(), ".")
+    {
+        let dot_tok = next_box.as_ref();
+        let (idx, mem, after_ident) = union_dot_designator(files, dot_tok, &init.ty)?;
+        init.union_mem = Some(mem);
+        let tok_after = designation(
+            files,
+            &after_ident,
+            &mut init.children[idx],
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        return skip(files, &tok_after, "}");
+    }
+
+    let Some(first) = init.ty.members.as_deref().cloned() else {
+        return Err(error_at(
+            files,
+            tok.file_no,
+            tok.loc,
+            "union has no members",
+        ));
+    };
+    init.union_mem = Some(first);
+
     if equal(files, tok, "{") {
         let tok = skip(files, tok, "{")?;
         let tok = initializer2(
@@ -1290,15 +1353,21 @@ fn create_lvar_init(
     }
 
     if ty.kind == TypeKind::Union {
+        let mem = init
+            .union_mem
+            .as_ref()
+            .or(ty.members.as_deref())
+            .expect("union has members");
+        let idx = mem.idx as usize;
         let desg2 = InitDesg {
             next: Some(Box::new(desg.clone())),
             idx: 0,
-            member: Some(ty.members.as_ref().unwrap().as_ref().clone()),
+            member: Some(mem.clone()),
             var: None,
         };
         return create_lvar_init(
-            &init.children[0],
-            &ty.members.as_ref().unwrap().ty,
+            &init.children[idx],
+            &mem.ty,
             &desg2,
             tok_loc,
             file_no,
@@ -2195,15 +2264,11 @@ fn write_gvar_data(
     }
 
     if ty.kind == TypeKind::Union {
-        let first_member_ty = &ty.members.as_ref().unwrap().ty;
-        return write_gvar_data(
-            files,
-            &init.children[0],
-            first_member_ty,
-            buf,
-            offset,
-            rel_head,
-        );
+        let Some(mem) = init.union_mem.as_ref() else {
+            return Ok(());
+        };
+        let idx = mem.idx as usize;
+        return write_gvar_data(files, &init.children[idx], &mem.ty, buf, offset, rel_head);
     }
 
     if init.expr.is_none() {
