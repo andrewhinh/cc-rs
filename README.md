@@ -238,7 +238,7 @@ cargo run
 - [x] [GNU] Allow to omit "=" in designated initializers
 - [x] Add struct designated initializer
 - [x] Add union designated initializer
-- [ ] Handle struct designator for anonymous struct member
+- [x] Handle struct designator for anonymous struct member
 - [ ] Add offsetof
 - [ ] [GNU] Support array range designator
 - [ ] Add __attribute__((packed))

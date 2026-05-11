@@ -502,6 +502,12 @@ fn struct_designator(files: &[File], dot_tok: &Token, ty: &Type) -> Result<(i64,
 
     let mut cur = ty.members.as_deref();
     while let Some(mem) = cur {
+        if mem.ty.kind == TypeKind::Struct
+            && mem.name.is_none()
+            && get_struct_member(files, &mem.ty, &tok).is_some()
+        {
+            return Ok((mem.idx, dot_tok.clone()));
+        }
         if let Some(name) = mem.name.as_deref() {
             let name_slice = if name.file_no == tok.file_no {
                 &ident_bytes[name.loc..name.loc + name.len]
