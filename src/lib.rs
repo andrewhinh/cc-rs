@@ -3,6 +3,7 @@ pub mod parse;
 pub mod preprocess;
 pub mod tokenize;
 mod unicode_ident;
+mod unicode_width;
 
 use std::cell::RefCell;
 use std::collections::HashSet;

@@ -273,7 +273,7 @@ cargo run
 - [x] [GNU] Accept $ as an identifier character
 - [x] Allow to concatenate regular string literals with L/u/U string literals
 - [x] Skip UTF-8 BOM markers
-- [ ] Improve error message for multibyte characters
+- [x] Improve error message for multibyte characters
 
 ### Preprocessor, Includes, and Macro System
 

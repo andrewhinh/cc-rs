@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::{
     File, Token, TokenKind, Type,
     unicode_ident::{is_ident1, is_ident2},
+    unicode_width::display_width_prefix,
 };
 
 static FILE_NO: AtomicUsize = AtomicUsize::new(0);
@@ -1294,58 +1295,38 @@ pub fn warn_tok(files: &[File], tok: &Token, msg: &str) {
     eprint!("warning: {}", warning);
 }
 
-pub fn error_tok(files: &[File], tok: &Token, msg: &str) -> String {
-    let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
+fn format_error_snippet(file: &File, line_no: usize, cursor_byte: usize, msg: &str) -> String {
     let src = &file.contents;
     let filename = &file.name;
-
-    let b = char_index_to_byte_offset(src, tok.loc);
-    let mut line_start = b;
+    let mut line_start = cursor_byte;
     while line_start > 0 && src.as_bytes()[line_start - 1] != b'\n' {
         line_start -= 1;
     }
 
-    let mut line_end = b;
-    while line_end < src.len() && src.as_bytes()[line_end] != b'\n' {
-        line_end += 1;
-    }
-
-    let line = &src[line_start..line_end];
-    let indent = format!("{filename}:{}: ", tok.line_no).len();
-    let pos = b - line_start + indent;
-
-    format!(
-        "{filename}:{}: {line}\n{:width$}^ {msg}\n",
-        tok.line_no,
-        "",
-        width = pos
-    )
-}
-
-pub fn error_at(files: &[File], file_no: usize, loc: usize, msg: &str) -> String {
-    let file = files.iter().find(|f| f.file_no == file_no).unwrap();
-    let src = &file.contents;
-    let filename = &file.name;
-
-    let (b, line_no) = byte_offset_and_line_at(src, loc);
-
-    let mut line_start = b;
-    while line_start > 0 && src.as_bytes()[line_start - 1] != b'\n' {
-        line_start -= 1;
-    }
-
-    let mut line_end = b;
+    let mut line_end = cursor_byte;
     while line_end < src.len() && src.as_bytes()[line_end] != b'\n' {
         line_end += 1;
     }
 
     let line = &src[line_start..line_end];
     let indent = format!("{filename}:{line_no}: ").len();
-    let pos = b - line_start + indent;
+    let pos = display_width_prefix(&src[line_start..cursor_byte]) + indent;
 
     format!(
         "{filename}:{line_no}: {line}\n{:width$}^ {msg}\n",
         "",
         width = pos
     )
+}
+
+pub fn error_tok(files: &[File], tok: &Token, msg: &str) -> String {
+    let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
+    let b = char_index_to_byte_offset(&file.contents, tok.loc);
+    format_error_snippet(file, tok.line_no, b, msg)
+}
+
+pub fn error_at(files: &[File], file_no: usize, loc: usize, msg: &str) -> String {
+    let file = files.iter().find(|f| f.file_no == file_no).unwrap();
+    let (b, line_no) = byte_offset_and_line_at(&file.contents, loc);
+    format_error_snippet(file, line_no, b, msg)
 }
