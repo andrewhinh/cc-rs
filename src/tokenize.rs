@@ -110,6 +110,7 @@ pub fn new_token(
         str: None,
         file_no,
         line_no: 0,
+        line_delta: 0,
         at_bol,
         has_space,
         hideset: HashSet::new(),
@@ -785,10 +786,36 @@ pub fn add_input_file(file: File) {
 
 pub fn new_file(name: String, file_no: usize, contents: String) -> File {
     File {
+        display_name: name.clone(),
         name,
         file_no,
         contents,
+        line_delta: 0,
     }
+}
+
+pub(crate) fn update_file_line_marker(
+    file_no: usize,
+    line_delta: i64,
+    display_name: Option<String>,
+) {
+    let mut files = INPUT_FILES.lock().unwrap();
+    if let Some(f) = files.iter_mut().find(|f| f.file_no == file_no) {
+        f.line_delta = line_delta;
+        if let Some(display) = display_name {
+            f.display_name = display;
+        }
+    }
+}
+
+pub(crate) fn line_delta_for_file(file_no: usize) -> i64 {
+    INPUT_FILES
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|f| f.file_no == file_no)
+        .map(|f| f.line_delta)
+        .unwrap_or(0)
 }
 
 pub fn tokenize_file(path: &str) -> Option<Token> {
@@ -896,6 +923,7 @@ pub fn tokenize(file: &File) -> Token {
         str: None,
         file_no,
         line_no: 0,
+        line_delta: 0,
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
@@ -1252,6 +1280,7 @@ fn make_error_token(file_no: usize, loc: usize, msg: &str) -> Token {
         str: Some(msg.as_bytes().to_vec()),
         file_no,
         line_no: 0,
+        line_delta: 0,
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),

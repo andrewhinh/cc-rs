@@ -35,8 +35,10 @@ pub enum TokenKind {
 #[derive(Debug, Clone)]
 pub struct File {
     pub name: String,
+    pub display_name: String,
     pub file_no: usize,
     pub contents: String,
+    pub line_delta: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +53,7 @@ pub struct Token {
     pub str: Option<Vec<u8>>,
     pub file_no: usize,
     pub line_no: usize,
+    pub line_delta: i64,
     pub at_bol: bool,
     pub has_space: bool,
     pub hideset: HashSet<String>,

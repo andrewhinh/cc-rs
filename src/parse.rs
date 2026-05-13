@@ -2971,6 +2971,7 @@ fn resolve_goto_labels(files: &[File], body: &mut Node) -> Result<(), String> {
                 ty: None,
                 str: None,
                 line_no: goto.line_no,
+                line_delta: 0,
                 at_bol: false,
                 has_space: false,
                 hideset: std::collections::HashSet::new(),

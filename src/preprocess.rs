@@ -5,10 +5,11 @@ use std::sync::atomic::{AtomicI32, Ordering};
 
 use chrono::Local;
 
+use crate::tokenize::{line_delta_for_file, update_file_line_marker};
 use crate::{
     File, Token, TokenKind, add_input_file, const_expr, consume, convert_pp_number, equal,
-    error_tok, get_file_no, get_include_paths, get_input_files, new_file, skip, tokenize,
-    tokenize_file, tokenize_string_literal, warn_tok,
+    error_tok, get_file_no, get_include_paths, get_input_files, is_integer, new_file, skip,
+    tokenize, tokenize_file, tokenize_string_literal, warn_tok,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -169,6 +170,7 @@ fn detached_token(tok: &Token) -> Token {
         str: tok.str.clone(),
         file_no: tok.file_no,
         line_no: tok.line_no,
+        line_delta: tok.line_delta,
         at_bol: tok.at_bol,
         has_space: tok.has_space,
         hideset: tok.hideset.clone(),
@@ -177,30 +179,32 @@ fn detached_token(tok: &Token) -> Token {
 }
 
 fn root_origin(tok: &Token) -> Token {
-    let mut cur = tok;
-    while let Some(origin) = cur.origin.as_deref() {
-        cur = origin;
+    detached_token(macro_origin(tok))
+}
+
+fn macro_origin(mut tmpl: &Token) -> &Token {
+    while let Some(origin) = tmpl.origin.as_deref() {
+        tmpl = origin;
     }
-    detached_token(cur)
+    tmpl
+}
+
+fn builtin_spelling_and_file<'a>(files: &'a [File], tmpl: &'a Token) -> (&'a Token, &'a File) {
+    let tmpl = macro_origin(tmpl);
+    let file = files.iter().find(|f| f.file_no == tmpl.file_no).unwrap();
+    (tmpl, file)
 }
 
 fn file_macro(tmpl: &Token) -> Token {
     let files = get_input_files();
-    let mut tmpl = tmpl;
-    while let Some(origin) = tmpl.origin.as_deref() {
-        tmpl = origin;
-    }
-    let file = files.iter().find(|f| f.file_no == tmpl.file_no).unwrap();
-    new_str_token(&files, &file.name, tmpl)
+    let (tmpl, file) = builtin_spelling_and_file(&files, tmpl);
+    new_str_token(&files, &file.display_name, tmpl)
 }
 
 fn line_macro(tmpl: &Token) -> Token {
     let files = get_input_files();
-    let mut tmpl = tmpl;
-    while let Some(origin) = tmpl.origin.as_deref() {
-        tmpl = origin;
-    }
-    new_num_token(&files, tmpl.line_no as i64, tmpl)
+    let (tmpl, file) = builtin_spelling_and_file(&files, tmpl);
+    new_num_token(&files, tmpl.line_no as i64 + file.line_delta, tmpl)
 }
 
 fn counter_macro(tmpl: &Token) -> Token {
@@ -324,6 +328,7 @@ fn read_macro_arg_one(
         str: None,
         file_no: 0,
         line_no: 0,
+        line_delta: 0,
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
@@ -588,6 +593,7 @@ fn subst(files: &[File], tok: &Token, args: &Option<Box<MacroArg>>) -> Result<To
         str: None,
         file_no: 0,
         line_no: 0,
+        line_delta: 0,
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
@@ -898,6 +904,7 @@ fn add_hideset(tok: Token, hs: &HashSet<String>) -> Token {
         str: None,
         file_no: 0,
         line_no: 0,
+        line_delta: 0,
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
@@ -996,6 +1003,7 @@ fn copy_line(_files: &[File], tok: &Token) -> (Token, Token) {
         str: None,
         file_no: 0,
         line_no: 0,
+        line_delta: 0,
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
@@ -1032,6 +1040,7 @@ fn read_const_expr(files: &[File], tok: &Token) -> Result<(Token, Token), String
         str: None,
         file_no: 0,
         line_no: 0,
+        line_delta: 0,
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
@@ -1092,6 +1101,7 @@ fn replace_idents_with_zero(mut tok: Token) -> Token {
         str: None,
         file_no: 0,
         line_no: 0,
+        line_delta: 0,
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
@@ -1379,6 +1389,7 @@ fn append(tok1: Token, tok2: Token) -> Token {
         str: None,
         file_no: 0,
         line_no: 0,
+        line_delta: 0,
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
@@ -1485,6 +1496,55 @@ fn read_include_filename(tok: &Token, is_dquote: &mut bool) -> Result<(String, T
     Err(error_tok(&files, tok, "expected a filename"))
 }
 
+fn str_payload_from_literal(bytes: &[u8]) -> String {
+    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    String::from_utf8_lossy(&bytes[..end]).into_owned()
+}
+
+fn apply_line_marker_adjustments(tok: &mut Token) {
+    let mut cur = tok;
+    loop {
+        cur.line_no = (cur.line_no as i64 + cur.line_delta) as usize;
+        if cur.next.is_none() {
+            break;
+        }
+        cur = cur.next.as_mut().unwrap();
+    }
+}
+
+fn read_line_marker(files: &[File], first_arg: &Token) -> Result<Token, String> {
+    let start = first_arg.clone();
+    let (line_body, rest) = copy_line(files, first_arg);
+
+    let mut expanded = preprocess2(&[], line_body)?;
+    let files_now = get_input_files();
+    convert_pp_tokens(&files_now, &mut expanded);
+    join_adjacent_string_literals(&files_now, &mut expanded)?;
+
+    if expanded.kind != TokenKind::Num {
+        return Err(error_tok(files, &start, "invalid line marker"));
+    }
+    if !matches!(expanded.ty.as_ref(), Some(ty) if is_integer(ty)) {
+        return Err(error_tok(files, &expanded, "invalid line marker"));
+    }
+
+    let delta = expanded.val - start.line_no as i64;
+    let after_num = expanded.next.as_deref();
+
+    match after_num {
+        Some(next) if next.kind != TokenKind::Eof => {
+            let bytes = match (next.kind, next.str.as_deref()) {
+                (TokenKind::Str, Some(b)) => b,
+                _ => return Err(error_tok(files, next, "filename expected")),
+            };
+            update_file_line_marker(start.file_no, delta, Some(str_payload_from_literal(bytes)));
+        }
+        _ => update_file_line_marker(start.file_no, delta, None),
+    }
+
+    Ok(rest)
+}
+
 fn include_file(tok: Token, path: &str, filename_tok: &Token) -> Result<Token, String> {
     match tokenize_file(path) {
         Some(tok2) => Ok(append(tok2, tok)),
@@ -1512,6 +1572,7 @@ fn preprocess2(_files: &[File], tok: Token) -> Result<Token, String> {
         str: None,
         file_no: 0,
         line_no: 0,
+        line_delta: 0,
         at_bol: false,
         has_space: false,
         hideset: HashSet::new(),
@@ -1533,6 +1594,7 @@ fn preprocess2(_files: &[File], tok: Token) -> Result<Token, String> {
         }
 
         if !is_hash(&files, &tok) {
+            tok.line_delta = line_delta_for_file(tok.file_no);
             let next = tok.next.take();
             cur.next = Some(Box::new(tok));
             cur = cur.next.as_mut().unwrap();
@@ -1671,6 +1733,12 @@ fn preprocess2(_files: &[File], tok: Token) -> Result<Token, String> {
             continue;
         }
 
+        if token_str_eq(&files, &tok, "line") {
+            let after_line = tok.next.as_ref().unwrap();
+            tok = read_line_marker(&files, after_line)?;
+            continue;
+        }
+
         if token_str_eq(&files, &tok, "error") {
             return Err(error_tok(&get_input_files(), &tok, "error"));
         }
@@ -1706,5 +1774,6 @@ pub fn preprocess(tok: Token) -> Result<Token, String> {
     let files = get_input_files();
     convert_pp_tokens(&files, &mut tok);
     join_adjacent_string_literals(&files, &mut tok)?;
+    apply_line_marker_adjustments(&mut tok);
     Ok(tok)
 }
