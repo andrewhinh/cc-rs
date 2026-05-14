@@ -1739,6 +1739,11 @@ fn preprocess2(_files: &[File], tok: Token) -> Result<Token, String> {
             continue;
         }
 
+        if tok.kind == TokenKind::PpNum {
+            tok = read_line_marker(&files, &tok)?;
+            continue;
+        }
+
         if token_str_eq(&files, &tok, "error") {
             return Err(error_tok(&get_input_files(), &tok, "error"));
         }

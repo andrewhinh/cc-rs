@@ -315,7 +315,7 @@ cargo run
 - [x] Add __DATE__ and __TIME__ macros
 - [x] [GNU] Add __COUNTER__ macro
 - [x] Add #line
-- [ ] [GNU] Add line marker directive
+- [x] [GNU] Add line marker directive
 - [ ] [GNU] Add __TIMESTAMP__ macro
 - [ ] [GNU] Add __BASE_FILE__ macro
 - [ ] Add __VA_OPT__
