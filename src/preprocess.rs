@@ -1,9 +1,10 @@
 use std::cell::Cell;
 use std::collections::HashSet;
+use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicI32, Ordering};
 
-use chrono::Local;
+use chrono::{DateTime, Local};
 
 use crate::tokenize::{line_delta_for_file, update_file_line_marker};
 use crate::{
@@ -213,6 +214,24 @@ fn counter_macro(tmpl: &Token) -> Token {
     new_num_token(&files, n, tmpl)
 }
 
+const TIMESTAMP_FALLBACK: &str = "??? ??? ?? ??:??:?? ????";
+
+fn timestamp_macro(tmpl: &Token) -> Token {
+    let files = get_input_files();
+    let (tmpl, file) = builtin_spelling_and_file(&files, tmpl);
+    let content = fs::metadata(&file.name)
+        .and_then(|m| m.modified())
+        .map_or_else(
+            |_| TIMESTAMP_FALLBACK.to_string(),
+            |st| {
+                DateTime::<Local>::from(st)
+                    .format("%a %b %e %H:%M:%S %Y")
+                    .to_string()
+            },
+        );
+    new_str_token(&files, &content, tmpl)
+}
+
 pub fn init_macros() {
     define_macro("_LP64", "1");
     define_macro("__C99_MACRO_WITH_VA_ARGS", "1");
@@ -261,6 +280,7 @@ pub fn init_macros() {
     add_builtin("__FILE__", file_macro);
     add_builtin("__LINE__", line_macro);
     add_builtin("__COUNTER__", counter_macro);
+    add_builtin("__TIMESTAMP__", timestamp_macro);
 
     let now = Local::now();
     let date_s = now.format("%b %e %Y").to_string();
