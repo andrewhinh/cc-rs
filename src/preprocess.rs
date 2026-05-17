@@ -674,6 +674,31 @@ fn subst(files: &[File], tok: &Token, args: &Option<Box<MacroArg>>) -> Result<To
             continue;
         }
 
+        // [GNU] ,## __VA_ARGS__
+        if equal(files, &tok, ",")
+            && let Some(sharp_ref) = tok.next.as_ref()
+            && equal(files, sharp_ref.as_ref(), "##")
+            && let Some(va_id_ref) = sharp_ref.next.as_ref()
+            && let Some(arg) = find_arg(args, files, va_id_ref.as_ref())
+            && arg.name == "__VA_ARGS__"
+        {
+            let mut sharp_box = tok.next.take().unwrap();
+            let mut va_ident_box = sharp_box.next.take().unwrap();
+
+            if arg.tok.kind == TokenKind::Eof {
+                tok = match va_ident_box.next.take() {
+                    Some(n) => *n,
+                    None => new_eof(va_ident_box.as_ref()),
+                };
+            } else {
+                cur.next = Some(Box::new(copy_token(&tok)));
+                cur = cur.next.as_mut().unwrap();
+                is_start = false;
+                tok = *va_ident_box;
+            }
+            continue;
+        }
+
         if equal(files, &tok, "##") {
             if is_start {
                 return Err(error_tok(
