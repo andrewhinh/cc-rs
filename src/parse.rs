@@ -461,7 +461,7 @@ fn bracket_const_expr(
     files: &[File],
     lbracket: &Token,
     tag_scope_stack: &mut [Vec<TagScope>],
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
 ) -> Result<(i64, Token), String> {
     let expr_tok = lbracket
         .next
@@ -476,7 +476,7 @@ fn array_designator(
     tok: &Token,
     ty: &Type,
     tag_scope_stack: &mut [Vec<TagScope>],
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
 ) -> Result<(usize, Token), String> {
     let start = tok.clone();
     let (idx, tok) = bracket_const_expr(files, tok, tag_scope_stack, scope_stack)?;
@@ -592,12 +592,8 @@ fn count_array_init_elements(
         first = false;
 
         if equal(files, &tok, "[") {
-            let (idx_val, mut t) = bracket_const_expr(
-                files,
-                &tok,
-                tag_scope_stack.as_mut_slice(),
-                scope_stack.as_mut_slice(),
-            )?;
+            let (idx_val, mut t) =
+                bracket_const_expr(files, &tok, tag_scope_stack.as_mut_slice(), scope_stack)?;
             i = idx_val;
             if equal(files, &t, "...") {
                 let expr_tok2 = t
@@ -1469,7 +1465,9 @@ pub fn struct_members(
     files: &[File],
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
 ) -> Result<(Option<Box<crate::Member>>, bool, Token), String> {
     let mut tok = tok.clone();
     let mut members: Vec<crate::Member> = Vec::new();
@@ -1477,8 +1475,15 @@ pub fn struct_members(
 
     while !equal(files, &tok, "}") {
         let mut attr = VarAttr::default();
-        let (basety, new_tok) =
-            declspec(files, &tok, tag_scope_stack, scope_stack, Some(&mut attr))?;
+        let (basety, new_tok) = declspec(
+            files,
+            &tok,
+            tag_scope_stack,
+            scope_stack,
+            Some(&mut attr),
+            locals,
+            globals,
+        )?;
         tok = new_tok;
         let mut first = true;
 
@@ -1514,8 +1519,15 @@ pub fn struct_members(
             }
             first = false;
 
-            let (mem_ty, new_tok) =
-                declarator(files, &tok, basety.clone(), tag_scope_stack, scope_stack)?;
+            let (mem_ty, new_tok) = declarator(
+                files,
+                &tok,
+                basety.clone(),
+                tag_scope_stack,
+                scope_stack,
+                locals,
+                globals,
+            )?;
             tok = new_tok;
             let mem_align = if attr.align > 0 {
                 attr.align
@@ -1579,7 +1591,9 @@ pub fn struct_union_decl(
     files: &[File],
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
 ) -> Result<(Rc<RefCell<Type>>, Token), String> {
     let mut tok = tok.clone();
 
@@ -1632,7 +1646,8 @@ pub fn struct_union_decl(
         Rc::new(RefCell::new(Type::new_struct()))
     };
 
-    let (members, is_flexible, rest) = struct_members(files, &tok, tag_scope_stack, scope_stack)?;
+    let (members, is_flexible, rest) =
+        struct_members(files, &tok, tag_scope_stack, scope_stack, locals, globals)?;
 
     {
         let mut ty = ty_rc.borrow_mut();
@@ -1650,9 +1665,12 @@ pub fn struct_decl(
     files: &[File],
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
 ) -> Result<(Type, Token), String> {
-    let (ty_rc, rest) = struct_union_decl(files, tok, tag_scope_stack, scope_stack)?;
+    let (ty_rc, rest) =
+        struct_union_decl(files, tok, tag_scope_stack, scope_stack, locals, globals)?;
     ty_rc.borrow_mut().kind = TypeKind::Struct;
 
     if ty_rc.borrow().size < 0 {
@@ -1706,9 +1724,12 @@ pub fn union_decl(
     files: &[File],
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
 ) -> Result<(Type, Token), String> {
-    let (ty_rc, rest) = struct_union_decl(files, tok, tag_scope_stack, scope_stack)?;
+    let (ty_rc, rest) =
+        struct_union_decl(files, tok, tag_scope_stack, scope_stack, locals, globals)?;
     ty_rc.borrow_mut().kind = TypeKind::Union;
 
     if ty_rc.borrow().size < 0 {
@@ -1748,7 +1769,7 @@ pub fn enum_specifier(
     files: &[File],
     tok: &Token,
     tag_scope_stack: &mut [Vec<TagScope>],
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
 ) -> Result<(Type, Token), String> {
     let ty = Type::new_enum();
 
@@ -1840,6 +1861,36 @@ pub fn enum_specifier(
     Ok((ty, tok))
 }
 
+fn typeof_specifier(
+    files: &[File],
+    tok: &Token,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+) -> Result<(Type, Token), String> {
+    let mut tok = skip(files, tok, "(")?;
+    let ty = if is_typename(files, &tok, scope_stack) {
+        let (t, new_tok) = typename(files, &tok, tag_scope_stack, scope_stack, locals, globals)?;
+        tok = new_tok;
+        t
+    } else {
+        let (mut node, new_tok) = expr(files, &tok, locals, globals, scope_stack, tag_scope_stack)?;
+        add_type(&mut node);
+        tok = new_tok;
+        node.ty.clone().ok_or_else(|| {
+            error_at(
+                files,
+                node.file_no,
+                node.tok_loc,
+                "expression has no type for typeof",
+            )
+        })?
+    };
+    tok = skip(files, &tok, ")")?;
+    Ok((ty, tok))
+}
+
 fn find_in_member_list(
     files: &[File],
     mut mem_ref: &crate::Member,
@@ -1924,8 +1975,10 @@ pub fn declspec(
     files: &[File],
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
     mut attr: Option<&mut VarAttr>,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
 ) -> Result<(Type, Token), String> {
     const VOID: i32 = 1 << 0;
     const BOOL: i32 = 1 << 2;
@@ -2019,7 +2072,8 @@ pub fn declspec(
             tok = skip(files, tok.next.as_ref().unwrap(), "(")?;
 
             if is_typename(files, &tok, scope_stack) {
-                let (align_ty, new_tok) = typename(files, &tok, tag_scope_stack, scope_stack)?;
+                let (align_ty, new_tok) =
+                    typename(files, &tok, tag_scope_stack, scope_stack, locals, globals)?;
                 tok = new_tok;
                 if let Some(a) = attr.as_mut() {
                     a.align = align_ty.align;
@@ -2039,6 +2093,7 @@ pub fn declspec(
         if equal(files, &tok, "struct")
             || equal(files, &tok, "union")
             || equal(files, &tok, "enum")
+            || equal(files, &tok, "typeof")
             || ty2.is_some()
         {
             if counter > 0 {
@@ -2051,6 +2106,8 @@ pub fn declspec(
                     tok.next.as_ref().unwrap(),
                     tag_scope_stack,
                     scope_stack,
+                    locals,
+                    globals,
                 )?;
                 ty = new_ty;
                 tok = new_tok;
@@ -2060,6 +2117,8 @@ pub fn declspec(
                     tok.next.as_ref().unwrap(),
                     tag_scope_stack,
                     scope_stack,
+                    locals,
+                    globals,
                 )?;
                 ty = new_ty;
                 tok = new_tok;
@@ -2067,6 +2126,17 @@ pub fn declspec(
                 let (new_ty, new_tok) = enum_specifier(
                     files,
                     tok.next.as_ref().unwrap(),
+                    tag_scope_stack,
+                    scope_stack,
+                )?;
+                ty = new_ty;
+                tok = new_tok;
+            } else if equal(files, &tok, "typeof") {
+                let (new_ty, new_tok) = typeof_specifier(
+                    files,
+                    tok.next.as_ref().unwrap(),
+                    locals,
+                    globals,
                     tag_scope_stack,
                     scope_stack,
                 )?;
@@ -2155,6 +2225,7 @@ pub fn is_typename(files: &[File], tok: &Token, scope_stack: &[Vec<VarScope>]) -
         || equal(files, tok, "_Noreturn")
         || equal(files, tok, "float")
         || equal(files, tok, "double")
+        || equal(files, tok, "typeof")
         || find_typedef(scope_stack, tok, files).is_some()
 }
 
@@ -2176,12 +2247,17 @@ pub fn is_function(
 
     let dummy = Type::new_int();
     let mut tag_scope_stack: Vec<Vec<TagScope>> = vec![Vec::new()];
+    let mut scope_stack_vec: Vec<Vec<VarScope>> = scope_stack.to_vec();
+    let mut empty_locals: Vec<Obj> = Vec::new();
+    let mut empty_globals: Vec<Obj> = Vec::new();
     let (ty, _) = declarator(
         files,
         tok,
         dummy,
         &mut tag_scope_stack,
-        &mut scope_stack.to_vec(),
+        &mut scope_stack_vec,
+        &mut empty_locals,
+        &mut empty_globals,
     )?;
     Ok(ty.kind == TypeKind::Func)
 }
@@ -2361,7 +2437,7 @@ pub fn global_variable(
     basety: Type,
     globals: &mut Vec<Obj>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
     attr: &VarAttr,
 ) -> Result<Token, String> {
     let mut tok = tok.clone();
@@ -2373,7 +2449,16 @@ pub fn global_variable(
         }
         first = false;
 
-        let (ty, new_tok) = declarator(files, &tok, basety.clone(), tag_scope_stack, scope_stack)?;
+        let mut empty_locals: Vec<Obj> = Vec::new();
+        let (ty, new_tok) = declarator(
+            files,
+            &tok,
+            basety.clone(),
+            tag_scope_stack,
+            scope_stack,
+            &mut empty_locals,
+            globals,
+        )?;
         tok = new_tok;
         if ty.kind == TypeKind::Array && ty.array_len < 0 && !equal(files, &tok, "=") {
             return Err(error_tok(files, &tok, "variable has incomplete type"));
@@ -2415,7 +2500,9 @@ pub fn func_params(
     tok: &Token,
     ty: Type,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
 ) -> Result<(Type, Token), String> {
     let mut tok = tok.clone();
 
@@ -2475,9 +2562,25 @@ pub fn func_params(
             return Ok((func_ty, tok));
         }
 
-        let (basety, new_tok) = declspec(files, &tok, tag_scope_stack, scope_stack, None)?;
+        let (basety, new_tok) = declspec(
+            files,
+            &tok,
+            tag_scope_stack,
+            scope_stack,
+            None,
+            locals,
+            globals,
+        )?;
         tok = new_tok;
-        let (param_ty, new_tok) = declarator(files, &tok, basety, tag_scope_stack, scope_stack)?;
+        let (param_ty, new_tok) = declarator(
+            files,
+            &tok,
+            basety,
+            tag_scope_stack,
+            scope_stack,
+            locals,
+            globals,
+        )?;
         tok = new_tok;
 
         let param_ty = if param_ty.kind == TypeKind::Array {
@@ -2515,7 +2618,9 @@ pub fn array_dimensions(
     tok: &Token,
     ty: Type,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
 ) -> Result<(Type, Token), String> {
     let mut tok = tok.clone();
     while equal(files, &tok, "static")
@@ -2533,13 +2638,23 @@ pub fn array_dimensions(
             ty,
             tag_scope_stack,
             scope_stack,
+            locals,
+            globals,
         )?;
         return Ok((Type::new_array(ty, -1), rest));
     }
 
     let (sz, tok) = const_expr(files, &tok, tag_scope_stack, scope_stack)?;
     let tok = skip(files, &tok, "]")?;
-    let (ty, rest) = type_suffix(files, &tok, ty, tag_scope_stack, scope_stack)?;
+    let (ty, rest) = type_suffix(
+        files,
+        &tok,
+        ty,
+        tag_scope_stack,
+        scope_stack,
+        locals,
+        globals,
+    )?;
     Ok((Type::new_array(ty, sz), rest))
 }
 
@@ -2548,7 +2663,9 @@ pub fn type_suffix(
     tok: &Token,
     ty: Type,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
 ) -> Result<(Type, Token), String> {
     if equal(files, tok, "(") {
         return func_params(
@@ -2557,6 +2674,8 @@ pub fn type_suffix(
             ty,
             tag_scope_stack,
             scope_stack,
+            locals,
+            globals,
         );
     }
 
@@ -2567,6 +2686,8 @@ pub fn type_suffix(
             ty,
             tag_scope_stack,
             scope_stack,
+            locals,
+            globals,
         );
     }
 
@@ -2598,7 +2719,9 @@ pub fn declarator(
     tok: &Token,
     ty: Type,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
 ) -> Result<(Type, Token), String> {
     let (tok, ty) = pointers(files, tok.clone(), ty);
 
@@ -2611,15 +2734,27 @@ pub fn declarator(
             dummy,
             tag_scope_stack,
             scope_stack,
+            locals,
+            globals,
         )?;
         let tok = skip(files, &tok, ")")?;
-        let (ty, rest) = type_suffix(files, &tok, ty, tag_scope_stack, scope_stack)?;
+        let (ty, rest) = type_suffix(
+            files,
+            &tok,
+            ty,
+            tag_scope_stack,
+            scope_stack,
+            locals,
+            globals,
+        )?;
         let (ty, _) = declarator(
             files,
             start.next.as_ref().unwrap(),
             ty,
             tag_scope_stack,
             scope_stack,
+            locals,
+            globals,
         )?;
         return Ok((ty, rest));
     }
@@ -2633,7 +2768,15 @@ pub fn declarator(
         (None, tok)
     };
 
-    let (ty, tok) = type_suffix(files, &tok, ty, tag_scope_stack, scope_stack)?;
+    let (ty, tok) = type_suffix(
+        files,
+        &tok,
+        ty,
+        tag_scope_stack,
+        scope_stack,
+        locals,
+        globals,
+    )?;
 
     let mut ty = ty;
     ty.name = name.map(Box::new);
@@ -2646,7 +2789,9 @@ pub fn abstract_declarator(
     tok: &Token,
     ty: Type,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
 ) -> Result<(Type, Token), String> {
     let (tok, ty) = pointers(files, tok.clone(), ty);
 
@@ -2659,30 +2804,68 @@ pub fn abstract_declarator(
             dummy,
             tag_scope_stack,
             scope_stack,
+            locals,
+            globals,
         )?;
         let tok = skip(files, &tok, ")")?;
-        let (ty, rest) = type_suffix(files, &tok, ty, tag_scope_stack, scope_stack)?;
+        let (ty, rest) = type_suffix(
+            files,
+            &tok,
+            ty,
+            tag_scope_stack,
+            scope_stack,
+            locals,
+            globals,
+        )?;
         let (ty, _) = abstract_declarator(
             files,
             start.next.as_ref().unwrap(),
             ty,
             tag_scope_stack,
             scope_stack,
+            locals,
+            globals,
         )?;
         return Ok((ty, rest));
     }
 
-    type_suffix(files, &tok, ty, tag_scope_stack, scope_stack)
+    type_suffix(
+        files,
+        &tok,
+        ty,
+        tag_scope_stack,
+        scope_stack,
+        locals,
+        globals,
+    )
 }
 
 pub fn typename(
     files: &[File],
     tok: &Token,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
 ) -> Result<(Type, Token), String> {
-    let (ty, tok) = declspec(files, tok, tag_scope_stack, scope_stack, None)?;
-    abstract_declarator(files, &tok, ty, tag_scope_stack, scope_stack)
+    let (ty, tok) = declspec(
+        files,
+        tok,
+        tag_scope_stack,
+        scope_stack,
+        None,
+        locals,
+        globals,
+    )?;
+    abstract_declarator(
+        files,
+        &tok,
+        ty,
+        tag_scope_stack,
+        scope_stack,
+        locals,
+        globals,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2746,7 +2929,15 @@ pub fn declaration(
         }
         first = false;
 
-        let (ty, new_tok) = declarator(files, &tok, basety.clone(), tag_scope_stack, scope_stack)?;
+        let (ty, new_tok) = declarator(
+            files,
+            &tok,
+            basety.clone(),
+            tag_scope_stack,
+            scope_stack,
+            locals,
+            globals,
+        )?;
         tok = new_tok;
         if ty.kind == TypeKind::Void {
             return Err(error_tok(
@@ -2864,7 +3055,10 @@ pub fn parse_typedef(
     files: &[File],
     tok: &Token,
     basety: Type,
-    scope_stack: &mut [Vec<VarScope>],
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
 ) -> Result<Token, String> {
     let mut tok = tok.clone();
     let mut first = true;
@@ -2875,7 +3069,15 @@ pub fn parse_typedef(
         }
         first = false;
 
-        let (ty, new_tok) = declarator(files, &tok, basety.clone(), &mut Vec::new(), scope_stack)?;
+        let (ty, new_tok) = declarator(
+            files,
+            &tok,
+            basety.clone(),
+            tag_scope_stack,
+            scope_stack,
+            locals,
+            globals,
+        )?;
         tok = new_tok;
         if ty.name.is_none() {
             if equal(files, &tok, ";") {
@@ -3043,10 +3245,19 @@ pub fn function(
     basety: Type,
     globals: &mut Vec<Obj>,
     tag_scope_stack: &mut Vec<Vec<TagScope>>,
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
     attr: &VarAttr,
 ) -> Result<(Obj, Token), String> {
-    let (ty, tok) = declarator(files, tok, basety, tag_scope_stack, scope_stack)?;
+    let mut empty_locals: Vec<Obj> = Vec::new();
+    let (ty, tok) = declarator(
+        files,
+        tok,
+        basety,
+        tag_scope_stack,
+        scope_stack,
+        &mut empty_locals,
+        globals,
+    )?;
     if ty.name.is_none() {
         return Err(error_tok(
             files,
@@ -3195,12 +3406,27 @@ pub fn compound_stmt(
     while !equal(files, &tok, "}") {
         if is_typename(files, &tok, scope_stack) && !equal(files, tok.next.as_ref().unwrap(), ":") {
             let mut attr = VarAttr::default();
-            let (basety, new_tok) =
-                declspec(files, &tok, tag_scope_stack, scope_stack, Some(&mut attr))?;
+            let (basety, new_tok) = declspec(
+                files,
+                &tok,
+                tag_scope_stack,
+                scope_stack,
+                Some(&mut attr),
+                locals,
+                globals,
+            )?;
             tok = new_tok;
 
             if attr.is_typedef {
-                tok = parse_typedef(files, &tok, basety, scope_stack)?;
+                tok = parse_typedef(
+                    files,
+                    &tok,
+                    basety,
+                    tag_scope_stack,
+                    scope_stack,
+                    locals,
+                    globals,
+                )?;
                 continue;
             }
 
@@ -3355,7 +3581,15 @@ pub fn stmt(
         node.cont_label = Some(cont_name);
 
         if is_typename(files, &tok, scope_stack) {
-            let (basety, new_tok) = declspec(files, &tok, tag_scope_stack, scope_stack, None)?;
+            let (basety, new_tok) = declspec(
+                files,
+                &tok,
+                tag_scope_stack,
+                scope_stack,
+                None,
+                locals,
+                globals,
+            )?;
             tok = new_tok;
             let (init, new_tok) = declaration(
                 files,
@@ -4033,7 +4267,7 @@ pub fn const_expr(
     files: &[File],
     tok: &Token,
     tag_scope_stack: &mut [Vec<TagScope>],
-    scope_stack: &mut [Vec<VarScope>],
+    scope_stack: &mut Vec<Vec<VarScope>>,
 ) -> Result<(i64, Token), String> {
     let mut empty_locals: Vec<Obj> = Vec::new();
     let mut empty_globals: Vec<Obj> = Vec::new();
@@ -4929,6 +5163,8 @@ pub fn cast(
             tok.next.as_ref().unwrap(),
             tag_scope_stack,
             scope_stack,
+            locals,
+            globals,
         )?;
         let tok = skip(files, &new_tok, ")")?;
 
@@ -5141,6 +5377,8 @@ pub fn postfix(
             tok.next.as_ref().unwrap(),
             tag_scope_stack,
             scope_stack,
+            locals,
+            globals,
         )?;
         let tok = skip(files, &tok, ")")?;
 
@@ -5437,6 +5675,8 @@ pub fn primary(
             tok.next.as_ref().unwrap().next.as_ref().unwrap(),
             tag_scope_stack,
             scope_stack,
+            locals,
+            globals,
         )?;
         let tok = skip(files, &tok, ")")?;
         return Ok((new_ulong(ty.size, tok_loc, file_no, line_no), tok));
@@ -5475,6 +5715,8 @@ pub fn primary(
             tok.next.as_ref().unwrap().next.as_ref().unwrap(),
             tag_scope_stack,
             scope_stack,
+            locals,
+            globals,
         )?;
         let tok = skip(files, &tok, ")")?;
         return Ok((new_ulong(ty.align, tok_loc, file_no, line_no), tok));
@@ -5517,6 +5759,8 @@ pub fn primary(
                 tok.next.as_ref().unwrap().next.as_ref().unwrap(),
                 tag_scope_stack,
                 scope_stack,
+                locals,
+                globals,
             )?;
             let tok = skip(files, &tok, ")")?;
 

@@ -1576,7 +1576,9 @@ pub fn emit_assembly() -> Result<String, String> {
 
     let files = get_input_files();
 
+    let mut empty_locals: Vec<Obj> = Vec::new();
     while tok.kind != TokenKind::Eof {
+        empty_locals.clear();
         let mut attr = VarAttr::default();
         let (basety, new_tok) = declspec(
             &files,
@@ -1584,11 +1586,21 @@ pub fn emit_assembly() -> Result<String, String> {
             &mut tag_scope_stack,
             &mut scope_stack,
             Some(&mut attr),
+            &mut empty_locals,
+            &mut globals,
         )?;
         tok = new_tok;
 
         if attr.is_typedef {
-            tok = parse_typedef(&files, &tok, basety, &mut scope_stack)?;
+            tok = parse_typedef(
+                &files,
+                &tok,
+                basety,
+                &mut tag_scope_stack,
+                &mut scope_stack,
+                &mut empty_locals,
+                &mut globals,
+            )?;
             continue;
         }
 

@@ -371,7 +371,7 @@ cargo run
 ### GNU/C11 Extensions, Atomics, and Advanced Features
 
 - [x] [GNU] Add statement expression
-- [ ] Add typeof
+- [x] Add typeof
 - [ ] [GNU] Add __builtin_types_compatible_p
 - [ ] Add _Generic
 - [ ] [GNU] Allow sizeof(<function type>)

@@ -977,6 +977,7 @@ fn is_keyword(name: &str) -> bool {
             | "_Noreturn"
             | "float"
             | "double"
+            | "typeof"
     )
 }
 
