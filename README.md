@@ -318,7 +318,7 @@ cargo run
 - [x] [GNU] Add line marker directive
 - [x] [GNU] Add __TIMESTAMP__ macro
 - [x] [GNU] Add __BASE_FILE__ macro
-- [ ] Add __VA_OPT__
+- [x] Add __VA_OPT__
 - [ ] [GNU] Handle ,##__VA_ARG__
 - [ ] Ignore #pragma
 - [ ] [GNU] Support GCC-style variadic macro

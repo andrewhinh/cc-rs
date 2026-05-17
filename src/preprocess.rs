@@ -494,6 +494,31 @@ fn find_arg<'a>(
     None
 }
 
+fn has_varargs(args: &Option<Box<MacroArg>>) -> bool {
+    let mut ap = args.as_ref();
+    while let Some(arg) = ap {
+        if arg.name == "__VA_ARGS__" && arg.tok.kind != TokenKind::Eof {
+            return true;
+        }
+        ap = arg.next.as_ref();
+    }
+    false
+}
+
+fn ident_spelling_eq(files: &[File], tok: &Token, s: &str) -> bool {
+    if tok.kind != TokenKind::Ident {
+        return false;
+    }
+    let Some(file) = files.iter().find(|f| f.file_no == tok.file_no) else {
+        return false;
+    };
+    file.contents
+        .chars()
+        .skip(tok.loc)
+        .take(tok.len)
+        .eq(s.chars())
+}
+
 fn quote_string(str: &str) -> String {
     let mut bufsize = 3;
     for c in str.chars() {
@@ -689,6 +714,32 @@ fn subst(files: &[File], tok: &Token, args: &Option<Box<MacroArg>>) -> Result<To
             let cur_tok = (*cur).clone();
             *cur = paste(&cur_tok, tok.next.as_ref().unwrap())?;
             tok = *tok.next.take().unwrap().next.take().unwrap();
+            continue;
+        }
+
+        if ident_spelling_eq(files, &tok, "__VA_OPT__")
+            && tok
+                .next
+                .as_ref()
+                .is_some_and(|n| equal(files, n.as_ref(), "("))
+        {
+            let open_paren = tok.next.as_ref().unwrap();
+            let inner_start = open_paren.next.as_ref().unwrap();
+            let (va_inner, rp) = read_macro_arg_one(files, inner_start.as_ref(), true)?;
+            if has_varargs(args) {
+                let mut t = va_inner.tok;
+                while t.kind != TokenKind::Eof {
+                    let next = t.next.take();
+                    cur.next = Some(Box::new(copy_token(&t)));
+                    cur = cur.next.as_mut().unwrap();
+                    is_start = false;
+                    match next {
+                        Some(n) => t = *n,
+                        None => break,
+                    }
+                }
+            }
+            tok = skip(files, &rp, ")")?;
             continue;
         }
 
