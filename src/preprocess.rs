@@ -232,6 +232,13 @@ fn timestamp_macro(tmpl: &Token) -> Token {
     new_str_token(&files, &content, tmpl)
 }
 
+fn base_file_macro(tmpl: &Token) -> Token {
+    let files = get_input_files();
+    let (tmpl, file) = builtin_spelling_and_file(&files, tmpl);
+    let base = std::env::var("CC_RS_BASE_FILE").unwrap_or_else(|_| file.name.clone());
+    new_str_token(&files, &base, tmpl)
+}
+
 pub fn init_macros() {
     define_macro("_LP64", "1");
     define_macro("__C99_MACRO_WITH_VA_ARGS", "1");
@@ -281,6 +288,7 @@ pub fn init_macros() {
     add_builtin("__LINE__", line_macro);
     add_builtin("__COUNTER__", counter_macro);
     add_builtin("__TIMESTAMP__", timestamp_macro);
+    add_builtin("__BASE_FILE__", base_file_macro);
 
     let now = Local::now();
     let date_s = now.format("%b %e %Y").to_string();

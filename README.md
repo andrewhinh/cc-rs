@@ -317,7 +317,7 @@ cargo run
 - [x] Add #line
 - [x] [GNU] Add line marker directive
 - [x] [GNU] Add __TIMESTAMP__ macro
-- [ ] [GNU] Add __BASE_FILE__ macro
+- [x] [GNU] Add __BASE_FILE__ macro
 - [ ] Add __VA_OPT__
 - [ ] [GNU] Handle ,##__VA_ARG__
 - [ ] Ignore #pragma
