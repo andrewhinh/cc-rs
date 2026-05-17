@@ -2142,8 +2142,10 @@ pub fn declspec(
                 )?;
                 ty = new_ty;
                 tok = new_tok;
-            } else {
-                ty = ty2.unwrap().borrow().clone();
+            } else if let Some(td) = ty2 {
+                let mut out = td.borrow().clone();
+                out.origin = Some(td);
+                ty = out;
                 tok = *tok.next.as_ref().unwrap().clone();
             }
             counter += OTHER;
@@ -5753,6 +5755,17 @@ pub fn primary(
             .take(tok.len)
             .collect();
 
+        if name == "__builtin_types_compatible_p" {
+            let t = skip(files, tok.next.as_ref().unwrap(), "(")?;
+            let (ty1, t) = typename(files, &t, tag_scope_stack, scope_stack, locals, globals)?;
+            let t = skip(files, &t, ",")?;
+            let (ty2, t) = typename(files, &t, tag_scope_stack, scope_stack, locals, globals)?;
+            let t = skip(files, &t, ")")?;
+
+            let n = i64::from(is_compatible(&ty1, &ty2));
+            return Ok((new_num(n, tok_loc, file_no, line_no), t));
+        }
+
         if name == "__builtin_reg_class" {
             let (ty, tok) = typename(
                 files,
@@ -5835,6 +5848,77 @@ pub fn pointer_to(base: Type) -> Type {
     }
 }
 
+fn compat_peeled(ty: &Type) -> Option<Type> {
+    let rc = ty.origin.as_ref()?;
+    let inner = rc.borrow();
+    match &inner.origin {
+        Some(p) if Rc::ptr_eq(rc, p) => None,
+        _ => Some(inner.clone()),
+    }
+}
+
+pub fn is_compatible(t1: &Type, t2: &Type) -> bool {
+    if std::ptr::eq(t1, t2) {
+        return true;
+    }
+
+    if let (Some(a), Some(b)) = (&t1.origin, &t2.origin)
+        && Rc::ptr_eq(a, b)
+    {
+        return true;
+    }
+
+    if let Some(inner) = compat_peeled(t1) {
+        return is_compatible(&inner, t2);
+    }
+
+    if let Some(inner) = compat_peeled(t2) {
+        return is_compatible(t1, &inner);
+    }
+
+    if t1.kind != t2.kind {
+        return false;
+    }
+
+    match t1.kind {
+        TypeKind::Struct | TypeKind::Union | TypeKind::Enum => false,
+        TypeKind::Void => true,
+        TypeKind::Bool | TypeKind::Char | TypeKind::Short | TypeKind::Int | TypeKind::Long => {
+            t1.is_unsigned == t2.is_unsigned
+        }
+        TypeKind::Float | TypeKind::Double => true,
+        TypeKind::Ptr => {
+            let b1 = t1.base.as_ref().unwrap().borrow().clone();
+            let b2 = t2.base.as_ref().unwrap().borrow().clone();
+            is_compatible(&b1, &b2)
+        }
+        TypeKind::Func => {
+            let r1 = t1.return_ty.as_ref().unwrap();
+            let r2 = t2.return_ty.as_ref().unwrap();
+            if !is_compatible(r1, r2) || t1.is_variadic != t2.is_variadic {
+                return false;
+            }
+            let mut p1 = t1.params.as_deref();
+            let mut p2 = t2.params.as_deref();
+            while let (Some(a), Some(b)) = (p1, p2) {
+                if !is_compatible(a, b) {
+                    return false;
+                }
+                p1 = a.next.as_deref();
+                p2 = b.next.as_deref();
+            }
+            p1.is_none() && p2.is_none()
+        }
+        TypeKind::Array => {
+            is_compatible(
+                &t1.base.as_ref().unwrap().borrow().clone(),
+                &t2.base.as_ref().unwrap().borrow().clone(),
+            ) && t1.array_len == t2.array_len
+                && t1.array_len < 0
+        }
+    }
+}
+
 pub fn func_type(return_ty: Type) -> Type {
     Type {
         kind: TypeKind::Func,
@@ -5856,7 +5940,9 @@ pub fn func_type(return_ty: Type) -> Type {
 }
 
 pub fn copy_type(ty: &Type) -> Type {
-    ty.clone()
+    let mut ret = ty.clone();
+    ret.origin = Some(Rc::new(RefCell::new(ty.clone())));
+    ret
 }
 
 fn copy_struct_type(ty: &Type) -> Type {
