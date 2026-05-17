@@ -321,7 +321,7 @@ cargo run
 - [x] Add __VA_OPT__
 - [x] [GNU] Handle ,##__VA_ARG__
 - [x] Ignore #pragma
-- [ ] [GNU] Support GCC-style variadic macro
+- [x] [GNU] Support GCC-style variadic macro
 - [ ] Add -idirafter option
 - [ ] Add -include option
 - [ ] Add string hashmap

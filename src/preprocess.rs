@@ -47,6 +47,7 @@ struct MacroArg {
     next: Option<Box<MacroArg>>,
     name: String,
     tok: Token,
+    is_va_args: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -55,7 +56,7 @@ struct Macro {
     name: String,
     is_objlike: bool,
     params: Option<Box<MacroParam>>,
-    is_variadic: bool,
+    va_args_name: Option<String>,
     body: Token,
     deleted: bool,
     handler: Option<MacroHandler>,
@@ -109,7 +110,7 @@ fn add_macro(
     name: String,
     is_objlike: bool,
     params: Option<Box<MacroParam>>,
-    is_variadic: bool,
+    va_args_name: Option<String>,
     body: Token,
     deleted: bool,
     handler: Option<MacroHandler>,
@@ -119,7 +120,7 @@ fn add_macro(
         name,
         is_objlike,
         params,
-        is_variadic,
+        va_args_name,
         body,
         deleted,
         handler,
@@ -132,7 +133,7 @@ pub fn define_macro(name: &str, body: &str) {
     let file = new_file("<built-in>".to_string(), file_no, body.to_string());
     add_input_file(file.clone());
     let tok = tokenize(&file);
-    add_macro(name.to_string(), true, None, false, tok, false, None);
+    add_macro(name.to_string(), true, None, None, tok, false, None);
 }
 
 pub fn undef_macro(name: &str) {
@@ -140,7 +141,7 @@ pub fn undef_macro(name: &str) {
     let file = new_file("<built-in>".to_string(), file_no, String::new());
     add_input_file(file.clone());
     let tok = tokenize(&file);
-    add_macro(name.to_string(), true, None, false, tok, true, None);
+    add_macro(name.to_string(), true, None, None, tok, true, None);
 }
 
 fn add_builtin(name: &str, handler: MacroHandler) {
@@ -152,7 +153,7 @@ fn add_builtin(name: &str, handler: MacroHandler) {
         name.to_string(),
         true,
         None,
-        false,
+        None,
         tok,
         false,
         Some(handler),
@@ -300,7 +301,7 @@ pub fn init_macros() {
 fn read_macro_params(
     files: &[File],
     tok: &Token,
-    is_variadic: &mut bool,
+    va_args_name: &mut Option<String>,
 ) -> Result<(Option<Box<MacroParam>>, Token), String> {
     let mut head: Option<Box<MacroParam>> = None;
     let mut cur: &mut Option<Box<MacroParam>> = &mut head;
@@ -312,7 +313,7 @@ fn read_macro_params(
         }
 
         if equal(files, &tok, "...") {
-            *is_variadic = true;
+            *va_args_name = Some("__VA_ARGS__".to_string());
             let tok = skip(files, tok.next.as_ref().unwrap(), ")")?;
             return Ok((head, tok));
         }
@@ -323,6 +324,14 @@ fn read_macro_params(
 
         let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
         let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
+
+        // [GNU] ident... variadic naming.
+        let next_after_ident = tok.next.as_ref().unwrap();
+        if equal(files, next_after_ident.as_ref(), "...") {
+            *va_args_name = Some(name);
+            let after = skip(files, next_after_ident.next.as_ref().unwrap().as_ref(), ")")?;
+            return Ok((head, after));
+        }
 
         let param = Box::new(MacroParam { next: None, name });
 
@@ -397,6 +406,7 @@ fn read_macro_arg_one(
         next: None,
         name: String::new(),
         tok: *head.next.unwrap(),
+        is_va_args: false,
     };
 
     Ok((arg, tok))
@@ -406,7 +416,7 @@ fn read_macro_args(
     files: &[File],
     tok: &Token,
     params: &Option<Box<MacroParam>>,
-    is_variadic: bool,
+    va_args_name: Option<&str>,
 ) -> Result<(Option<Box<MacroArg>>, Token), String> {
     let start = tok.clone();
     let mut tok = tok
@@ -446,12 +456,13 @@ fn read_macro_args(
         pp = p.next.as_ref();
     }
 
-    if is_variadic {
+    if let Some(va_name) = va_args_name {
         let arg = if equal(files, &tok, ")") {
             MacroArg {
                 next: None,
-                name: "__VA_ARGS__".to_string(),
+                name: va_name.to_string(),
                 tok: new_eof(&tok),
+                is_va_args: true,
             }
         } else {
             if params.is_some() {
@@ -459,7 +470,8 @@ fn read_macro_args(
             }
             let (mut arg, new_tok) = read_macro_arg_one(files, &tok, true)?;
             tok = new_tok;
-            arg.name = "__VA_ARGS__".to_string();
+            arg.name = va_name.to_string();
+            arg.is_va_args = true;
             arg
         };
         let arg_box = Box::new(arg);
@@ -497,7 +509,7 @@ fn find_arg<'a>(
 fn has_varargs(args: &Option<Box<MacroArg>>) -> bool {
     let mut ap = args.as_ref();
     while let Some(arg) = ap {
-        if arg.name == "__VA_ARGS__" && arg.tok.kind != TokenKind::Eof {
+        if arg.is_va_args && arg.tok.kind != TokenKind::Eof {
             return true;
         }
         ap = arg.next.as_ref();
@@ -674,13 +686,13 @@ fn subst(files: &[File], tok: &Token, args: &Option<Box<MacroArg>>) -> Result<To
             continue;
         }
 
-        // [GNU] ,## __VA_ARGS__
+        // [GNU] ,## removes comma when variadic expansion is empty.
         if equal(files, &tok, ",")
             && let Some(sharp_ref) = tok.next.as_ref()
             && equal(files, sharp_ref.as_ref(), "##")
             && let Some(va_id_ref) = sharp_ref.next.as_ref()
             && let Some(arg) = find_arg(args, files, va_id_ref.as_ref())
-            && arg.name == "__VA_ARGS__"
+            && arg.is_va_args
         {
             let mut sharp_box = tok.next.take().unwrap();
             let mut va_ident_box = sharp_box.next.take().unwrap();
@@ -849,16 +861,16 @@ fn read_macro_definition(files: &[File], tok: &Token) -> Result<Token, String> {
     let next_tok = tok.next.as_ref().unwrap();
 
     if !next_tok.has_space && equal(files, next_tok, "(") {
-        let mut is_variadic = false;
+        let mut va_args_name = None;
         let (params, tok) =
-            read_macro_params(files, next_tok.next.as_ref().unwrap(), &mut is_variadic)?;
+            read_macro_params(files, next_tok.next.as_ref().unwrap(), &mut va_args_name)?;
         let (body, rest) = copy_line(files, &tok);
-        add_macro(name, false, params, is_variadic, body, false, None);
+        add_macro(name, false, params, va_args_name, body, false, None);
         return Ok(rest);
     }
 
     let (body, rest) = copy_line(files, next_tok);
-    add_macro(name, true, None, false, body, false, None);
+    add_macro(name, true, None, None, body, false, None);
     Ok(rest)
 }
 
@@ -894,7 +906,7 @@ fn expand_macro(files: &[File], tok: &Token) -> Option<Token> {
     }
 
     let macro_token = tok;
-    let (args, rparen) = read_macro_args(files, tok, &m.params, m.is_variadic).ok()?;
+    let (args, rparen) = read_macro_args(files, tok, &m.params, m.va_args_name.as_deref()).ok()?;
     let hs = hideset_intersection(&macro_token.hideset, &rparen.hideset);
     let hs = hideset_union(&hs, &HashSet::from([m.name.clone()]));
     let mut body = subst(files, &m.body, &args).ok()?;
