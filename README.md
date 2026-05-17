@@ -320,7 +320,7 @@ cargo run
 - [x] [GNU] Add __BASE_FILE__ macro
 - [x] Add __VA_OPT__
 - [x] [GNU] Handle ,##__VA_ARG__
-- [ ] Ignore #pragma
+- [x] Ignore #pragma
 - [ ] [GNU] Support GCC-style variadic macro
 - [ ] Add -idirafter option
 - [ ] Add -include option
