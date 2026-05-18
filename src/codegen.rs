@@ -1,5 +1,6 @@
 use crate::File;
 use crate::get_input_files;
+use crate::parse::mark_live_globals;
 use crate::preprocess::{preprocess, reset_counter};
 use crate::tokenize::tokenize_file;
 use crate::{
@@ -1618,7 +1619,7 @@ pub fn emit_assembly() -> Result<String, String> {
         }
 
         if is_function(&files, &tok, &scope_stack)? {
-            let (func, new_tok) = function(
+            let (_, new_tok) = function(
                 &files,
                 &tok,
                 basety,
@@ -1628,7 +1629,6 @@ pub fn emit_assembly() -> Result<String, String> {
                 &attr,
             )?;
             tok = new_tok;
-            globals.push(func);
         } else {
             tok = global_variable(
                 &files,
@@ -1641,6 +1641,8 @@ pub fn emit_assembly() -> Result<String, String> {
             )?;
         }
     }
+
+    mark_live_globals(&mut globals);
 
     let mut result = String::new();
     let files = get_input_files();
@@ -1689,6 +1691,10 @@ pub fn emit_assembly() -> Result<String, String> {
 
     for func in globals.iter_mut() {
         if !func.is_function || !func.is_definition {
+            continue;
+        }
+
+        if !func.is_live {
             continue;
         }
 

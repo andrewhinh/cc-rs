@@ -117,7 +117,7 @@ cargo run
 - [x] Add va_copy()
 - [x] Dereferencing a function shouldn't do anything
 - [x] Handle inline functions as static functions
-- [ ] Do not emit static inline functions if referenced by no one
+- [x] Do not emit static inline functions if referenced by no one
 
 ### Type System, Declarations, and Semantics
 

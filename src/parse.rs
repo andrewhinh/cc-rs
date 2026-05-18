@@ -14,6 +14,46 @@ thread_local! {
     static BRK_LABEL: Cell<Option<String>> = const { Cell::new(None) };
     static CONT_LABEL: Cell<Option<String>> = const { Cell::new(None) };
     static CURRENT_SWITCH: Cell<Option<Box<Node>>> = const { Cell::new(None) };
+    static PARSING_FN: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+fn func_index(globals: &[Obj], name: &str) -> Option<usize> {
+    let mut fallback = None;
+    for (i, o) in globals.iter().enumerate().rev() {
+        if o.name != name || !o.is_function {
+            continue;
+        }
+        if o.is_definition {
+            return Some(i);
+        }
+        if fallback.is_none() {
+            fallback = Some(i);
+        }
+    }
+    fallback
+}
+
+fn mark_live(globals: &mut [Obj], name: &str) {
+    let Some(idx) = func_index(globals, name) else {
+        return;
+    };
+    if globals[idx].is_live {
+        return;
+    }
+    globals[idx].is_live = true;
+    let refs = std::mem::take(&mut globals[idx].refs);
+    for ref_name in refs {
+        mark_live(globals, &ref_name);
+    }
+}
+
+pub(crate) fn mark_live_globals(globals: &mut [Obj]) {
+    for i in (0..globals.len()).rev() {
+        if globals[i].is_root {
+            let name = globals[i].name.clone();
+            mark_live(globals, &name);
+        }
+    }
 }
 
 fn gotos_get() -> Option<Box<Node>> {
@@ -383,6 +423,9 @@ pub fn new_var(name: String, ty: Type) -> Obj {
         is_definition: false,
         is_static: false,
         is_inline: false,
+        is_live: false,
+        is_root: false,
+        refs: Vec::new(),
         init_data: None,
         rel: None,
         params: Vec::new(),
@@ -3284,6 +3327,10 @@ pub fn function(
     fn_obj.is_definition = !is_definition;
     fn_obj.is_static = attr.is_static || (attr.is_inline && !attr.is_extern);
     fn_obj.is_inline = attr.is_inline;
+    fn_obj.is_root = !(fn_obj.is_static && fn_obj.is_inline);
+
+    let fn_index = globals.len();
+    globals.push(fn_obj.clone());
 
     if !fn_obj.is_definition {
         return Ok((fn_obj, tok));
@@ -3352,7 +3399,8 @@ pub fn function(
     });
 
     let return_ty = ty.return_ty.as_ref().map(|b| b.as_ref());
-    let (mut body, tok) = compound_stmt(
+    PARSING_FN.set(Some(fn_index));
+    let body_result = compound_stmt(
         files,
         &tok,
         &mut locals,
@@ -3360,17 +3408,22 @@ pub fn function(
         &mut local_scope_stack,
         tag_scope_stack,
         return_ty,
-    )?;
+    );
+    PARSING_FN.set(None);
+    let (mut body, tok) = body_result?;
 
     add_type(&mut body);
     resolve_goto_labels(files, &mut body)?;
 
-    fn_obj.body = Some(Box::new(body));
-    fn_obj.locals = locals;
+    let g = &mut globals[fn_index];
+    g.params = fn_obj.params;
+    g.va_area = fn_obj.va_area;
+    g.body = Some(Box::new(body));
+    g.locals = locals;
 
     tag_scope_stack.pop();
 
-    Ok((fn_obj, tok))
+    Ok((globals[fn_index].clone(), tok))
 }
 
 fn asm_stmt(files: &[File], tok: &Token) -> Result<(Node, Token), String> {
@@ -5982,6 +6035,13 @@ pub fn primary(
 
         if let Some(sc) = sc {
             if let Some(var) = sc.var {
+                if var.is_function {
+                    if let Some(fn_index) = PARSING_FN.get() {
+                        globals[fn_index].refs.push(var.name.clone());
+                    } else if let Some(idx) = func_index(globals, &var.name) {
+                        globals[idx].is_root = true;
+                    }
+                }
                 return Ok((
                     new_var_node(var, tok_loc, file_no, line_no),
                     *tok.next.as_ref().unwrap().clone(),
