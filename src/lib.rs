@@ -105,6 +105,7 @@ pub enum NodeKind {
     Case,
     NullExpr,
     Memzero,
+    Asm,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -563,6 +564,7 @@ pub struct Node {
     pub cont_label: Option<String>,
     pub case_next: Option<Box<Node>>,
     pub default_case: Option<Box<Node>>,
+    pub asm_str: Option<String>,
 }
 
 pub fn align_to(n: i64, align: i64) -> i64 {

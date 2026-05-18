@@ -1029,6 +1029,14 @@ fn gen_expr(
             }
             return Ok(());
         }
+        NodeKind::Asm => {
+            return Err(error_at(
+                files,
+                node.file_no,
+                node.tok_loc,
+                "invalid expression",
+            ));
+        }
         NodeKind::Comma => {
             gen_expr(node.lhs.as_ref().unwrap(), result, files, current_fn, depth)?;
             gen_expr(node.rhs.as_ref().unwrap(), result, files, current_fn, depth)?;
@@ -1246,7 +1254,8 @@ fn gen_expr(
         | NodeKind::Switch
         | NodeKind::Case
         | NodeKind::NullExpr
-        | NodeKind::Memzero => unreachable!(),
+        | NodeKind::Memzero
+        | NodeKind::Asm => unreachable!(),
     }
     Ok(())
 }
@@ -1394,6 +1403,11 @@ fn gen_stmt(
         }
         NodeKind::ExprStmt => {
             gen_expr(node.lhs.as_ref().unwrap(), result, files, current_fn, depth)?;
+        }
+        NodeKind::Asm => {
+            result.push_str("  ");
+            result.push_str(node.asm_str.as_ref().unwrap());
+            result.push('\n');
         }
         NodeKind::Goto => {
             result.push_str(&format!("  jmp {}\n", node.unique_label.as_ref().unwrap()));

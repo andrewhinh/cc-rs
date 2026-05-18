@@ -211,6 +211,7 @@ pub fn new_node(kind: NodeKind, tok_loc: usize, file_no: usize, line_no: usize) 
         cont_label: None,
         case_next: None,
         default_case: None,
+        asm_str: None,
     }
 }
 
@@ -2913,6 +2914,7 @@ pub fn declaration(
         cont_label: None,
         case_next: None,
         default_case: None,
+        asm_str: None,
     };
     let mut cur = &mut head;
     let mut first = true;
@@ -3364,6 +3366,33 @@ pub fn function(
     Ok((fn_obj, tok))
 }
 
+fn asm_stmt(files: &[File], tok: &Token) -> Result<(Node, Token), String> {
+    let tok_loc = tok.loc;
+    let file_no = tok.file_no;
+    let line_no = tok.line_no;
+    let mut node = new_node(NodeKind::Asm, tok_loc, file_no, line_no);
+
+    let mut cur = tok.next.as_ref().unwrap();
+    while equal(files, cur, "volatile") || equal(files, cur, "inline") {
+        cur = cur.next.as_ref().unwrap();
+    }
+
+    let cur = skip(files, cur, "(")?;
+    let ok = cur.kind == TokenKind::Str
+        && cur.ty.as_ref().is_some_and(|ty| {
+            ty.kind == TypeKind::Array
+                && ty.base.as_ref().map(|b| b.borrow().kind) == Some(TypeKind::Char)
+        })
+        && cur.str.is_some();
+    if !ok {
+        return Err(error_tok(files, &cur, "expected string literal"));
+    }
+    node.asm_str = Some(String::from_utf8_lossy(cur.str.as_ref().unwrap()).into_owned());
+
+    let tok = skip(files, cur.next.as_ref().unwrap(), ")")?;
+    Ok((node, tok))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn compound_stmt(
     files: &[File],
@@ -3411,6 +3440,7 @@ pub fn compound_stmt(
         cont_label: None,
         case_next: None,
         default_case: None,
+        asm_str: None,
     };
     let mut cur = &mut head;
 
@@ -3723,6 +3753,9 @@ pub fn stmt(
         let tok = skip(files, &tok, ")")?;
         let tok = skip(files, &tok, ";")?;
         return Ok((node, tok));
+    }
+    if equal(files, tok, "asm") {
+        return asm_stmt(files, tok);
     }
     if equal(files, tok, "goto") {
         let tok_loc = tok.loc;
@@ -5628,6 +5661,7 @@ pub fn funcall(
         cont_label: None,
         case_next: None,
         default_case: None,
+        asm_str: None,
     };
     let mut cur = &mut head;
 
@@ -6283,7 +6317,8 @@ pub fn add_type(node: &mut Node) {
         | NodeKind::Switch
         | NodeKind::Case
         | NodeKind::NullExpr
-        | NodeKind::Memzero => {}
+        | NodeKind::Memzero
+        | NodeKind::Asm => {}
         NodeKind::Var => {
             node.ty = Some(node.var.as_ref().unwrap().ty.clone());
         }

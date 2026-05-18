@@ -375,7 +375,7 @@ cargo run
 - [x] [GNU] Add __builtin_types_compatible_p
 - [x] Add _Generic
 - [x] [GNU] Allow sizeof(<function type>)
-- [ ] Add basic "asm" statement
+- [x] Add basic "asm" statement
 - [ ] [GNU] Support case ranges
 - [ ] Add atomic_compare_exchange
 - [ ] Add atomic_exchange
