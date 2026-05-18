@@ -758,15 +758,13 @@ pub fn convert_pp_number(files: &[File], tok: &mut Token) -> Result<(), String> 
         return Ok(());
     }
 
-    let chars: Vec<char> = s.chars().collect();
-    let fval = parse_float(&s)?;
+    let (num_str, ty) = match s.as_bytes().last().copied() {
+        Some(b'f' | b'F') if s.len() > 1 => (&s[..s.len() - 1], Type::new_float()),
+        Some(b'l' | b'L') if s.len() > 1 => (&s[..s.len() - 1], Type::new_double()),
+        _ => (s.as_str(), Type::new_double()),
+    };
 
-    let ty =
-        if !chars.is_empty() && (chars[chars.len() - 1] == 'f' || chars[chars.len() - 1] == 'F') {
-            Type::new_float()
-        } else {
-            Type::new_double()
-        };
+    let fval = parse_float(num_str)?;
 
     tok.kind = TokenKind::Num;
     tok.fval = fval;

@@ -5621,6 +5621,86 @@ pub fn funcall(
     Ok((node, tok))
 }
 
+fn generic_selection(
+    files: &[File],
+    err_tok: &Token,
+    lparen: &Token,
+    locals: &mut Vec<Obj>,
+    globals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+    tag_scope_stack: &mut Vec<Vec<TagScope>>,
+) -> Result<(Node, Token), String> {
+    let cursor = skip(files, lparen, "(")?;
+    let (mut ctrl, mut cursor) = assign(
+        files,
+        &cursor,
+        locals,
+        globals,
+        scope_stack,
+        tag_scope_stack,
+    )?;
+    add_type(&mut ctrl);
+    let mut t1 = ctrl.ty.clone().unwrap();
+    match t1.kind {
+        TypeKind::Func => t1 = pointer_to(t1),
+        TypeKind::Array => {
+            let base = t1.base.as_ref().unwrap().borrow().clone();
+            t1 = pointer_to(base);
+        }
+        _ => {}
+    }
+
+    let mut ret: Option<Node> = None;
+    let closing = loop {
+        let (closes, after_paren) = consume(files, &cursor, ")");
+        if closes {
+            break after_paren;
+        }
+        cursor = skip(files, &cursor, ",")?;
+
+        if equal(files, &cursor, "default") {
+            let colon = cursor.next.as_ref().unwrap();
+            let after_colon = skip(files, colon, ":")?;
+            let (node, t) = assign(
+                files,
+                &after_colon,
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+            if ret.is_none() {
+                ret = Some(node);
+            }
+            cursor = t;
+        } else {
+            let (t2, t) = typename(
+                files,
+                &cursor,
+                tag_scope_stack,
+                scope_stack,
+                locals,
+                globals,
+            )?;
+            let t = skip(files, &t, ":")?;
+            let (node, t) = assign(files, &t, locals, globals, scope_stack, tag_scope_stack)?;
+            if is_compatible(&t1, &t2) {
+                ret = Some(node);
+            }
+            cursor = t;
+        }
+    };
+
+    let Some(node) = ret else {
+        return Err(error_tok(
+            files,
+            err_tok,
+            "controlling expression type not compatible with any generic association type",
+        ));
+    };
+    Ok((node, closing))
+}
+
 pub fn primary(
     files: &[File],
     tok: &Token,
@@ -5739,6 +5819,19 @@ pub fn primary(
         add_type(&mut node);
         let align = node.ty.as_ref().unwrap().align;
         return Ok((new_ulong(align, tok_loc, file_no, line_no), tok));
+    }
+
+    if equal(files, tok, "_Generic") {
+        let lparen = tok.next.as_deref().unwrap();
+        return generic_selection(
+            files,
+            tok,
+            lparen,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        );
     }
 
     if tok.kind == TokenKind::Ident {

@@ -373,7 +373,7 @@ cargo run
 - [x] [GNU] Add statement expression
 - [x] Add typeof
 - [x] [GNU] Add __builtin_types_compatible_p
-- [ ] Add _Generic
+- [x] Add _Generic
 - [ ] [GNU] Allow sizeof(<function type>)
 - [ ] Add basic "asm" statement
 - [ ] [GNU] Support case ranges

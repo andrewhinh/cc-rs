@@ -963,6 +963,7 @@ fn is_keyword(name: &str) -> bool {
             | "default"
             | "extern"
             | "_Alignof"
+            | "_Generic"
             | "_Alignas"
             | "do"
             | "signed"
