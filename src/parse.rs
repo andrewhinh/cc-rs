@@ -382,6 +382,7 @@ pub fn new_var(name: String, ty: Type) -> Obj {
         is_function: false,
         is_definition: false,
         is_static: false,
+        is_inline: false,
         init_data: None,
         rel: None,
         params: Vec::new(),
@@ -2022,20 +2023,24 @@ pub fn declspec(
         if equal(files, &tok, "typedef")
             || equal(files, &tok, "static")
             || equal(files, &tok, "extern")
+            || equal(files, &tok, "inline")
         {
             if let Some(a) = attr.as_mut() {
                 if equal(files, &tok, "typedef") {
                     a.is_typedef = true;
                 } else if equal(files, &tok, "static") {
                     a.is_static = true;
-                } else {
+                } else if equal(files, &tok, "extern") {
                     a.is_extern = true;
+                } else {
+                    a.is_inline = true;
                 }
-                if a.is_typedef && a.is_static as i32 + a.is_extern as i32 > 1 {
+                if a.is_typedef && a.is_static as i32 + a.is_extern as i32 + a.is_inline as i32 > 1
+                {
                     return Err(error_tok(
                         files,
                         &tok,
-                        "typedef may not be used together with static or extern",
+                        "typedef may not be used together with static, extern or inline",
                     ));
                 }
             } else {
@@ -2215,6 +2220,7 @@ pub fn is_typename(files: &[File], tok: &Token, scope_stack: &[Vec<VarScope>]) -
         || equal(files, tok, "enum")
         || equal(files, tok, "static")
         || equal(files, tok, "extern")
+        || equal(files, tok, "inline")
         || equal(files, tok, "_Alignas")
         || equal(files, tok, "signed")
         || equal(files, tok, "unsigned")
@@ -3276,7 +3282,8 @@ pub fn function(
 
     let (is_definition, tok) = consume(files, &tok, ";");
     fn_obj.is_definition = !is_definition;
-    fn_obj.is_static = attr.is_static;
+    fn_obj.is_static = attr.is_static || (attr.is_inline && !attr.is_extern);
+    fn_obj.is_inline = attr.is_inline;
 
     if !fn_obj.is_definition {
         return Ok((fn_obj, tok));

@@ -522,6 +522,7 @@ pub struct Obj {
     pub is_function: bool,
     pub is_definition: bool,
     pub is_static: bool,
+    pub is_inline: bool,
     pub init_data: Option<Vec<u8>>,
     pub rel: Option<Box<Relocation>>,
     pub params: Vec<Obj>,
@@ -593,7 +594,7 @@ static VAR_UNIQUE_ID: AtomicU64 = AtomicU64::new(0);
 
 pub fn new_unique_name() -> String {
     let id = UNIQUE_ID.fetch_add(1, Ordering::SeqCst);
-    format!(".L..{}", id)
+    format!(".L.{}.{}", std::process::id(), id)
 }
 
 pub fn new_var_unique_id() -> u64 {
@@ -620,6 +621,7 @@ pub struct VarAttr {
     pub is_typedef: bool,
     pub is_static: bool,
     pub is_extern: bool,
+    pub is_inline: bool,
     pub align: i64,
 }
 
