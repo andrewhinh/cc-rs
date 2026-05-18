@@ -3295,6 +3295,16 @@ pub fn function(
         );
     }
 
+    // GCC/Chibicc: function id visible in-body; inserted before params so params
+    // shadow.
+    local_scope_stack.last_mut().unwrap().push(VarScope {
+        name: fn_obj.name.clone(),
+        var: Some(fn_obj.clone()),
+        type_def: None,
+        enum_ty: None,
+        enum_val: 0,
+    });
+
     if let Some(params) = &ty.params {
         create_param_lvars(files, params, &mut locals, &mut local_scope_stack)?;
     }
@@ -6013,10 +6023,11 @@ pub fn is_compatible(t1: &Type, t2: &Type) -> bool {
 }
 
 pub fn func_type(return_ty: Type) -> Type {
+    // GNU sizeof(function type) is 1.
     Type {
         kind: TypeKind::Func,
-        size: 0,
-        align: 0,
+        size: 1,
+        align: 1,
         is_unsigned: false,
         base: None,
         name: None,
