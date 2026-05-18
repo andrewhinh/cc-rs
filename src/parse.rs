@@ -4696,14 +4696,62 @@ pub fn conditional(
     let tok_loc = tok.loc;
     let file_no = tok.file_no;
     let line_no = tok.line_no;
-    let (then, new_tok) = expr(
-        files,
-        tok.next.as_ref().unwrap(),
-        locals,
-        globals,
-        scope_stack,
-        tag_scope_stack,
-    )?;
+
+    let q_next = tok
+        .next
+        .as_ref()
+        .ok_or_else(|| error_tok(files, &tok, "premature end of input"))?;
+
+    // [GNU] a ?: b → tmp=a, tmp?tmp:b
+    if equal(files, q_next, ":") {
+        let mut cond = cond;
+        add_type(&mut cond);
+        let ty = cond
+            .ty
+            .clone()
+            .ok_or_else(|| error_tok(files, &tok, "missing type"))?;
+        let var = new_lvar(String::new(), ty, locals, scope_stack);
+        let lhs = new_binary(
+            NodeKind::Assign,
+            new_var_node(var.clone(), tok_loc, file_no, line_no),
+            cond,
+            tok_loc,
+            file_no,
+            line_no,
+        );
+        let after_colon = q_next
+            .next
+            .as_ref()
+            .ok_or_else(|| error_tok(files, q_next, "premature end of input"))?;
+        let (els, els_tok) = conditional(
+            files,
+            after_colon,
+            locals,
+            globals,
+            scope_stack,
+            tag_scope_stack,
+        )?;
+        let mut rhs = new_node(NodeKind::Cond, tok_loc, file_no, line_no);
+        rhs.cond = Some(Box::new(new_var_node(
+            var.clone(),
+            tok_loc,
+            file_no,
+            line_no,
+        )));
+        rhs.then = Some(Box::new(new_var_node(
+            var.clone(),
+            tok_loc,
+            file_no,
+            line_no,
+        )));
+        rhs.els = Some(Box::new(els));
+        return Ok((
+            new_binary(NodeKind::Comma, lhs, rhs, tok_loc, file_no, line_no),
+            els_tok,
+        ));
+    }
+
+    let (then, new_tok) = expr(files, q_next, locals, globals, scope_stack, tag_scope_stack)?;
     tok = skip(files, &new_tok, ":")?;
 
     let (els, tok) = conditional(files, &tok, locals, globals, scope_stack, tag_scope_stack)?;

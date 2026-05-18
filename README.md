@@ -174,7 +174,7 @@ cargo run
 - [x] Handle flonum for if, while, do, !, ?:, || and &&
 - [x] Add flonum constant expression
 - [x] Add "long double" as an alias for "double"
-- [ ] [GNU] Add ?: operator with omitted operand
+- [x] [GNU] Add ?: operator with omitted operand
 - [ ] Add tentative definition
 - [ ] Add thread-local variable
 - [ ] Add alloca()
