@@ -322,7 +322,7 @@ cargo run
 - [x] [GNU] Handle ,##__VA_ARG__
 - [x] Ignore #pragma
 - [x] [GNU] Support GCC-style variadic macro
-- [ ] Add -idirafter option
+- [x] Add -idirafter option
 - [ ] Add -include option
 - [ ] Add string hashmap
 - [ ] Use hashmap for macro name lookup

@@ -57,6 +57,7 @@ fn parse_args() -> Args {
     let mut output_file: Option<String> = None;
     let mut input_paths: Vec<String> = Vec::new();
     let mut include_paths: Vec<String> = Vec::new();
+    let mut idirafter_paths: Vec<String> = Vec::new();
     let mut defines: Vec<String> = Vec::new();
     let mut undefines: Vec<String> = Vec::new();
     let mut i = 1;
@@ -147,6 +148,16 @@ fn parse_args() -> Args {
             continue;
         }
 
+        if args[i] == "-idirafter" {
+            i += 1;
+            if i >= args.len() {
+                usage(1);
+            }
+            idirafter_paths.push(args[i].clone());
+            i += 1;
+            continue;
+        }
+
         if args[i] == "-D" {
             i += 1;
             if i >= args.len() {
@@ -208,6 +219,8 @@ fn parse_args() -> Args {
         input_paths.push(args[i].clone());
         i += 1;
     }
+
+    include_paths.extend(idirafter_paths);
 
     if input_paths.is_empty() && base_file.is_none() {
         eprintln!("no input files");
