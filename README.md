@@ -239,7 +239,7 @@ cargo run
 - [x] Add struct designated initializer
 - [x] Add union designated initializer
 - [x] Handle struct designator for anonymous struct member
-- [ ] Add offsetof
+- [x] Add offsetof
 - [ ] [GNU] Support array range designator
 - [ ] Add __attribute__((packed))
 - [ ] Add __attribute__((aligned(N)) for struct declaration

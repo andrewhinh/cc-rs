@@ -496,9 +496,7 @@ fn find_arg<'a>(
 ) -> Option<&'a MacroArg> {
     let mut ap = args.as_ref();
     while let Some(arg) = ap {
-        let file = files.iter().find(|f| f.file_no == tok.file_no)?;
-        let tok_str: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
-        if tok_str == arg.name {
+        if ident_spelling_eq(files, tok, &arg.name) {
             return Some(arg);
         }
         ap = arg.next.as_ref();
@@ -859,8 +857,12 @@ fn read_macro_definition(files: &[File], tok: &Token) -> Result<Token, String> {
     let file = files.iter().find(|f| f.file_no == tok.file_no).unwrap();
     let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
     let next_tok = tok.next.as_ref().unwrap();
-
-    if !next_tok.has_space && equal(files, next_tok, "(") {
+    if !next_tok.has_space
+        && equal(files, next_tok, "(")
+        && next_tok.next.as_ref().is_some_and(|t| {
+            t.kind == TokenKind::Ident || equal(files, t, ")") || equal(files, t, "...")
+        })
+    {
         let mut va_args_name = None;
         let (params, tok) =
             read_macro_params(files, next_tok.next.as_ref().unwrap(), &mut va_args_name)?;

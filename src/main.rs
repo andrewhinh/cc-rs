@@ -342,10 +342,9 @@ fn cc1(args: &Args) -> Result<(), String> {
         add_default_include_paths(&argv0);
     }
 
-    let tok = tokenize_file(input).ok_or("cannot open input file")?;
-    let tok = preprocess(tok)?;
-
     if args.opt_e {
+        let tok = tokenize_file(input).ok_or("cannot open input file")?;
+        let tok = preprocess(tok)?;
         return print_tokens(&tok, args.opt_o.as_ref());
     }
 
