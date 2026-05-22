@@ -56,6 +56,18 @@ pub(crate) fn mark_live_globals(globals: &mut [Obj]) {
     }
 }
 
+pub(crate) fn scan_globals(globals: &mut Vec<Obj>) {
+    let all = globals.clone();
+    globals.retain(|var| {
+        if !var.is_tentative {
+            return true;
+        }
+        !all.iter().any(|var2| {
+            var2.unique_id != var.unique_id && var2.is_definition && var2.name == var.name
+        })
+    });
+}
+
 fn gotos_get() -> Option<Box<Node>> {
     GOTOS.with(|g| g.take())
 }
@@ -421,6 +433,7 @@ pub fn new_var(name: String, ty: Type) -> Obj {
         offset: 0,
         is_function: false,
         is_definition: false,
+        is_tentative: false,
         is_static: false,
         is_inline: false,
         is_live: false,
@@ -2496,6 +2509,9 @@ pub fn global_variable(
     let mut first = true;
 
     loop {
+        if equal(files, &tok, ";") {
+            return Ok(*tok.next.as_ref().unwrap().clone());
+        }
         if !first {
             tok = skip(files, &tok, ",")?;
         }
@@ -2538,6 +2554,8 @@ pub fn global_variable(
                 tag_scope_stack,
                 scope_stack,
             )?;
+        } else if !attr.is_extern {
+            var.is_tentative = true;
         }
         globals.push(var);
 

@@ -1,6 +1,6 @@
 use crate::File;
 use crate::get_input_files;
-use crate::parse::mark_live_globals;
+use crate::parse::{mark_live_globals, scan_globals};
 use crate::preprocess::{preprocess, reset_counter};
 use crate::tokenize::tokenize_file;
 use crate::{
@@ -1643,6 +1643,7 @@ pub fn emit_assembly() -> Result<String, String> {
     }
 
     mark_live_globals(&mut globals);
+    scan_globals(&mut globals);
 
     let mut result = String::new();
     let files = get_input_files();
@@ -1661,9 +1662,19 @@ pub fn emit_assembly() -> Result<String, String> {
             result.push_str(&format!("  .globl {}\n", var.name));
         }
 
+        let align = effective_var_align(var);
+        result.push_str(&format!("  .align {}\n", align));
+
+        if var.is_tentative {
+            result.push_str(&format!(
+                "  .comm {}, {}, {}\n",
+                var.name, var.ty.size, align
+            ));
+            continue;
+        }
+
         if let Some(init_data) = &var.init_data {
             result.push_str("  .data\n");
-            result.push_str(&format!("  .align {}\n", effective_var_align(var)));
             result.push_str(&format!("{}:\n", var.name));
 
             let mut rel = var.rel.clone();
@@ -1684,7 +1695,6 @@ pub fn emit_assembly() -> Result<String, String> {
         }
 
         result.push_str("  .bss\n");
-        result.push_str(&format!("  .align {}\n", effective_var_align(var)));
         result.push_str(&format!("{}:\n", var.name));
         result.push_str(&format!("  .zero {}\n", var.ty.size));
     }

@@ -175,7 +175,7 @@ cargo run
 - [x] Add flonum constant expression
 - [x] Add "long double" as an alias for "double"
 - [x] [GNU] Add ?: operator with omitted operand
-- [ ] Add tentative definition
+- [x] Add tentative definition
 - [ ] Add thread-local variable
 - [ ] Add alloca()
 - [ ] Add sizeof() for VLA
