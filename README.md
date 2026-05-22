@@ -349,7 +349,7 @@ cargo run
 - [x] Ignore -O, -W and -g and other flags
 - [x] Turn on -Wall compiler flag and fix compiler warnings
 - [x] Use __attribute__((format(printf, ...))) to find programming errors
-- [ ] Add -fcommon and -fno-common flags
+- [x] Add -fcommon and -fno-common flags
 - [ ] Add -x option
 - [ ] Make -E to imply -xc
 - [ ] Add -l option

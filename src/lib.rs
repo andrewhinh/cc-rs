@@ -630,9 +630,18 @@ pub struct VarAttr {
 }
 
 static INCLUDE_PATHS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static OPT_FCOMMON: Mutex<bool> = Mutex::new(true);
 
 pub fn get_include_paths() -> Vec<String> {
     INCLUDE_PATHS.lock().unwrap().clone()
+}
+
+pub fn get_opt_fcommon() -> bool {
+    *OPT_FCOMMON.lock().unwrap()
+}
+
+pub fn set_opt_fcommon(value: bool) {
+    *OPT_FCOMMON.lock().unwrap() = value;
 }
 
 pub fn set_include_paths(paths: Vec<String>) {

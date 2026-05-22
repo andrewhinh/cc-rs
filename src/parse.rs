@@ -286,7 +286,11 @@ fn token_snapshot(tok: &Token) -> Token {
         str: tok.str.clone(),
         file_no: tok.file_no,
         line_no: tok.line_no,
+        line_delta: tok.line_delta,
         at_bol: tok.at_bol,
+        has_space: tok.has_space,
+        hideset: tok.hideset.clone(),
+        origin: None,
     }
 }
 

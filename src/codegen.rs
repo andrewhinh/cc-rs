@@ -1,5 +1,4 @@
 use crate::File;
-use crate::get_input_files;
 use crate::parse::{mark_live_globals, scan_globals};
 use crate::preprocess::{preprocess, reset_counter};
 use crate::tokenize::tokenize_file;
@@ -7,6 +6,7 @@ use crate::{
     Node, NodeKind, Obj, TagScope, TokenKind, Type, TypeKind, VarAttr, VarScope, error_at,
 };
 use crate::{declspec, function, global_variable, is_function, new_unique_name, parse_typedef};
+use crate::{get_input_files, get_opt_fcommon};
 
 fn epilogue_lbl(fn_name: &str) -> String {
     format!(".L.{}.ret_{}", std::process::id(), fn_name)
@@ -1665,7 +1665,7 @@ pub fn emit_assembly() -> Result<String, String> {
         let align = effective_var_align(var);
         result.push_str(&format!("  .align {}\n", align));
 
-        if var.is_tentative {
+        if get_opt_fcommon() && var.is_tentative {
             result.push_str(&format!(
                 "  .comm {}, {}, {}\n",
                 var.name, var.ty.size, align
@@ -1838,32 +1838,19 @@ pub fn emit_assembly() -> Result<String, String> {
                 }
             }
 
-            // va_elem at va_area offset 0:
-            //   0-3: gp_offset
-            //   4-7: fp_offset
-            //   8-15: overflow_arg_area
-            //   16-23: reg_save_area
-            // Saved registers start at va_area offset 24
-
-            // gp_offset at va_area offset 0
             result.push_str(&format!("  movl ${}, {}(%rbp)\n", gp * 8, off));
-            // fp_offset at va_area offset 4
             result.push_str(&format!("  movl ${}, {}(%rbp)\n", fp * 8 + 48, off + 4));
-            // overflow_arg_area at va_area offset 8 = rbp + 16
             result.push_str("  lea 16(%rbp), %rax\n");
             result.push_str(&format!("  movq %rax, {}(%rbp)\n", off + 8));
-            // reg_save_area at va_area offset 16
             result.push_str(&format!("  lea {}(%rbp), %rax\n", off + 24));
             result.push_str(&format!("  movq %rax, {}(%rbp)\n", off + 16));
 
-            // Save GP registers at va_area + 24 onwards
             result.push_str(&format!("  movq %rdi, {}(%rbp)\n", off + 24));
             result.push_str(&format!("  movq %rsi, {}(%rbp)\n", off + 32));
             result.push_str(&format!("  movq %rdx, {}(%rbp)\n", off + 40));
             result.push_str(&format!("  movq %rcx, {}(%rbp)\n", off + 48));
             result.push_str(&format!("  movq %r8, {}(%rbp)\n", off + 56));
             result.push_str(&format!("  movq %r9, {}(%rbp)\n", off + 64));
-            // Save FP registers
             result.push_str(&format!("  movsd %xmm0, {}(%rbp)\n", off + 72));
             result.push_str(&format!("  movsd %xmm1, {}(%rbp)\n", off + 80));
             result.push_str(&format!("  movsd %xmm2, {}(%rbp)\n", off + 88));

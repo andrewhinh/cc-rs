@@ -7,7 +7,7 @@ use std::{
 
 use cc_rs::{
     Token, TokenKind, add_include_path, codegen::emit_assembly, define_macro, get_input_files,
-    init_macros, preprocess::preprocess, tokenize::tokenize_file, undef_macro,
+    init_macros, preprocess::preprocess, set_opt_fcommon, tokenize::tokenize_file, undef_macro,
 };
 use tempfile::NamedTempFile;
 
@@ -24,6 +24,7 @@ struct Args {
     include_paths: Vec<String>,
     defines: Vec<String>,
     undefines: Vec<String>,
+    opt_fcommon: bool,
 }
 
 fn usage(status: i32) {
@@ -60,6 +61,7 @@ fn parse_args() -> Args {
     let mut idirafter_paths: Vec<String> = Vec::new();
     let mut defines: Vec<String> = Vec::new();
     let mut undefines: Vec<String> = Vec::new();
+    let mut opt_fcommon = true;
     let mut i = 1;
 
     while i < args.len() {
@@ -93,6 +95,18 @@ fn parse_args() -> Args {
 
         if args[i] == "-E" {
             opt_e = true;
+            i += 1;
+            continue;
+        }
+
+        if args[i] == "-fcommon" {
+            opt_fcommon = true;
+            i += 1;
+            continue;
+        }
+
+        if args[i] == "-fno-common" {
+            opt_fcommon = false;
             i += 1;
             continue;
         }
@@ -240,6 +254,7 @@ fn parse_args() -> Args {
         include_paths,
         defines,
         undefines,
+        opt_fcommon,
     }
 }
 
@@ -330,6 +345,7 @@ fn print_tokens(tok: &Token, opt_o: Option<&String>) -> Result<(), String> {
 
 fn cc1(args: &Args) -> Result<(), String> {
     let input = args.base_file.as_ref().ok_or("no input file for cc1")?;
+    set_opt_fcommon(args.opt_fcommon);
     unsafe {
         std::env::set_var("CC_RS_BASE_FILE", input);
     }
