@@ -7,6 +7,7 @@ mod unicode_width;
 
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
@@ -15,7 +16,10 @@ pub use parse::{
     add_type, const_expr, declspec, find_tag, find_typedef, function, global_variable, is_function,
     is_typename, parse_typedef, push_tag_scope,
 };
-pub use preprocess::{define_macro, init_macros, preprocess, reset_counter, undef_macro};
+pub use preprocess::{
+    append_tokens, define_macro, init_macros, preprocess, reset_counter, search_include_paths,
+    undef_macro,
+};
 pub use tokenize::{
     add_input_file, consume, convert_pp_number, equal, error_at, error_tok, get_file_no,
     get_input_files, new_file, skip, tokenize, tokenize_file, tokenize_string_literal, warn_tok,
@@ -652,4 +656,28 @@ pub fn set_include_paths(paths: Vec<String>) {
 
 pub fn add_include_path(path: String) {
     INCLUDE_PATHS.lock().unwrap().push(path);
+}
+
+fn resolve_include_path(incl: &str) -> Result<String, String> {
+    if Path::new(incl).exists() {
+        return Ok(incl.to_string());
+    }
+    search_include_paths(incl).ok_or_else(|| format!("-include: {incl}: No such file or directory"))
+}
+
+pub fn tokenize_input(base: &str, opt_include: &[String]) -> Result<Token, String> {
+    let mut tok: Option<Token> = None;
+    for incl in opt_include {
+        let path = resolve_include_path(incl)?;
+        let tok2 = tokenize_file(&path).ok_or_else(|| format!("{path}: cannot open input file"))?;
+        tok = Some(match tok {
+            None => tok2,
+            Some(t) => append_tokens(t, tok2),
+        });
+    }
+    let base_tok = tokenize_file(base).ok_or_else(|| format!("{base}: cannot open input file"))?;
+    Ok(match tok {
+        None => base_tok,
+        Some(t) => append_tokens(t, base_tok),
+    })
 }

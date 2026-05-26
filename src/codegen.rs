@@ -1,7 +1,7 @@
 use crate::File;
 use crate::parse::{mark_live_globals, scan_globals};
 use crate::preprocess::{preprocess, reset_counter};
-use crate::tokenize::tokenize_file;
+use crate::tokenize_input;
 use crate::{
     Node, NodeKind, Obj, TagScope, TokenKind, Type, TypeKind, VarAttr, VarScope, error_at,
 };
@@ -1577,7 +1577,7 @@ fn fix_var_offsets(node: &mut Node, locals: &[Obj]) {
     }
 }
 
-pub fn emit_assembly() -> Result<String, String> {
+pub fn emit_assembly(opt_include: &[String]) -> Result<String, String> {
     if !cfg!(target_arch = "x86_64") {
         return Err(String::from(
             "Unsupported target architecture: require x86_64",
@@ -1586,7 +1586,7 @@ pub fn emit_assembly() -> Result<String, String> {
 
     let base_file =
         std::env::var("CC_RS_BASE_FILE").map_err(|_| "base file not set".to_string())?;
-    let tok = tokenize_file(&base_file).ok_or("cannot open input file")?;
+    let tok = tokenize_input(&base_file, opt_include)?;
     reset_counter();
     let mut tok = preprocess(tok)?;
 

@@ -896,7 +896,7 @@ fn expand_macro(files: &[File], tok: &Token) -> Option<Token> {
         hs.insert(m.name.clone());
         let mut body = add_hideset(m.body, &hs);
         set_origin(&mut body, tok);
-        let mut result = append(body, *tok.next.as_ref().unwrap().clone());
+        let mut result = append_tokens(body, *tok.next.as_ref().unwrap().clone());
         result.at_bol = tok.at_bol;
         result.has_space = tok.has_space;
         return Some(result);
@@ -917,7 +917,7 @@ fn expand_macro(files: &[File], tok: &Token) -> Option<Token> {
         .next
         .clone()
         .unwrap_or_else(|| Box::new(new_eof(&rparen)));
-    let mut result = append(body, *next_tok);
+    let mut result = append_tokens(body, *next_tok);
     result.at_bol = macro_token.at_bol;
     result.has_space = macro_token.has_space;
     Some(result)
@@ -1495,7 +1495,7 @@ fn join_adjacent_string_literals(files: &[File], tok: &mut Token) -> Result<(), 
     Ok(())
 }
 
-fn append(tok1: Token, tok2: Token) -> Token {
+pub fn append_tokens(tok1: Token, tok2: Token) -> Token {
     if tok1.kind == TokenKind::Eof {
         return tok2;
     }
@@ -1551,7 +1551,7 @@ fn token_str_eq(files: &[File], tok: &Token, s: &str) -> bool {
             .eq(s.chars())
 }
 
-fn search_include_paths(filename: &str) -> Option<String> {
+pub fn search_include_paths(filename: &str) -> Option<String> {
     if filename.starts_with('/') {
         return Some(filename.to_string());
     }
@@ -1669,7 +1669,7 @@ fn read_line_marker(files: &[File], first_arg: &Token) -> Result<Token, String> 
 
 fn include_file(tok: Token, path: &str, filename_tok: &Token) -> Result<Token, String> {
     match tokenize_file(path) {
-        Some(tok2) => Ok(append(tok2, tok)),
+        Some(tok2) => Ok(append_tokens(tok2, tok)),
         None => Err(error_tok(
             &get_input_files(),
             filename_tok,

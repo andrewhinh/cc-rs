@@ -7,7 +7,7 @@ use std::{
 
 use cc_rs::{
     Token, TokenKind, add_include_path, codegen::emit_assembly, define_macro, get_input_files,
-    init_macros, preprocess::preprocess, set_opt_fcommon, tokenize::tokenize_file, undef_macro,
+    init_macros, preprocess::preprocess, set_opt_fcommon, tokenize_input, undef_macro,
 };
 use tempfile::NamedTempFile;
 
@@ -22,6 +22,7 @@ struct Args {
     output_file: Option<String>,
     input_paths: Vec<String>,
     include_paths: Vec<String>,
+    opt_include: Vec<String>,
     defines: Vec<String>,
     undefines: Vec<String>,
     opt_fcommon: bool,
@@ -58,6 +59,7 @@ fn parse_args() -> Args {
     let mut output_file: Option<String> = None;
     let mut input_paths: Vec<String> = Vec::new();
     let mut include_paths: Vec<String> = Vec::new();
+    let mut opt_include: Vec<String> = Vec::new();
     let mut idirafter_paths: Vec<String> = Vec::new();
     let mut defines: Vec<String> = Vec::new();
     let mut undefines: Vec<String> = Vec::new();
@@ -172,6 +174,16 @@ fn parse_args() -> Args {
             continue;
         }
 
+        if args[i] == "-include" {
+            i += 1;
+            if i >= args.len() {
+                usage(1);
+            }
+            opt_include.push(args[i].clone());
+            i += 1;
+            continue;
+        }
+
         if args[i] == "-D" {
             i += 1;
             if i >= args.len() {
@@ -252,6 +264,7 @@ fn parse_args() -> Args {
         output_file,
         input_paths,
         include_paths,
+        opt_include,
         defines,
         undefines,
         opt_fcommon,
@@ -359,12 +372,12 @@ fn cc1(args: &Args) -> Result<(), String> {
     }
 
     if args.opt_e {
-        let tok = tokenize_file(input).ok_or("cannot open input file")?;
+        let tok = tokenize_input(input, &args.opt_include)?;
         let tok = preprocess(tok)?;
         return print_tokens(&tok, args.opt_o.as_ref());
     }
 
-    let asm = emit_assembly()?;
+    let asm = emit_assembly(&args.opt_include)?;
 
     let out_path = args.output_file.as_ref();
     let mut out = open_output_file(out_path);
