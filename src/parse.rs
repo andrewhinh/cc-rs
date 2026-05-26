@@ -438,6 +438,7 @@ pub fn new_var(name: String, ty: Type) -> Obj {
         is_function: false,
         is_definition: false,
         is_tentative: false,
+        is_tls: false,
         is_static: false,
         is_inline: false,
         is_live: false,
@@ -2084,6 +2085,8 @@ pub fn declspec(
             || equal(files, &tok, "static")
             || equal(files, &tok, "extern")
             || equal(files, &tok, "inline")
+            || equal(files, &tok, "_Thread_local")
+            || equal(files, &tok, "__thread")
         {
             if let Some(a) = attr.as_mut() {
                 if equal(files, &tok, "typedef") {
@@ -2092,15 +2095,23 @@ pub fn declspec(
                     a.is_static = true;
                 } else if equal(files, &tok, "extern") {
                     a.is_extern = true;
-                } else {
+                } else if equal(files, &tok, "inline") {
                     a.is_inline = true;
+                } else {
+                    a.is_tls = true;
                 }
-                if a.is_typedef && a.is_static as i32 + a.is_extern as i32 + a.is_inline as i32 > 1
+                if a.is_typedef
+                    && a.is_static as i32
+                        + a.is_extern as i32
+                        + a.is_inline as i32
+                        + a.is_tls as i32
+                        > 1
                 {
                     return Err(error_tok(
                         files,
                         &tok,
-                        "typedef may not be used together with static, extern or inline",
+                        "typedef may not be used together with static, extern, inline, __thread \
+                         or _Thread_local",
                     ));
                 }
             } else {
@@ -2281,6 +2292,8 @@ pub fn is_typename(files: &[File], tok: &Token, scope_stack: &[Vec<VarScope>]) -
         || equal(files, tok, "static")
         || equal(files, tok, "extern")
         || equal(files, tok, "inline")
+        || equal(files, tok, "_Thread_local")
+        || equal(files, tok, "__thread")
         || equal(files, tok, "_Alignas")
         || equal(files, tok, "signed")
         || equal(files, tok, "unsigned")
@@ -2546,6 +2559,7 @@ pub fn global_variable(
         let mut var = new_gvar(name, ty);
         var.is_definition = !attr.is_extern;
         var.is_static = attr.is_static;
+        var.is_tls = attr.is_tls;
         if attr.align > 0 {
             var.align = attr.align;
         }
@@ -2558,7 +2572,7 @@ pub fn global_variable(
                 tag_scope_stack,
                 scope_stack,
             )?;
-        } else if !attr.is_extern {
+        } else if !attr.is_extern && !attr.is_tls {
             var.is_tentative = true;
         }
         globals.push(var);

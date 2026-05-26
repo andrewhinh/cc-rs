@@ -522,6 +522,7 @@ pub struct Obj {
     pub is_function: bool,
     pub is_definition: bool,
     pub is_tentative: bool,
+    pub is_tls: bool,
     pub is_static: bool,
     pub is_inline: bool,
     pub(crate) is_live: bool,
@@ -626,6 +627,7 @@ pub struct VarAttr {
     pub is_static: bool,
     pub is_extern: bool,
     pub is_inline: bool,
+    pub is_tls: bool,
     pub align: i64,
 }
 

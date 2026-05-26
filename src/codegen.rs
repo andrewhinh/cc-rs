@@ -36,6 +36,12 @@ fn gen_addr(
                 return Ok(());
             }
 
+            if var.is_tls {
+                result.push_str("  mov %fs:0, %rax\n");
+                result.push_str(&format!("  add ${}@tpoff, %rax\n", var.name));
+                return Ok(());
+            }
+
             result.push_str(&format!("  lea {}(%rip), %rax\n", var.name));
         }
         NodeKind::Deref => {
@@ -1674,7 +1680,11 @@ pub fn emit_assembly() -> Result<String, String> {
         }
 
         if let Some(init_data) = &var.init_data {
-            result.push_str("  .data\n");
+            if var.is_tls {
+                result.push_str("  .section .tdata,\"awT\",@progbits\n");
+            } else {
+                result.push_str("  .data\n");
+            }
             result.push_str(&format!("{}:\n", var.name));
 
             let mut rel = var.rel.clone();
@@ -1694,7 +1704,11 @@ pub fn emit_assembly() -> Result<String, String> {
             continue;
         }
 
-        result.push_str("  .bss\n");
+        if var.is_tls {
+            result.push_str("  .section .tbss,\"awT\",@nobits\n");
+        } else {
+            result.push_str("  .bss\n");
+        }
         result.push_str(&format!("{}:\n", var.name));
         result.push_str(&format!("  .zero {}\n", var.ty.size));
     }

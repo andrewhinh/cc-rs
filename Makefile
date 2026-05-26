@@ -89,7 +89,7 @@ test-stage2: stage2/cpp
 		name=$$(basename $${i%.c}); \
 		echo $$i; \
 		timeout $(TEST_TIMEOUT)s ./stage2/cpp -S $(CPP_INCLUDES) -o stage2/test/$$name.s $$i || exit 1; \
-		timeout $(TEST_TIMEOUT)s gcc -no-pie -o stage2/test/$$name.exe stage2/test/$$name.s -xc src/cpp/test/common || exit 1; \
+		timeout $(TEST_TIMEOUT)s gcc -no-pie -pthread -o stage2/test/$$name.exe stage2/test/$$name.s -xc src/cpp/test/common || exit 1; \
 		timeout $(TEST_TIMEOUT)s ./stage2/test/$$name.exe || exit 1; \
 		echo; \
 	done
@@ -103,7 +103,7 @@ test: target/release/cc-rs
 		name=$$(basename $${i%.c}); \
 		echo $$i; \
 		timeout $(TEST_TIMEOUT)s $(CC_RS) -S $(CPP_INCLUDES) -o /tmp/$$name.s $$i; \
-		timeout $(TEST_TIMEOUT)s gcc -no-pie -o /tmp/$$name /tmp/$$name.s -xc src/cpp/test/common; \
+		timeout $(TEST_TIMEOUT)s gcc -no-pie -pthread -o /tmp/$$name /tmp/$$name.s -xc src/cpp/test/common; \
 		timeout $(TEST_TIMEOUT)s /tmp/$$name || exit 1; \
 		echo; \
 	done

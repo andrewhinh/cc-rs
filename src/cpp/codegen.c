@@ -100,6 +100,12 @@ static void gen_addr(Node *node) {
     }
 
     // Global variable
+    if (node->var->is_tls) {
+      println("  mov %%fs:0, %%rax");
+      println("  add $%s@tpoff, %%rax", node->var->name);
+      return;
+    }
+
     println("  lea %s(%%rip), %%rax", node->var->name);
     return;
   case ND_DEREF:
@@ -1142,7 +1148,11 @@ static void emit_data(Obj *prog) {
     }
 
     if (var->init_data) {
-      println("  .data");
+      if (var->is_tls)
+        println("  .section .tdata,\"awT\",@progbits");
+      else
+        println("  .data");
+
       println("%s:", var->name);
 
       Relocation *rel = var->rel;
@@ -1159,7 +1169,11 @@ static void emit_data(Obj *prog) {
       continue;
     }
 
-    println("  .bss");
+    if (var->is_tls)
+      println("  .section .tbss,\"awT\",@nobits");
+    else
+      println("  .bss");
+
     println("%s:", var->name);
     println("  .zero %d", var->ty->size);
   }

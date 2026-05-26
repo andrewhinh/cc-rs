@@ -176,7 +176,7 @@ cargo run
 - [x] Add "long double" as an alias for "double"
 - [x] [GNU] Add ?: operator with omitted operand
 - [x] Add tentative definition
-- [ ] Add thread-local variable
+- [x] Add thread-local variable
 - [ ] Add alloca()
 - [ ] Add sizeof() for VLA
 - [ ] Add pointer arithmetic for VLA
