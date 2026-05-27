@@ -288,6 +288,10 @@ fn parse_args() -> Result<Args, String> {
         process::exit(1);
     }
 
+    if opt_e {
+        opt_x = FileType::C;
+    }
+
     Ok(Args {
         opt_cc1,
         opt_s,

@@ -351,7 +351,7 @@ cargo run
 - [x] Use __attribute__((format(printf, ...))) to find programming errors
 - [x] Add -fcommon and -fno-common flags
 - [x] Add -x option
-- [ ] Make -E to imply -xc
+- [x] Make -E to imply -xc
 - [ ] Add -l option
 - [ ] Add -s option
 - [ ] Recognize .a and .so files

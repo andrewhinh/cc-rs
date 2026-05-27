@@ -198,4 +198,7 @@ echo 'int x;' > $tmp/foo.c
 $compiler -c -x assembler -x none -o $tmp/foo.o $tmp/foo.c
 check '-x none'
 
+echo foo | $compiler -E - | grep -q foo
+check '-E implies -xc'
+
 echo OK

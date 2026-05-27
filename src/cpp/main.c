@@ -203,6 +203,9 @@ static void parse_args(int argc, char **argv) {
 
   if (input_paths.len == 0 && !base_file)
     error("no input files");
+
+  if (opt_E)
+    opt_x = FILE_C;
 }
 
 static FILE *open_file(char *path) {
