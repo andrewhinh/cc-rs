@@ -11,6 +11,14 @@ use cc_rs::{
 };
 use tempfile::NamedTempFile;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FileType {
+    None,
+    C,
+    Asm,
+    Obj,
+}
+
 struct Args {
     opt_cc1: bool,
     opt_s: bool,
@@ -26,11 +34,21 @@ struct Args {
     defines: Vec<String>,
     undefines: Vec<String>,
     opt_fcommon: bool,
+    opt_x: FileType,
 }
 
 fn usage(status: i32) {
     eprintln!("Usage: cc-rs [ -o <path> ] <file>");
     process::exit(status);
+}
+
+fn parse_opt_x(s: &str) -> Result<FileType, String> {
+    match s {
+        "c" => Ok(FileType::C),
+        "assembler" => Ok(FileType::Asm),
+        "none" => Ok(FileType::None),
+        _ => Err(format!("<command line>: unknown argument for -x: {s}")),
+    }
 }
 
 fn add_default_include_paths(argv0: &str) {
@@ -47,7 +65,7 @@ fn add_default_include_paths(argv0: &str) {
     add_include_path("/usr/include".to_string());
 }
 
-fn parse_args() -> Args {
+fn parse_args() -> Result<Args, String> {
     let args: Vec<String> = env::args().collect();
     let mut opt_cc1 = false;
     let mut opt_s = false;
@@ -64,6 +82,7 @@ fn parse_args() -> Args {
     let mut defines: Vec<String> = Vec::new();
     let mut undefines: Vec<String> = Vec::new();
     let mut opt_fcommon = true;
+    let mut opt_x = FileType::None;
     let mut i = 1;
 
     while i < args.len() {
@@ -184,6 +203,22 @@ fn parse_args() -> Args {
             continue;
         }
 
+        if args[i] == "-x" {
+            i += 1;
+            if i >= args.len() {
+                usage(1);
+            }
+            opt_x = parse_opt_x(&args[i])?;
+            i += 1;
+            continue;
+        }
+
+        if args[i].starts_with("-x") && args[i] != "-x" {
+            opt_x = parse_opt_x(&args[i][2..])?;
+            i += 1;
+            continue;
+        }
+
         if args[i] == "-D" {
             i += 1;
             if i >= args.len() {
@@ -253,7 +288,7 @@ fn parse_args() -> Args {
         process::exit(1);
     }
 
-    Args {
+    Ok(Args {
         opt_cc1,
         opt_s,
         opt_c,
@@ -268,7 +303,8 @@ fn parse_args() -> Args {
         defines,
         undefines,
         opt_fcommon,
-    }
+        opt_x,
+    })
 }
 
 fn open_output_file(path: Option<&String>) -> Box<dyn Write> {
@@ -416,6 +452,27 @@ fn endswith(s: &str, suffix: &str) -> bool {
     s.len() >= suffix.len() && &s[s.len() - suffix.len()..] == suffix
 }
 
+fn get_file_type(filename: &str, opt_x: FileType) -> Result<FileType, String> {
+    if endswith(filename, ".o") {
+        return Ok(FileType::Obj);
+    }
+
+    if opt_x != FileType::None {
+        return Ok(opt_x);
+    }
+
+    if endswith(filename, ".c") {
+        return Ok(FileType::C);
+    }
+    if endswith(filename, ".s") {
+        return Ok(FileType::Asm);
+    }
+
+    Err(format!(
+        "<command line>: unknown file extension: {filename}"
+    ))
+}
+
 fn file_exists(path: &str) -> bool {
     Path::new(path).exists()
 }
@@ -505,7 +562,7 @@ fn define(str: &str) {
 
 fn run() -> Result<(), String> {
     init_macros();
-    let args = parse_args();
+    let args = parse_args()?;
 
     for d in &args.defines {
         define(d);
@@ -532,25 +589,22 @@ fn run() -> Result<(), String> {
     let mut _tmpfiles: Vec<NamedTempFile> = Vec::new();
 
     for input in &args.input_paths {
-        if endswith(input, ".o") {
+        let file_type = get_file_type(input, args.opt_x)?;
+
+        if file_type == FileType::Obj {
             ld_args.push(input.clone());
             continue;
         }
 
-        if endswith(input, ".s") {
+        if file_type == FileType::Asm {
             if !args.opt_s {
                 let output = args
                     .opt_o
                     .clone()
                     .unwrap_or_else(|| replace_extn(input, ".o"));
                 assemble(input, &output, args.opt_hash_hash_hash)?;
-                ld_args.push(output);
             }
             continue;
-        }
-
-        if !endswith(input, ".c") && input != "-" {
-            return Err(format!("unknown file extension: {}", input));
         }
 
         if args.opt_e {
