@@ -450,6 +450,7 @@ pub fn new_var(name: String, ty: Type) -> Obj {
         body: None,
         locals: Vec::new(),
         va_area: None,
+        alloca_bottom: None,
         stack_size: 0,
         unique_id: new_var_unique_id(),
     }
@@ -500,6 +501,14 @@ pub fn new_gvar(name: String, ty: Type) -> Obj {
     var.is_definition = true;
     var.is_static = true;
     var
+}
+
+pub(crate) fn declare_builtin_functions(globals: &mut Vec<Obj>) {
+    let mut ty = func_type(pointer_to(Type::new_void()));
+    ty.params = Some(Box::new(copy_type(&Type::new_int())));
+    let mut builtin = new_gvar("alloca".to_string(), ty);
+    builtin.is_definition = false;
+    globals.push(builtin);
 }
 
 fn skip_excess_element(
@@ -3413,6 +3422,14 @@ pub fn function(
         fn_obj.va_area = Some(Box::new(va_area));
     }
 
+    let alloca_bottom = new_lvar(
+        "__alloca_size__".to_string(),
+        pointer_to(Type::new_char()),
+        &mut locals,
+        &mut local_scope_stack,
+    );
+    fn_obj.alloca_bottom = Some(Box::new(alloca_bottom));
+
     let tok = skip(files, &tok, "{")?;
 
     let func_name_bytes = fn_obj.name.as_bytes();
@@ -3454,6 +3471,7 @@ pub fn function(
     let g = &mut globals[fn_index];
     g.params = fn_obj.params;
     g.va_area = fn_obj.va_area;
+    g.alloca_bottom = fn_obj.alloca_bottom;
     g.body = Some(Box::new(body));
     g.locals = locals;
 

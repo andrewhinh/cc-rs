@@ -97,6 +97,7 @@ static Obj *locals;
 
 // Likewise, global variables are accumulated to this list.
 static Obj *globals;
+static Obj *builtin_alloca;
 
 static Scope *scope = &(Scope){};
 
@@ -2913,6 +2914,7 @@ static Token *function(Token *tok, Type *basety, VarAttr *attr) {
   fn->params = locals;
   if (ty->is_variadic)
     fn->va_area = new_lvar("__va_area__", array_of(ty_char, 136));
+  fn->alloca_bottom = new_lvar("__alloca_size__", pointer_to(ty_char));
 
   tok = skip(tok, "{");
 
@@ -2998,9 +3000,18 @@ static void scan_globals(void) {
   globals = head.next;
 }
 
+static void declare_builtin_functions(void) {
+  Type *ty = func_type(pointer_to(ty_void));
+  ty->params = copy_type(ty_int);
+  builtin_alloca = new_gvar("alloca", ty);
+  builtin_alloca->is_definition = false;
+  push_scope("alloca")->var = builtin_alloca;
+}
+
 // program = (typedef | function-definition | global-variable)*
 Obj *parse(Token *tok) {
   globals = NULL;
+  declare_builtin_functions();
 
   while (tok->kind != TK_EOF) {
     VarAttr attr = {};

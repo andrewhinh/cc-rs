@@ -177,7 +177,7 @@ cargo run
 - [x] [GNU] Add ?: operator with omitted operand
 - [x] Add tentative definition
 - [x] Add thread-local variable
-- [ ] Add alloca()
+- [x] Add alloca()
 - [ ] Add sizeof() for VLA
 - [ ] Add pointer arithmetic for VLA
 - [ ] Support sizeof(typename) where typename is a VLA

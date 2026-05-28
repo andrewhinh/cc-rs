@@ -538,6 +538,7 @@ pub struct Obj {
     pub body: Option<Box<Node>>,
     pub locals: Vec<Obj>,
     pub va_area: Option<Box<Obj>>,
+    pub alloca_bottom: Option<Box<Obj>>,
     #[allow(dead_code)]
     pub stack_size: i64,
     pub unique_id: u64,

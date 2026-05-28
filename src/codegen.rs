@@ -1,5 +1,5 @@
 use crate::File;
-use crate::parse::{mark_live_globals, scan_globals};
+use crate::parse::{declare_builtin_functions, mark_live_globals, scan_globals};
 use crate::preprocess::{preprocess, reset_counter};
 use crate::tokenize_input;
 use crate::{
@@ -10,6 +10,30 @@ use crate::{get_input_files, get_opt_fcommon};
 
 fn epilogue_lbl(fn_name: &str) -> String {
     format!(".L.{}.ret_{}", std::process::id(), fn_name)
+}
+
+fn builtin_alloca(current_fn: &Obj, result: &mut String) {
+    let off = current_fn.alloca_bottom.as_ref().unwrap().offset;
+    result.push_str("  add $15, %rdi\n");
+    result.push_str("  and $0xfffffff0, %edi\n");
+    result.push_str(&format!("  mov {off}(%rbp), %rcx\n"));
+    result.push_str("  sub %rsp, %rcx\n");
+    result.push_str("  mov %rsp, %rax\n");
+    result.push_str("  sub %rdi, %rsp\n");
+    result.push_str("  mov %rsp, %rdx\n");
+    result.push_str("1:\n");
+    result.push_str("  cmp $0, %rcx\n");
+    result.push_str("  je 2f\n");
+    result.push_str("  mov (%rax), %r8b\n");
+    result.push_str("  mov %r8b, (%rdx)\n");
+    result.push_str("  inc %rdx\n");
+    result.push_str("  inc %rax\n");
+    result.push_str("  dec %rcx\n");
+    result.push_str("  jmp 1b\n");
+    result.push_str("2:\n");
+    result.push_str(&format!("  mov {off}(%rbp), %rax\n"));
+    result.push_str("  sub %rdi, %rax\n");
+    result.push_str(&format!("  mov %rax, {off}(%rbp)\n"));
 }
 
 fn gen_addr(
@@ -902,6 +926,22 @@ fn gen_expr(
             return Ok(());
         }
         NodeKind::FuncCall => {
+            if node.lhs.as_ref().is_some_and(|lhs| {
+                lhs.kind == NodeKind::Var
+                    && lhs.var.as_ref().is_some_and(|var| var.name == "alloca")
+            }) {
+                gen_expr(
+                    node.args.as_ref().unwrap(),
+                    result,
+                    files,
+                    current_fn,
+                    depth,
+                )?;
+                result.push_str("  mov %rax, %rdi\n");
+                builtin_alloca(current_fn, result);
+                return Ok(());
+            }
+
             let argreg64 = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
 
             let ret_buffer = node.ret_buffer.as_ref().map(|b| b.as_ref());
@@ -1591,6 +1631,7 @@ pub fn emit_assembly(opt_include: &[String]) -> Result<String, String> {
     let mut tok = preprocess(tok)?;
 
     let mut globals: Vec<Obj> = Vec::new();
+    declare_builtin_functions(&mut globals);
     let mut tag_scope_stack: Vec<Vec<TagScope>> = vec![Vec::new()];
     let mut scope_stack: Vec<Vec<VarScope>> = vec![Vec::new()];
 
@@ -1824,6 +1865,13 @@ pub fn emit_assembly(opt_include: &[String]) -> Result<String, String> {
         {
             va_area.offset = lv.offset;
         }
+        if let Some(alloca_bottom) = &mut func.alloca_bottom
+            && let Some(lv) = locals
+                .iter()
+                .find(|l| l.unique_id == alloca_bottom.unique_id)
+        {
+            alloca_bottom.offset = lv.offset;
+        }
         if let Some(body) = &mut func.body {
             fix_var_offsets(body, &locals);
         }
@@ -1839,6 +1887,10 @@ pub fn emit_assembly(opt_include: &[String]) -> Result<String, String> {
         result.push_str("  push %rbp\n");
         result.push_str("  mov %rsp, %rbp\n");
         result.push_str(&format!("  sub ${}, %rsp\n", stack_size));
+
+        if let Some(alloca_bottom) = &func.alloca_bottom {
+            result.push_str(&format!("  mov %rsp, {}(%rbp)\n", alloca_bottom.offset));
+        }
 
         if let Some(va_area) = &func.va_area {
             let off = va_area.offset;
