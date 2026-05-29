@@ -178,7 +178,7 @@ cargo run
 - [x] Add tentative definition
 - [x] Add thread-local variable
 - [x] Add alloca()
-- [ ] Add sizeof() for VLA
+- [x] Add sizeof() for VLA
 - [ ] Add pointer arithmetic for VLA
 - [ ] Support sizeof(typename) where typename is a VLA
 - [ ] Do not define __STDC_NO_VLA__

@@ -2638,6 +2638,8 @@ pub fn func_params(
         origin: None,
         is_flexible: false,
         is_variadic: false,
+        vla_len: None,
+        vla_size: None,
     };
     let mut cur = &mut head;
     let mut first = true;
@@ -2710,6 +2712,129 @@ pub fn func_params(
     Ok((func_ty, rest))
 }
 
+fn is_const_expr(files: &[File], node: &mut Node) -> Result<bool, String> {
+    add_type(node);
+    match node.kind {
+        NodeKind::Add
+        | NodeKind::Sub
+        | NodeKind::Mul
+        | NodeKind::Div
+        | NodeKind::BitAnd
+        | NodeKind::BitOr
+        | NodeKind::BitXor
+        | NodeKind::Shl
+        | NodeKind::Shr
+        | NodeKind::Eq
+        | NodeKind::Ne
+        | NodeKind::Lt
+        | NodeKind::Le
+        | NodeKind::LogAnd
+        | NodeKind::LogOr => Ok(is_const_expr(files, node.lhs.as_mut().unwrap())?
+            && is_const_expr(files, node.rhs.as_mut().unwrap())?),
+        NodeKind::Cond => {
+            if !is_const_expr(files, node.cond.as_mut().unwrap())? {
+                return Ok(false);
+            }
+            let branch = if eval(files, node.cond.as_mut().unwrap())? != 0 {
+                node.then.as_mut().unwrap()
+            } else {
+                node.els.as_mut().unwrap()
+            };
+            is_const_expr(files, branch)
+        }
+        NodeKind::Comma => is_const_expr(files, node.rhs.as_mut().unwrap()),
+        NodeKind::Neg | NodeKind::Not | NodeKind::BitNot | NodeKind::Cast => {
+            is_const_expr(files, node.lhs.as_mut().unwrap())
+        }
+        NodeKind::Num => Ok(true),
+        _ => Ok(false),
+    }
+}
+
+fn compute_vla_size(
+    ty: &mut Type,
+    tok: &Token,
+    locals: &mut Vec<Obj>,
+    scope_stack: &mut Vec<Vec<VarScope>>,
+) -> Result<Node, String> {
+    let tok_loc = tok.loc;
+    let file_no = tok.file_no;
+    let line_no = tok.line_no;
+    let mut node = new_node(NodeKind::NullExpr, tok_loc, file_no, line_no);
+
+    if let Some(base) = ty.base.as_ref() {
+        let base_node = compute_vla_size(&mut base.borrow_mut(), tok, locals, scope_stack)?;
+        node = new_binary(NodeKind::Comma, node, base_node, tok_loc, file_no, line_no);
+    }
+
+    if ty.kind != TypeKind::Vla {
+        return Ok(node);
+    }
+
+    let base_sz = {
+        let base_ty = ty.base.as_ref().unwrap().borrow();
+        if base_ty.kind == TypeKind::Vla {
+            let vla_size = base_ty
+                .vla_size
+                .as_ref()
+                .ok_or_else(|| "internal error: missing VLA size".to_string())?;
+            new_var_node((**vla_size).clone(), tok_loc, file_no, line_no)
+        } else {
+            new_ulong(base_ty.size, tok_loc, file_no, line_no)
+        }
+    };
+
+    let vla_size_var = new_lvar(String::new(), Type::new_ulong(), locals, scope_stack);
+    ty.vla_size = Some(Box::new(vla_size_var.clone()));
+
+    let mut vla_len = ty.vla_len.as_ref().unwrap().as_ref().clone();
+    add_type(&mut vla_len);
+    let mul = new_binary(NodeKind::Mul, vla_len, base_sz, tok_loc, file_no, line_no);
+    let assign = new_binary(
+        NodeKind::Assign,
+        new_var_node(vla_size_var, tok_loc, file_no, line_no),
+        mul,
+        tok_loc,
+        file_no,
+        line_no,
+    );
+    Ok(new_binary(
+        NodeKind::Comma,
+        node,
+        assign,
+        tok_loc,
+        file_no,
+        line_no,
+    ))
+}
+
+fn new_alloca(
+    sz: Node,
+    globals: &[Obj],
+    tok_loc: usize,
+    file_no: usize,
+    line_no: usize,
+) -> Result<Node, String> {
+    let builtin = globals
+        .iter()
+        .find(|v| v.name == "alloca")
+        .ok_or_else(|| "internal error: missing alloca builtin".to_string())?
+        .clone();
+    let mut sz = sz;
+    add_type(&mut sz);
+    let mut node = new_unary(
+        NodeKind::FuncCall,
+        new_var_node(builtin.clone(), tok_loc, file_no, line_no),
+        tok_loc,
+        file_no,
+        line_no,
+    );
+    node.func_ty = Some(builtin.ty.clone());
+    node.ty = Some(builtin.ty.return_ty.as_ref().unwrap().as_ref().clone());
+    node.args = Some(Box::new(sz));
+    Ok(node)
+}
+
 pub fn array_dimensions(
     files: &[File],
     tok: &Token,
@@ -2741,7 +2866,7 @@ pub fn array_dimensions(
         return Ok((Type::new_array(ty, -1), rest));
     }
 
-    let (sz, tok) = const_expr(files, &tok, tag_scope_stack, scope_stack)?;
+    let (expr_node, tok) = conditional(files, &tok, locals, globals, scope_stack, tag_scope_stack)?;
     let tok = skip(files, &tok, "]")?;
     let (ty, rest) = type_suffix(
         files,
@@ -2752,6 +2877,11 @@ pub fn array_dimensions(
         locals,
         globals,
     )?;
+    let mut expr_node = expr_node;
+    if ty.kind == TypeKind::Vla || !is_const_expr(files, &mut expr_node)? {
+        return Ok((Type::new_vla(ty, expr_node), rest));
+    }
+    let sz = eval(files, &mut expr_node)?;
     Ok((Type::new_array(ty, sz), rest))
 }
 
@@ -3081,6 +3211,76 @@ pub fn declaration(
                 let tok_loc = tok.loc;
                 let file_no = tok.file_no;
                 let line_no = tok.line_no;
+                let mut node = new_node(NodeKind::Block, tok_loc, file_no, line_no);
+                node.body = head.next;
+                return Ok((node, *tok.next.as_ref().unwrap().clone()));
+            }
+            continue;
+        }
+
+        let mut ty = ty;
+        let vla_size_node = compute_vla_size(&mut ty, &tok, locals, scope_stack)?;
+        let tok_loc = tok.loc;
+        let file_no = tok.file_no;
+        let line_no = tok.line_no;
+        cur.next = Some(Box::new(new_unary(
+            NodeKind::ExprStmt,
+            vla_size_node,
+            tok_loc,
+            file_no,
+            line_no,
+        )));
+        cur = cur.next.as_mut().unwrap();
+
+        if ty.kind == TypeKind::Vla {
+            if equal(files, &tok, "=") {
+                return Err(error_tok(
+                    files,
+                    &tok,
+                    "variable-sized object may not be initialized",
+                ));
+            }
+
+            let var = new_lvar(name.clone(), ty.clone(), locals, scope_stack);
+            let name_tok = ty.name.as_ref().unwrap();
+            let vla_size = ty
+                .vla_size
+                .as_ref()
+                .ok_or_else(|| "internal error: missing VLA size".to_string())?;
+            let expr = new_binary(
+                NodeKind::Assign,
+                new_var_node(
+                    var.clone(),
+                    name_tok.loc,
+                    name_tok.file_no,
+                    name_tok.line_no,
+                ),
+                new_alloca(
+                    new_var_node(
+                        (**vla_size).clone(),
+                        name_tok.loc,
+                        name_tok.file_no,
+                        name_tok.line_no,
+                    ),
+                    globals,
+                    name_tok.loc,
+                    name_tok.file_no,
+                    name_tok.line_no,
+                )?,
+                name_tok.loc,
+                name_tok.file_no,
+                name_tok.line_no,
+            );
+            cur.next = Some(Box::new(new_unary(
+                NodeKind::ExprStmt,
+                expr,
+                name_tok.loc,
+                name_tok.file_no,
+                name_tok.line_no,
+            )));
+            cur = cur.next.as_mut().unwrap();
+
+            if equal(files, &tok, ";") {
                 let mut node = new_node(NodeKind::Block, tok_loc, file_no, line_no);
                 node.body = head.next;
                 return Ok((node, *tok.next.as_ref().unwrap().clone()));
@@ -5967,6 +6167,16 @@ pub fn primary(
             globals,
         )?;
         let tok = skip(files, &tok, ")")?;
+        if ty.kind == TypeKind::Vla {
+            let vla_size = ty
+                .vla_size
+                .as_ref()
+                .ok_or_else(|| "internal error: missing VLA size".to_string())?;
+            return Ok((
+                new_var_node((**vla_size).clone(), tok_loc, file_no, line_no),
+                tok,
+            ));
+        }
         return Ok((new_ulong(ty.size, tok_loc, file_no, line_no), tok));
     }
 
@@ -5983,6 +6193,19 @@ pub fn primary(
             tag_scope_stack,
         )?;
         add_type(&mut node);
+        if node.ty.as_ref().unwrap().kind == TypeKind::Vla {
+            let vla_size = node
+                .ty
+                .as_ref()
+                .unwrap()
+                .vla_size
+                .as_ref()
+                .ok_or_else(|| "internal error: missing VLA size".to_string())?;
+            return Ok((
+                new_var_node((**vla_size).clone(), tok_loc, file_no, line_no),
+                tok,
+            ));
+        }
         let size = node.ty.as_ref().unwrap().size;
         return Ok((new_ulong(size, tok_loc, file_no, line_no), tok));
     }
@@ -6222,6 +6445,7 @@ pub fn is_compatible(t1: &Type, t2: &Type) -> bool {
             ) && t1.array_len == t2.array_len
                 && t1.array_len < 0
         }
+        TypeKind::Vla => false,
     }
 }
 
@@ -6243,6 +6467,8 @@ pub fn func_type(return_ty: Type) -> Type {
         origin: None,
         is_flexible: false,
         is_variadic: false,
+        vla_len: None,
+        vla_size: None,
     }
 }
 
@@ -6417,7 +6643,13 @@ pub fn add_type(node: &mut Node) {
             node.ty = Some(Type::new_int());
         }
         NodeKind::FuncCall => {
-            node.ty = Some(Type::new_long());
+            node.ty = Some(
+                node.func_ty
+                    .as_ref()
+                    .and_then(|ty| ty.return_ty.as_ref())
+                    .map(|ty| ty.as_ref().clone())
+                    .unwrap_or_else(Type::new_long),
+            );
         }
         NodeKind::Not | NodeKind::LogAnd | NodeKind::LogOr => {
             node.ty = Some(Type::new_int());
@@ -6471,10 +6703,11 @@ pub fn add_type(node: &mut Node) {
         }
         NodeKind::Deref => {
             let lhs_ty = node.lhs.as_ref().unwrap().ty.as_ref().unwrap();
-            if lhs_ty.kind == TypeKind::Ptr || lhs_ty.kind == TypeKind::Array {
-                node.ty = Some(lhs_ty.base.as_ref().unwrap().borrow().clone());
-            } else {
+            let base = lhs_ty.base.as_ref().unwrap().borrow();
+            if base.kind == TypeKind::Void {
                 node.ty = Some(Type::new_int());
+            } else {
+                node.ty = Some(base.clone());
             }
         }
         NodeKind::StmtExpr => {

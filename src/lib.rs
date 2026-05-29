@@ -124,6 +124,7 @@ pub enum TypeKind {
     Ptr,
     Func,
     Array,
+    Vla,
     Struct,
     Union,
     Float,
@@ -163,6 +164,8 @@ pub struct Type {
     pub origin: Option<Rc<RefCell<Type>>>,
     pub is_flexible: bool,
     pub is_variadic: bool,
+    pub vla_len: Option<Box<Node>>,
+    pub vla_size: Option<Box<Obj>>,
 }
 
 impl Type {
@@ -183,6 +186,8 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
         }
     }
 
@@ -203,6 +208,8 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
         }
     }
 
@@ -223,6 +230,8 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
         }
     }
 
@@ -243,6 +252,8 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
         }
     }
 
@@ -263,6 +274,8 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
         }
     }
 
@@ -283,6 +296,8 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
         }
     }
 
@@ -303,6 +318,8 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
         }
     }
 
@@ -323,6 +340,8 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
         }
     }
 
@@ -343,6 +362,8 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
         }
     }
 
@@ -363,6 +384,8 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
         }
     }
 
@@ -383,6 +406,8 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
         }
     }
 
@@ -403,6 +428,8 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
         }
     }
 
@@ -424,6 +451,30 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
+        }
+    }
+
+    pub fn new_vla(base: Type, len: Node) -> Type {
+        Type {
+            kind: TypeKind::Vla,
+            size: 8,
+            align: 8,
+            is_unsigned: false,
+            base: Some(Rc::new(RefCell::new(base))),
+            name: None,
+            name_pos: None,
+            return_ty: None,
+            params: None,
+            next: None,
+            array_len: 0,
+            members: None,
+            origin: None,
+            is_flexible: false,
+            is_variadic: false,
+            vla_len: Some(Box::new(len)),
+            vla_size: None,
         }
     }
 
@@ -444,6 +495,8 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
         }
     }
 
@@ -464,6 +517,8 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
         }
     }
 
@@ -484,6 +539,8 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
         }
     }
 
@@ -504,6 +561,8 @@ impl Type {
             origin: None,
             is_flexible: false,
             is_variadic: false,
+            vla_len: None,
+            vla_size: None,
         }
     }
 }
