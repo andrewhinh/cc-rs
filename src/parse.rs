@@ -347,6 +347,54 @@ pub fn new_var_node(var: Obj, tok_loc: usize, file_no: usize, line_no: usize) ->
     node
 }
 
+fn new_vla_ptr(var: Obj, tok_loc: usize, file_no: usize, line_no: usize) -> Node {
+    let mut node = new_node(NodeKind::VlaPtr, tok_loc, file_no, line_no);
+    node.var = Some(Box::new(var.clone()));
+    node.ty = Some(var.ty);
+    node
+}
+
+fn ptr_points_to_vla(ty: &Type) -> bool {
+    ty.base
+        .as_ref()
+        .is_some_and(|b| b.borrow().kind == TypeKind::Vla)
+}
+
+fn vla_row_size_var(ty: &Type) -> Result<Obj, String> {
+    ty.base
+        .as_ref()
+        .and_then(|b| b.borrow().vla_size.as_ref().map(|o| (**o).clone()))
+        .ok_or_else(|| "internal error: missing VLA size".to_string())
+}
+
+fn scale_ptr_offset(
+    rhs: Node,
+    lhs_ty: &Type,
+    tok_loc: usize,
+    file_no: usize,
+    line_no: usize,
+) -> Result<Node, String> {
+    let factor = if ptr_points_to_vla(lhs_ty) {
+        new_var_node(vla_row_size_var(lhs_ty)?, tok_loc, file_no, line_no)
+    } else {
+        let base_size = lhs_ty
+            .base
+            .as_ref()
+            .ok_or_else(|| "internal error: missing pointer base".to_string())?
+            .borrow()
+            .size;
+        new_long(base_size, tok_loc, file_no, line_no)
+    };
+    Ok(new_binary(
+        NodeKind::Mul,
+        rhs,
+        factor,
+        tok_loc,
+        file_no,
+        line_no,
+    ))
+}
+
 pub fn new_cast(expr: Node, ty: Type) -> Node {
     let mut expr = expr;
     add_type(&mut expr);
@@ -3249,7 +3297,7 @@ pub fn declaration(
                 .ok_or_else(|| "internal error: missing VLA size".to_string())?;
             let expr = new_binary(
                 NodeKind::Assign,
-                new_var_node(
+                new_vla_ptr(
                     var.clone(),
                     name_tok.loc,
                     name_tok.file_no,
@@ -6672,7 +6720,7 @@ pub fn add_type(node: &mut Node) {
         | NodeKind::NullExpr
         | NodeKind::Memzero
         | NodeKind::Asm => {}
-        NodeKind::Var => {
+        NodeKind::Var | NodeKind::VlaPtr => {
             node.ty = Some(node.var.as_ref().unwrap().ty.clone());
         }
         NodeKind::Cond => {
@@ -6768,23 +6816,8 @@ pub fn new_add(
         std::mem::swap(&mut lhs, &mut rhs);
     }
 
-    let base_size = lhs
-        .ty
-        .as_ref()
-        .unwrap()
-        .base
-        .as_ref()
-        .unwrap()
-        .borrow()
-        .size;
-    let rhs = new_binary(
-        NodeKind::Mul,
-        rhs,
-        new_long(base_size, tok_loc, file_no, line_no),
-        tok_loc,
-        file_no,
-        line_no,
-    );
+    let lhs_ty = lhs.ty.as_ref().unwrap();
+    let rhs = scale_ptr_offset(rhs, lhs_ty, tok_loc, file_no, line_no)?;
     Ok(new_binary(
         NodeKind::Add,
         lhs,
@@ -6824,35 +6857,17 @@ pub fn new_sub(
 
     if (lhs_ty.kind == TypeKind::Ptr || lhs_ty.kind == TypeKind::Array) && crate::is_integer(rhs_ty)
     {
-        let lhs_ty_clone = lhs.ty.clone();
-        let base_size = lhs
-            .ty
-            .as_ref()
-            .unwrap()
-            .base
-            .as_ref()
-            .unwrap()
-            .borrow()
-            .size;
-        let mut rhs = new_binary(
-            NodeKind::Mul,
-            rhs,
-            new_long(base_size, tok_loc, file_no, line_no),
-            tok_loc,
-            file_no,
-            line_no,
-        );
+        let lhs_ty = lhs.ty.clone();
+        let mut rhs = scale_ptr_offset(rhs, lhs_ty.as_ref().unwrap(), tok_loc, file_no, line_no)?;
         add_type(&mut rhs);
         let mut node = new_binary(NodeKind::Sub, lhs, rhs, tok_loc, file_no, line_no);
-        node.ty = Some(Type::new_ptr(
-            lhs_ty_clone
-                .unwrap()
-                .base
-                .as_ref()
-                .unwrap()
-                .borrow()
-                .clone(),
-        ));
+        node.ty = if ptr_points_to_vla(lhs_ty.as_ref().unwrap()) {
+            lhs_ty
+        } else {
+            Some(Type::new_ptr(
+                lhs_ty.unwrap().base.as_ref().unwrap().borrow().clone(),
+            ))
+        };
         return Ok(node);
     }
 

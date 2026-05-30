@@ -101,6 +101,9 @@ pub enum NodeKind {
     ExprStmt,
     StmtExpr,
     Var,
+    /// Address of a VLA's stack slot (assignment LHS), not its decayed pointer
+    /// value.
+    VlaPtr,
     Num,
     Cast,
     Goto,

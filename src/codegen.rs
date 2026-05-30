@@ -46,6 +46,11 @@ fn gen_addr(
     match node.kind {
         NodeKind::Var => {
             let var = node.var.as_ref().unwrap();
+            // VLA names hold the alloca'd pointer in their stack slot.
+            if var.ty.kind == TypeKind::Vla {
+                result.push_str(&format!("  mov {}(%rbp), %rax\n", var.offset));
+                return Ok(());
+            }
             if var.is_local {
                 result.push_str(&format!("  lea {}(%rbp), %rax\n", var.offset));
                 return Ok(());
@@ -87,6 +92,12 @@ fn gen_addr(
             }
             return Err(error_at(files, node.file_no, node.tok_loc, "not an lvalue"));
         }
+        NodeKind::VlaPtr => {
+            // Assignment LHS: take the address of the pointer slot, not its value.
+            let var = node.var.as_ref().unwrap();
+            result.push_str(&format!("  lea {}(%rbp), %rax\n", var.offset));
+            return Ok(());
+        }
         _ => return Err(error_at(files, node.file_no, node.tok_loc, "not an lvalue")),
     }
     Ok(())
@@ -94,7 +105,9 @@ fn gen_addr(
 
 fn load(ty: &Type, result: &mut String) {
     match ty.kind {
-        TypeKind::Array | TypeKind::Struct | TypeKind::Union | TypeKind::Func => return,
+        TypeKind::Array | TypeKind::Struct | TypeKind::Union | TypeKind::Func | TypeKind::Vla => {
+            return;
+        }
         TypeKind::Float => {
             result.push_str("  movss (%rax), %xmm0\n");
             return;
@@ -813,7 +826,7 @@ fn gen_expr(
             result.push_str("  neg %rax\n");
             return Ok(());
         }
-        NodeKind::Var => {
+        NodeKind::Var | NodeKind::VlaPtr => {
             gen_addr(node, result, files, current_fn, depth)?;
             load(node.ty.as_ref().unwrap(), result);
             return Ok(());
@@ -1285,6 +1298,7 @@ fn gen_expr(
         | NodeKind::ExprStmt
         | NodeKind::StmtExpr
         | NodeKind::Var
+        | NodeKind::VlaPtr
         | NodeKind::Member
         | NodeKind::Assign
         | NodeKind::Addr
