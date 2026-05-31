@@ -6216,12 +6216,27 @@ pub fn primary(
         )?;
         let tok = skip(files, &tok, ")")?;
         if ty.kind == TypeKind::Vla {
+            if let Some(vla_size) = ty.vla_size.as_ref() {
+                return Ok((
+                    new_var_node((**vla_size).clone(), tok_loc, file_no, line_no),
+                    tok,
+                ));
+            }
+            let mut ty = ty;
+            let lhs = compute_vla_size(&mut ty, &tok, locals, scope_stack)?;
             let vla_size = ty
                 .vla_size
                 .as_ref()
                 .ok_or_else(|| "internal error: missing VLA size".to_string())?;
             return Ok((
-                new_var_node((**vla_size).clone(), tok_loc, file_no, line_no),
+                new_binary(
+                    NodeKind::Comma,
+                    lhs,
+                    new_var_node((**vla_size).clone(), tok_loc, file_no, line_no),
+                    tok_loc,
+                    file_no,
+                    line_no,
+                ),
                 tok,
             ));
         }

@@ -180,7 +180,7 @@ cargo run
 - [x] Add alloca()
 - [x] Add sizeof() for VLA
 - [x] Add pointer arithmetic for VLA
-- [ ] Support sizeof(typename) where typename is a VLA
+- [x] Support sizeof(typename) where typename is a VLA
 - [ ] Do not define __STDC_NO_VLA__
 - [ ] Emit size and type for symbols
 - [ ] Add long double
