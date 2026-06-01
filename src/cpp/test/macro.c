@@ -336,6 +336,9 @@ int main() {
 #undef foo
 
   ASSERT(1, __STDC__);
+#ifdef __STDC_NO_VLA__
+  ASSERT(0, 1);
+#endif
 
   ASSERT(0, strcmp(main_filename1, "src/cpp/test/macro.c"));
   ASSERT(5, main_line1);
