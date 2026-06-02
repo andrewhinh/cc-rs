@@ -251,6 +251,12 @@ fn parse_args() -> Result<Args, String> {
             continue;
         }
 
+        if args[i].starts_with("-l") {
+            input_paths.push(args[i].clone());
+            i += 1;
+            continue;
+        }
+
         let a = args[i].as_str();
         if a.starts_with("-O")
             || a.starts_with("-W")
@@ -593,6 +599,11 @@ fn run() -> Result<(), String> {
     let mut _tmpfiles: Vec<NamedTempFile> = Vec::new();
 
     for input in &args.input_paths {
+        if input.starts_with("-l") {
+            ld_args.push(input.clone());
+            continue;
+        }
+
         let file_type = get_file_type(input, args.opt_x)?;
 
         if file_type == FileType::Obj {

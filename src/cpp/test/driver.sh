@@ -54,6 +54,13 @@ echo 'int y;' > $tmp/bar.c
 [ -f $tmp/foo.s ] && [ -f $tmp/bar.s ]
 check 'multiple input files'
 
+# -l
+rm -f $tmp/foo
+echo '#include <math.h>
+int main() { return (int)sin(0.0); }' | $compiler -o $tmp/foo -xc - -lm
+$tmp/foo
+check -l
+
 # Run linker
 rm -f $tmp/foo
 echo 'int main() { return 0; }' | $compiler -o $tmp/foo -xc -

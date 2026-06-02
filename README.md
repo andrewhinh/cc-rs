@@ -352,7 +352,7 @@ cargo run
 - [x] Add -fcommon and -fno-common flags
 - [x] Add -x option
 - [x] Make -E to imply -xc
-- [ ] Add -l option
+- [x] Add -l option
 - [ ] Add -s option
 - [ ] Recognize .a and .so files
 - [ ] Add -M option
