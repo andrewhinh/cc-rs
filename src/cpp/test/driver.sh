@@ -67,6 +67,13 @@ echo 'int main() { return 0; }' | $compiler -o $tmp/foo -xc -
 $tmp/foo
 check linker
 
+# -s
+rm -f $tmp/foo
+echo 'int main() { return 0; }' | $compiler -s -o $tmp/foo -xc -
+$tmp/foo
+nm $tmp/foo 2>&1 | grep -qi 'no symbols'
+check -s
+
 rm -f $tmp/foo
 echo 'int bar(); int main() { return bar(); }' > $tmp/foo.c
 echo 'int bar() { return 42; }' > $tmp/bar.c

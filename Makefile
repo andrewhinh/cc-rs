@@ -107,6 +107,7 @@ test: target/release/cc-rs
 		timeout $(TEST_TIMEOUT)s /tmp/$$name || exit 1; \
 		echo; \
 	done
+	timeout $(TEST_TIMEOUT)s bash src/cpp/test/driver.sh $(CC_RS)
 
 clean:
 	rm -rf stage2

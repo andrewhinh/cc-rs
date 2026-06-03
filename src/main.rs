@@ -35,6 +35,7 @@ struct Args {
     undefines: Vec<String>,
     opt_fcommon: bool,
     opt_x: FileType,
+    ld_extra_args: Vec<String>,
 }
 
 fn usage(status: i32) {
@@ -83,6 +84,7 @@ fn parse_args() -> Result<Args, String> {
     let mut undefines: Vec<String> = Vec::new();
     let mut opt_fcommon = true;
     let mut opt_x = FileType::None;
+    let mut ld_extra_args: Vec<String> = Vec::new();
     let mut i = 1;
 
     while i < args.len() {
@@ -110,6 +112,12 @@ fn parse_args() -> Result<Args, String> {
 
         if args[i] == "-c" {
             opt_c = true;
+            i += 1;
+            continue;
+        }
+
+        if args[i] == "-s" {
+            ld_extra_args.push("-s".to_string());
             i += 1;
             continue;
         }
@@ -314,6 +322,7 @@ fn parse_args() -> Result<Args, String> {
         undefines,
         opt_fcommon,
         opt_x,
+        ld_extra_args,
     })
 }
 
@@ -520,7 +529,12 @@ fn find_gcc_libpath() -> Result<String, String> {
     Err("gcc library path is not found".to_string())
 }
 
-fn run_linker(inputs: &[String], output: &str, opt_hash_hash_hash: bool) -> Result<(), String> {
+fn run_linker(
+    inputs: &[String],
+    output: &str,
+    ld_extra_args: &[String],
+    opt_hash_hash_hash: bool,
+) -> Result<(), String> {
     let libpath = find_libpath()?;
     let gcc_libpath = find_gcc_libpath()?;
 
@@ -546,6 +560,8 @@ fn run_linker(inputs: &[String], output: &str, opt_hash_hash_hash: bool) -> Resu
         "-L/usr/lib".to_string(),
         "-L/lib".to_string(),
     ];
+
+    args.extend(ld_extra_args.iter().cloned());
 
     for input in inputs {
         args.push(input.clone());
@@ -674,7 +690,12 @@ fn run() -> Result<(), String> {
 
     if !ld_args.is_empty() {
         let output = args.opt_o.clone().unwrap_or_else(|| "a.out".to_string());
-        run_linker(&ld_args, &output, args.opt_hash_hash_hash)?;
+        run_linker(
+            &ld_args,
+            &output,
+            &args.ld_extra_args,
+            args.opt_hash_hash_hash,
+        )?;
     }
 
     Ok(())
