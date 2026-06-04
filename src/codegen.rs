@@ -1724,7 +1724,6 @@ pub fn emit_assembly(opt_include: &[String]) -> Result<String, String> {
         }
 
         let align = effective_var_align(var);
-        result.push_str(&format!("  .align {}\n", align));
 
         if get_opt_fcommon() && var.is_tentative {
             result.push_str(&format!(
@@ -1740,6 +1739,9 @@ pub fn emit_assembly(opt_include: &[String]) -> Result<String, String> {
             } else {
                 result.push_str("  .data\n");
             }
+            result.push_str(&format!("  .type {}, @object\n", var.name));
+            result.push_str(&format!("  .size {}, {}\n", var.name, var.ty.size));
+            result.push_str(&format!("  .align {}\n", align));
             result.push_str(&format!("{}:\n", var.name));
 
             let mut rel = var.rel.clone();
@@ -1764,6 +1766,7 @@ pub fn emit_assembly(opt_include: &[String]) -> Result<String, String> {
         } else {
             result.push_str("  .bss\n");
         }
+        result.push_str(&format!("  .align {}\n", align));
         result.push_str(&format!("{}:\n", var.name));
         result.push_str(&format!("  .zero {}\n", var.ty.size));
     }
@@ -1890,12 +1893,13 @@ pub fn emit_assembly(opt_include: &[String]) -> Result<String, String> {
             fix_var_offsets(body, &locals);
         }
 
-        result.push_str("  .text\n");
         if func.is_static {
             result.push_str(&format!("  .local {}\n", func.name));
         } else {
             result.push_str(&format!("  .globl {}\n", func.name));
         }
+        result.push_str("  .text\n");
+        result.push_str(&format!("  .type {}, @function\n", func.name));
         result.push_str(&format!("{}:\n", func.name));
 
         result.push_str("  push %rbp\n");

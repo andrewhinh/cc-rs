@@ -182,7 +182,7 @@ cargo run
 - [x] Add pointer arithmetic for VLA
 - [x] Support sizeof(typename) where typename is a VLA
 - [x] Do not define __STDC_NO_VLA__
-- [ ] Emit size and type for symbols
+- [x] Emit size and type for symbols
 - [ ] Add long double
 
 ### Pointers, Arrays, Structs, Unions, and Initializers
