@@ -354,7 +354,7 @@ cargo run
 - [x] Make -E to imply -xc
 - [x] Add -l option
 - [x] Add -s option
-- [ ] Recognize .a and .so files
+- [x] Recognize .a and .so files
 - [ ] Add -M option
 - [ ] Add -MF option
 - [ ] Add -MP option

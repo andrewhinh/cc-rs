@@ -1,6 +1,8 @@
 #include "cpp.h"
 
-typedef enum { FILE_NONE, FILE_C, FILE_ASM, FILE_OBJ } FileType;
+typedef enum {
+  FILE_NONE, FILE_C, FILE_ASM, FILE_OBJ, FILE_AR, FILE_DSO,
+} FileType;
 
 StringArray include_paths;
 bool opt_fcommon = true;
@@ -473,13 +475,20 @@ static void run_linker(StringArray *inputs, char *output) {
   run_subprocess(arr.data);
 }
 
-static FileType get_file_type(char *filename) {
-  if (endswith(filename, ".o"))
-    return FILE_OBJ;
+static bool is_linker_input(FileType type) {
+  return type == FILE_OBJ || type == FILE_AR || type == FILE_DSO;
+}
 
+static FileType get_file_type(char *filename) {
   if (opt_x != FILE_NONE)
     return opt_x;
 
+  if (endswith(filename, ".a"))
+    return FILE_AR;
+  if (endswith(filename, ".so"))
+    return FILE_DSO;
+  if (endswith(filename, ".o"))
+    return FILE_OBJ;
   if (endswith(filename, ".c"))
     return FILE_C;
   if (endswith(filename, ".s"))
@@ -522,8 +531,7 @@ int main(int argc, char **argv) {
 
     FileType type = get_file_type(input);
 
-    // Handle .o
-    if (type == FILE_OBJ) {
+    if (is_linker_input(type)) {
       strarray_push(&ld_args, input);
       continue;
     }

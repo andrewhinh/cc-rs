@@ -17,6 +17,14 @@ enum FileType {
     C,
     Asm,
     Obj,
+    Ar,
+    Dso,
+}
+
+impl FileType {
+    fn is_linker_input(self) -> bool {
+        matches!(self, FileType::Obj | FileType::Ar | FileType::Dso)
+    }
 }
 
 struct Args {
@@ -472,14 +480,19 @@ fn endswith(s: &str, suffix: &str) -> bool {
 }
 
 fn get_file_type(filename: &str, opt_x: FileType) -> Result<FileType, String> {
-    if endswith(filename, ".o") {
-        return Ok(FileType::Obj);
-    }
-
     if opt_x != FileType::None {
         return Ok(opt_x);
     }
 
+    if endswith(filename, ".a") {
+        return Ok(FileType::Ar);
+    }
+    if endswith(filename, ".so") {
+        return Ok(FileType::Dso);
+    }
+    if endswith(filename, ".o") {
+        return Ok(FileType::Obj);
+    }
     if endswith(filename, ".c") {
         return Ok(FileType::C);
     }
@@ -622,7 +635,7 @@ fn run() -> Result<(), String> {
 
         let file_type = get_file_type(input, args.opt_x)?;
 
-        if file_type == FileType::Obj {
+        if file_type.is_linker_input() {
             ld_args.push(input.clone());
             continue;
         }
