@@ -2325,7 +2325,8 @@ pub fn declspec(
                 ty = Type::new_ulong()
             }
             FLOAT => ty = Type::new_float(),
-            DOUBLE | LONG_DOUBLE => ty = Type::new_double(),
+            DOUBLE => ty = Type::new_double(),
+            LONG_DOUBLE => ty = Type::new_ldouble(),
             _ => return Err(error_tok(files, &tok, "invalid type")),
         }
 
@@ -2507,6 +2508,13 @@ fn write_gvar_data(
         let fval = eval_double(files, &mut init.expr.as_ref().unwrap().clone())?;
         let bytes = fval.to_le_bytes();
         buf[offset..offset + 8].copy_from_slice(&bytes);
+        return Ok(());
+    }
+
+    if ty.kind == TypeKind::LDouble {
+        let fval = eval_double(files, &mut init.expr.as_ref().unwrap().clone())?;
+        let bytes = crate::f64_to_x87_16(fval);
+        buf[offset..offset + 16].copy_from_slice(&bytes);
         return Ok(());
     }
 
@@ -6478,7 +6486,7 @@ pub fn is_compatible(t1: &Type, t2: &Type) -> bool {
         TypeKind::Bool | TypeKind::Char | TypeKind::Short | TypeKind::Int | TypeKind::Long => {
             t1.is_unsigned == t2.is_unsigned
         }
-        TypeKind::Float | TypeKind::Double => true,
+        TypeKind::Float | TypeKind::Double | TypeKind::LDouble => true,
         TypeKind::Ptr => {
             let b1 = t1.base.as_ref().unwrap().borrow().clone();
             let b2 = t2.base.as_ref().unwrap().borrow().clone();
@@ -6574,6 +6582,9 @@ pub fn get_common_type(ty1: &Type, ty2: &Type) -> Type {
         return pointer_to(ty2.clone());
     }
 
+    if ty1.kind == TypeKind::LDouble || ty2.kind == TypeKind::LDouble {
+        return Type::new_ldouble();
+    }
     if ty1.kind == TypeKind::Double || ty2.kind == TypeKind::Double {
         return Type::new_double();
     }

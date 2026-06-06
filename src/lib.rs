@@ -132,6 +132,7 @@ pub enum TypeKind {
     Union,
     Float,
     Double,
+    LDouble,
 }
 
 #[derive(Debug, Clone)]
@@ -568,6 +569,28 @@ impl Type {
             vla_size: None,
         }
     }
+
+    pub fn new_ldouble() -> Type {
+        Type {
+            kind: TypeKind::LDouble,
+            size: 16,
+            align: 16,
+            is_unsigned: false,
+            base: None,
+            name: None,
+            name_pos: None,
+            return_ty: None,
+            params: None,
+            next: None,
+            array_len: 0,
+            members: None,
+            origin: None,
+            is_flexible: false,
+            is_variadic: false,
+            vla_len: None,
+            vla_size: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -644,7 +667,49 @@ pub fn align_to(n: i64, align: i64) -> i64 {
     (n + align - 1) / align * align
 }
 
+/// x86-64 Linux `long double` (80-bit x87) as 16 zero-padded bytes.
+pub fn f64_to_x87_16(val: f64) -> [u8; 16] {
+    let mut r = [0u8; 16];
+    if val == 0.0 {
+        if val.is_sign_negative() {
+            r[9] = 0x80;
+        }
+        return r;
+    }
+    if val.is_nan() {
+        r[0..8].copy_from_slice(&0xC000_0000_0000_0000u64.to_le_bytes());
+        r[8..10].copy_from_slice(&0xFFFFu16.to_le_bytes());
+        return r;
+    }
+    if val.is_infinite() {
+        r[0] = 0x80;
+        let exp = if val.is_sign_negative() {
+            0xFFFFu16
+        } else {
+            0x7FFFu16
+        };
+        r[8..10].copy_from_slice(&exp.to_le_bytes());
+        return r;
+    }
+
+    let bits = val.to_bits();
+    let sign = ((bits >> 63) & 1) as u16;
+    let exp = ((bits >> 52) & 0x7ff) as i32;
+    let frac = bits & 0x000f_ffff_ffff_ffff;
+
+    let x87_exp = (exp - 1023 + 16383) as u16;
+    let mant = (frac << 11) | (1u64 << 63);
+    r[0..8].copy_from_slice(&mant.to_le_bytes());
+    let es = x87_exp | (sign << 15);
+    r[8..10].copy_from_slice(&es.to_le_bytes());
+    r
+}
+
 pub fn is_flonum(ty: &Type) -> bool {
+    ty.kind == TypeKind::Float || ty.kind == TypeKind::Double || ty.kind == TypeKind::LDouble
+}
+
+pub fn is_sse_flonum(ty: &Type) -> bool {
     ty.kind == TypeKind::Float || ty.kind == TypeKind::Double
 }
 

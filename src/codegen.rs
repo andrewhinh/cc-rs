@@ -116,6 +116,10 @@ fn load(ty: &Type, result: &mut String) {
             result.push_str("  movsd (%rax), %xmm0\n");
             return;
         }
+        TypeKind::LDouble => {
+            result.push_str("  fldt (%rax)\n");
+            return;
+        }
         _ => {}
     }
     let insn = if ty.is_unsigned { "movz" } else { "movs" };
@@ -150,6 +154,10 @@ fn store(ty: &Type, result: &mut String, depth: &mut i32) {
             result.push_str("  movsd %xmm0, (%rdi)\n");
             return;
         }
+        TypeKind::LDouble => {
+            result.push_str("  fstpt (%rdi)\n");
+            return;
+        }
         _ => {}
     }
 
@@ -174,6 +182,12 @@ fn cmp_zero(ty: &Type, result: &mut String) {
         TypeKind::Double => {
             result.push_str("  xorpd %xmm1, %xmm1\n");
             result.push_str("  ucomisd %xmm1, %xmm0\n");
+            return;
+        }
+        TypeKind::LDouble => {
+            result.push_str("  fldz\n");
+            result.push_str("  fucomip\n");
+            result.push_str("  fstp %st(0)\n");
             return;
         }
         _ => {}
@@ -221,7 +235,7 @@ fn has_flonum(ty: &Type, lo: i64, hi: i64, offset: i64) -> bool {
             }
             true
         }
-        _ => offset < lo || hi <= offset || crate::is_flonum(ty),
+        _ => offset < lo || hi <= offset || crate::is_sse_flonum(ty),
     }
 }
 
@@ -296,6 +310,10 @@ fn count_args(
                 }
                 fp += 1;
             }
+            TypeKind::LDouble => {
+                pass_by_stack.push(true);
+                stack += 2;
+            }
             _ => {
                 if gp >= GP_MAX {
                     pass_by_stack.push(true);
@@ -348,6 +366,11 @@ fn push_args2(
         }
         TypeKind::Float | TypeKind::Double => {
             pushf(result, depth);
+        }
+        TypeKind::LDouble => {
+            result.push_str("  sub $16, %rsp\n");
+            result.push_str("  fstpt (%rsp)\n");
+            *depth += 2;
         }
         _ => {
             result.push_str("  push %rax\n");
@@ -417,6 +440,7 @@ const U32: usize = 6;
 const U64: usize = 7;
 const F32: usize = 8;
 const F64: usize = 9;
+const F80: usize = 10;
 
 fn get_type_id(ty: &Type) -> usize {
     match ty.kind {
@@ -451,6 +475,7 @@ fn get_type_id(ty: &Type) -> usize {
         }
         TypeKind::Float => F32,
         TypeKind::Double => F64,
+        TypeKind::LDouble => F80,
         _ => {
             if ty.is_unsigned {
                 U64
@@ -486,6 +511,12 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
                 result.push_str("  movzb %al, %rax\n");
                 return;
             }
+            TypeKind::LDouble => {
+                cmp_zero(from, result);
+                result.push_str("  setne %al\n");
+                result.push_str("  movzb %al, %rax\n");
+                return;
+            }
             _ => {
                 cmp_zero(from, result);
                 result.push_str("  setne %al\n");
@@ -505,18 +536,23 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
     let i32i64: &str = "movsxd %eax, %rax";
     let i32f32: &str = "cvtsi2ssl %eax, %xmm0";
     let i32f64: &str = "cvtsi2sdl %eax, %xmm0";
+    let i32f80: &str = "mov %eax, -4(%rsp); fildl -4(%rsp)";
 
     let u32i64: &str = "mov %eax, %eax";
     let u32f32: &str = "mov %eax, %eax; cvtsi2ssq %rax, %xmm0";
     let u32f64: &str = "mov %eax, %eax; cvtsi2sdq %rax, %xmm0";
+    let u32f80: &str = "mov %eax, %eax; mov %rax, -8(%rsp); fildll -8(%rsp)";
 
     let i64f32: &str = "cvtsi2ssq %rax, %xmm0";
     let i64f64: &str = "cvtsi2sdq %rax, %xmm0";
+    let i64f80: &str = "movq %rax, -8(%rsp); fildll -8(%rsp)";
 
     let u64f32: &str = "cvtsi2ssq %rax, %xmm0";
     let u64f64: &str = "test %rax,%rax; js 1f; pxor %xmm0,%xmm0; cvtsi2sd %rax,%xmm0; jmp 2f; 1: \
                         mov %rax,%rdi; and $1,%eax; pxor %xmm0,%xmm0; shr %rdi; or %rax,%rdi; \
                         cvtsi2sd %rdi,%xmm0; addsd %xmm0,%xmm0; 2:";
+    let u64f80: &str = "mov %rax, -8(%rsp); fildq -8(%rsp); test %rax, %rax; jns 1f; mov \
+                        $1602224128, %eax; mov %eax, -4(%rsp); fadds -4(%rsp); 1:";
 
     let f32i8: &str = "cvttss2sil %xmm0, %eax; movsbl %al, %eax";
     let f32u8: &str = "cvttss2sil %xmm0, %eax; movzbl %al, %eax";
@@ -527,6 +563,7 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
     let f32i64: &str = "cvttss2siq %xmm0, %rax";
     let f32u64: &str = "cvttss2siq %xmm0, %rax";
     let f32f64: &str = "cvtss2sd %xmm0, %xmm0";
+    let f32f80: &str = "movss %xmm0, -4(%rsp); flds -4(%rsp)";
 
     let f64i8: &str = "cvttsd2sil %xmm0, %eax; movsbl %al, %eax";
     let f64u8: &str = "cvttsd2sil %xmm0, %eax; movzbl %al, %eax";
@@ -535,10 +572,36 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
     let f64i32: &str = "cvttsd2sil %xmm0, %eax";
     let f64u32: &str = "cvttsd2siq %xmm0, %rax";
     let f64f32: &str = "cvtsd2ss %xmm0, %xmm0";
+    let f64f80: &str = "movsd %xmm0, -8(%rsp); fldl -8(%rsp)";
     let f64i64: &str = "cvttsd2siq %xmm0, %rax";
     let f64u64: &str = "cvttsd2siq %xmm0, %rax";
 
-    let cast_table: [[Option<&str>; 10]; 10] = [
+    let f80i8: &str = "fnstcw -10(%rsp); movzwl -10(%rsp), %eax; or $12, %ah; mov %ax, -12(%rsp); \
+                       fldcw -12(%rsp); fistps -24(%rsp); fldcw -10(%rsp); movsbl -24(%rsp), %eax";
+    let f80u8: &str = "fnstcw -10(%rsp); movzwl -10(%rsp), %eax; or $12, %ah; mov %ax, -12(%rsp); \
+                       fldcw -12(%rsp); fistps -24(%rsp); fldcw -10(%rsp); movzbl -24(%rsp), %eax";
+    let f80i16: &str = "fnstcw -10(%rsp); movzwl -10(%rsp), %eax; or $12, %ah; mov %ax, \
+                        -12(%rsp); fldcw -12(%rsp); fistps -24(%rsp); fldcw -10(%rsp); movswl \
+                        -24(%rsp), %eax";
+    let f80u16: &str = "fnstcw -10(%rsp); movzwl -10(%rsp), %eax; or $12, %ah; mov %ax, \
+                        -12(%rsp); fldcw -12(%rsp); fistpl -24(%rsp); fldcw -10(%rsp); movswl \
+                        -24(%rsp), %eax";
+    let f80i32: &str = "fnstcw -10(%rsp); movzwl -10(%rsp), %eax; or $12, %ah; mov %ax, \
+                        -12(%rsp); fldcw -12(%rsp); fistpl -24(%rsp); fldcw -10(%rsp); mov \
+                        -24(%rsp), %eax";
+    let f80u32: &str = "fnstcw -10(%rsp); movzwl -10(%rsp), %eax; or $12, %ah; mov %ax, \
+                        -12(%rsp); fldcw -12(%rsp); fistpl -24(%rsp); fldcw -10(%rsp); mov \
+                        -24(%rsp), %eax";
+    let f80i64: &str = "fnstcw -10(%rsp); movzwl -10(%rsp), %eax; or $12, %ah; mov %ax, \
+                        -12(%rsp); fldcw -12(%rsp); fistpq -24(%rsp); fldcw -10(%rsp); mov \
+                        -24(%rsp), %rax";
+    let f80u64: &str = "fnstcw -10(%rsp); movzwl -10(%rsp), %eax; or $12, %ah; mov %ax, \
+                        -12(%rsp); fldcw -12(%rsp); fistpq -24(%rsp); fldcw -10(%rsp); mov \
+                        -24(%rsp), %rax";
+    let f80f32: &str = "fstps -8(%rsp); movss -8(%rsp), %xmm0";
+    let f80f64: &str = "fstpl -8(%rsp); movsd -8(%rsp), %xmm0";
+
+    let cast_table: [[Option<&str>; 11]; 11] = [
         [
             None,
             None,
@@ -550,6 +613,7 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             Some(i32i64),
             Some(i32f32),
             Some(i32f64),
+            Some(i32f80),
         ],
         [
             Some(i32i8),
@@ -562,6 +626,7 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             Some(i32i64),
             Some(i32f32),
             Some(i32f64),
+            Some(i32f80),
         ],
         [
             Some(i32i8),
@@ -574,6 +639,7 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             Some(i32i64),
             Some(i32f32),
             Some(i32f64),
+            Some(i32f80),
         ],
         [
             Some(i32i8),
@@ -586,6 +652,7 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             None,
             Some(i64f32),
             Some(i64f64),
+            Some(i64f80),
         ],
         [
             Some(i32i8),
@@ -598,6 +665,7 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             Some(i32i64),
             Some(i32f32),
             Some(i32f64),
+            Some(i32f80),
         ],
         [
             Some(i32i8),
@@ -610,6 +678,7 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             Some(i32i64),
             Some(i32f32),
             Some(i32f64),
+            Some(i32f80),
         ],
         [
             Some(i32i8),
@@ -622,6 +691,7 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             Some(u32i64),
             Some(u32f32),
             Some(u32f64),
+            Some(u32f80),
         ],
         [
             Some(i32i8),
@@ -634,6 +704,7 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             None,
             Some(u64f32),
             Some(u64f64),
+            Some(u64f80),
         ],
         [
             Some(f32i8),
@@ -646,6 +717,7 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             Some(f32u64),
             None,
             Some(f32f64),
+            Some(f32f80),
         ],
         [
             Some(f64i8),
@@ -657,6 +729,20 @@ fn cast_type(from: &Type, to: &Type, result: &mut String) {
             Some(f64u32),
             Some(f64u64),
             Some(f64f32),
+            None,
+            Some(f64f80),
+        ],
+        [
+            Some(f80i8),
+            Some(f80i16),
+            Some(f80i32),
+            Some(f80i64),
+            Some(f80u8),
+            Some(f80u16),
+            Some(f80u32),
+            Some(f80u64),
+            Some(f80f32),
+            Some(f80f64),
             None,
         ],
     ];
@@ -795,6 +881,19 @@ fn gen_expr(
                     ));
                     result.push_str("  movq %rax, %xmm0\n");
                 }
+                TypeKind::LDouble => {
+                    let bytes = crate::f64_to_x87_16(node.fval);
+                    let lo = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
+                    let hi = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+                    result.push_str(&format!(
+                        "  mov ${}, %rax # long double {}\n",
+                        lo, node.fval
+                    ));
+                    result.push_str("  mov %rax, -16(%rsp)\n");
+                    result.push_str(&format!("  mov ${}, %rax\n", hi));
+                    result.push_str("  mov %rax, -8(%rsp)\n");
+                    result.push_str("  fldt -16(%rsp)\n");
+                }
                 _ => {
                     result.push_str(&format!("  mov ${}, %rax\n", node.val));
                 }
@@ -818,6 +917,10 @@ fn gen_expr(
                     result.push_str("  shl $63, %rax\n");
                     result.push_str("  movq %rax, %xmm1\n");
                     result.push_str("  xorpd %xmm1, %xmm0\n");
+                    return Ok(());
+                }
+                TypeKind::LDouble => {
+                    result.push_str("  fchs\n");
                     return Ok(());
                 }
                 _ => {}
@@ -1038,6 +1141,7 @@ fn gen_expr(
                             fp_count += 1;
                         }
                     }
+                    TypeKind::LDouble => {}
                     _ => {
                         if gp < GP_MAX {
                             result.push_str(&format!("  pop {}\n", argreg64[gp as usize]));
@@ -1153,71 +1257,118 @@ fn gen_expr(
     }
 
     let lhs_ty = node.lhs.as_ref().unwrap().ty.as_ref().unwrap();
-    if crate::is_flonum(lhs_ty) {
-        gen_expr(node.rhs.as_ref().unwrap(), result, files, current_fn, depth)?;
-        pushf(result, depth);
-        gen_expr(node.lhs.as_ref().unwrap(), result, files, current_fn, depth)?;
-        popf(result, depth, 1);
+    match lhs_ty.kind {
+        TypeKind::Float | TypeKind::Double => {
+            gen_expr(node.rhs.as_ref().unwrap(), result, files, current_fn, depth)?;
+            pushf(result, depth);
+            gen_expr(node.lhs.as_ref().unwrap(), result, files, current_fn, depth)?;
+            popf(result, depth, 1);
 
-        let sz = if lhs_ty.kind == TypeKind::Float {
-            "ss"
-        } else {
-            "sd"
-        };
+            let sz = if lhs_ty.kind == TypeKind::Float {
+                "ss"
+            } else {
+                "sd"
+            };
 
-        match node.kind {
-            NodeKind::Add => {
-                result.push_str(&format!("  add{} %xmm1, %xmm0\n", sz));
-                return Ok(());
-            }
-            NodeKind::Sub => {
-                result.push_str(&format!("  sub{} %xmm1, %xmm0\n", sz));
-                return Ok(());
-            }
-            NodeKind::Mul => {
-                result.push_str(&format!("  mul{} %xmm1, %xmm0\n", sz));
-                return Ok(());
-            }
-            NodeKind::Div => {
-                result.push_str(&format!("  div{} %xmm1, %xmm0\n", sz));
-                return Ok(());
-            }
-            NodeKind::Eq | NodeKind::Ne | NodeKind::Lt | NodeKind::Le => {
-                result.push_str(&format!("  ucomi{} %xmm0, %xmm1\n", sz));
-
-                match node.kind {
-                    NodeKind::Eq => {
-                        result.push_str("  sete %al\n");
-                        result.push_str("  setnp %dl\n");
-                        result.push_str("  and %dl, %al\n");
-                    }
-                    NodeKind::Ne => {
-                        result.push_str("  setne %al\n");
-                        result.push_str("  setp %dl\n");
-                        result.push_str("  or %dl, %al\n");
-                    }
-                    NodeKind::Lt => {
-                        result.push_str("  seta %al\n");
-                    }
-                    NodeKind::Le => {
-                        result.push_str("  setae %al\n");
-                    }
-                    _ => unreachable!(),
+            match node.kind {
+                NodeKind::Add => {
+                    result.push_str(&format!("  add{} %xmm1, %xmm0\n", sz));
+                    return Ok(());
                 }
+                NodeKind::Sub => {
+                    result.push_str(&format!("  sub{} %xmm1, %xmm0\n", sz));
+                    return Ok(());
+                }
+                NodeKind::Mul => {
+                    result.push_str(&format!("  mul{} %xmm1, %xmm0\n", sz));
+                    return Ok(());
+                }
+                NodeKind::Div => {
+                    result.push_str(&format!("  div{} %xmm1, %xmm0\n", sz));
+                    return Ok(());
+                }
+                NodeKind::Eq | NodeKind::Ne | NodeKind::Lt | NodeKind::Le => {
+                    result.push_str(&format!("  ucomi{} %xmm0, %xmm1\n", sz));
 
-                result.push_str("  and $1, %al\n");
-                result.push_str("  movzb %al, %rax\n");
-                return Ok(());
-            }
-            _ => {
-                return Err(error_at(
-                    files,
-                    node.file_no,
-                    node.tok_loc,
-                    "invalid expression",
-                ));
+                    match node.kind {
+                        NodeKind::Eq => {
+                            result.push_str("  sete %al\n");
+                            result.push_str("  setnp %dl\n");
+                            result.push_str("  and %dl, %al\n");
+                        }
+                        NodeKind::Ne => {
+                            result.push_str("  setne %al\n");
+                            result.push_str("  setp %dl\n");
+                            result.push_str("  or %dl, %al\n");
+                        }
+                        NodeKind::Lt => {
+                            result.push_str("  seta %al\n");
+                        }
+                        NodeKind::Le => {
+                            result.push_str("  setae %al\n");
+                        }
+                        _ => unreachable!(),
+                    }
+
+                    result.push_str("  and $1, %al\n");
+                    result.push_str("  movzb %al, %rax\n");
+                    return Ok(());
+                }
+                _ => {
+                    return Err(error_at(
+                        files,
+                        node.file_no,
+                        node.tok_loc,
+                        "invalid expression",
+                    ));
+                }
             }
         }
+        TypeKind::LDouble => {
+            gen_expr(node.lhs.as_ref().unwrap(), result, files, current_fn, depth)?;
+            gen_expr(node.rhs.as_ref().unwrap(), result, files, current_fn, depth)?;
+
+            match node.kind {
+                NodeKind::Add => {
+                    result.push_str("  faddp\n");
+                    return Ok(());
+                }
+                NodeKind::Sub => {
+                    result.push_str("  fsubrp\n");
+                    return Ok(());
+                }
+                NodeKind::Mul => {
+                    result.push_str("  fmulp\n");
+                    return Ok(());
+                }
+                NodeKind::Div => {
+                    result.push_str("  fdivrp\n");
+                    return Ok(());
+                }
+                NodeKind::Eq | NodeKind::Ne | NodeKind::Lt | NodeKind::Le => {
+                    result.push_str("  fcomip\n");
+                    result.push_str("  fstp %st(0)\n");
+                    match node.kind {
+                        NodeKind::Eq => result.push_str("  sete %al\n"),
+                        NodeKind::Ne => result.push_str("  setne %al\n"),
+                        NodeKind::Lt => result.push_str("  seta %al\n"),
+                        NodeKind::Le => result.push_str("  setae %al\n"),
+                        _ => unreachable!(),
+                    }
+                    result.push_str("  movzb %al, %rax\n");
+                    return Ok(());
+                }
+                _ => {
+                    return Err(error_at(
+                        files,
+                        node.file_no,
+                        node.tok_loc,
+                        "invalid expression",
+                    ));
+                }
+            }
+        }
+        _ => {}
     }
 
     gen_expr(node.rhs.as_ref().unwrap(), result, files, current_fn, depth)?;
@@ -1839,6 +1990,14 @@ pub fn emit_assembly(opt_include: &[String]) -> Result<String, String> {
                         top += ty.size;
                     }
                 }
+                TypeKind::LDouble => {
+                    top = align_to(top, ty.align);
+                    var.offset = top;
+                    if let Some(local_var) = func.locals.iter_mut().find(|l| l.name == var.name) {
+                        local_var.offset = top;
+                    }
+                    top += ty.size;
+                }
                 _ => {
                     if gp < GP_MAX {
                         gp += 1;
@@ -1915,7 +2074,7 @@ pub fn emit_assembly(opt_include: &[String]) -> Result<String, String> {
             let mut gp = 0;
             let mut fp = 0;
             for var in func.params.iter() {
-                if crate::is_flonum(&var.ty) {
+                if crate::is_sse_flonum(&var.ty) {
                     fp += 1;
                 } else {
                     gp += 1;
@@ -1986,6 +2145,7 @@ pub fn emit_assembly(opt_include: &[String]) -> Result<String, String> {
                     store_fp(fp, var.offset, ty.size, &mut result);
                     fp += 1;
                 }
+                TypeKind::LDouble => {}
                 _ => {
                     store_gp(gp, var.offset, ty.size, &mut result);
                     gp += 1;

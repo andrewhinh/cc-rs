@@ -760,7 +760,7 @@ pub fn convert_pp_number(files: &[File], tok: &mut Token) -> Result<(), String> 
 
     let (num_str, ty) = match s.as_bytes().last().copied() {
         Some(b'f' | b'F') if s.len() > 1 => (&s[..s.len() - 1], Type::new_float()),
-        Some(b'l' | b'L') if s.len() > 1 => (&s[..s.len() - 1], Type::new_double()),
+        Some(b'l' | b'L') if s.len() > 1 => (&s[..s.len() - 1], Type::new_ldouble()),
         _ => (s.as_str(), Type::new_double()),
     };
 
