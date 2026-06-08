@@ -263,6 +263,8 @@ pub fn new_node(kind: NodeKind, tok_loc: usize, file_no: usize, line_no: usize) 
         cont_label: None,
         case_next: None,
         default_case: None,
+        begin: 0,
+        end: 0,
         asm_str: None,
     }
 }
@@ -270,7 +272,8 @@ pub fn new_node(kind: NodeKind, tok_loc: usize, file_no: usize, line_no: usize) 
 fn new_case_link(node: &Node) -> Node {
     let mut link = new_node(NodeKind::Case, node.tok_loc, node.file_no, node.line_no);
     link.label = node.label.clone();
-    link.val = node.val;
+    link.begin = node.begin;
+    link.end = node.end;
     link
 }
 
@@ -3194,6 +3197,8 @@ pub fn declaration(
         cont_label: None,
         case_next: None,
         default_case: None,
+        begin: 0,
+        end: 0,
         asm_str: None,
     };
     let mut cur = &mut head;
@@ -3810,6 +3815,8 @@ pub fn compound_stmt(
         cont_label: None,
         case_next: None,
         default_case: None,
+        begin: 0,
+        end: 0,
         asm_str: None,
     };
     let mut cur = &mut head;
@@ -4214,17 +4221,34 @@ pub fn stmt(
         let tok_loc = tok.loc;
         let file_no = tok.file_no;
         let line_no = tok.line_no;
-        let (val, new_tok) = const_expr(
+        let (begin, new_tok) = const_expr(
             files,
             tok.next.as_ref().unwrap(),
             tag_scope_stack,
             scope_stack,
         )?;
-        let tok = skip(files, &new_tok, ":")?;
+        let mut tok = new_tok;
+        let end = if equal(files, &tok, "...") {
+            let (end, new_tok) = const_expr(
+                files,
+                tok.next.as_ref().unwrap(),
+                tag_scope_stack,
+                scope_stack,
+            )?;
+            tok = new_tok;
+            if end < begin {
+                return Err(error_tok(files, &tok, "empty case range specified"));
+            }
+            end
+        } else {
+            begin
+        };
+        let tok = skip(files, &tok, ":")?;
 
         let mut node = new_node(NodeKind::Case, tok_loc, file_no, line_no);
         node.label = Some(new_unique_name());
-        node.val = val;
+        node.begin = begin;
+        node.end = end;
         let (lhs, tok) = stmt(
             files,
             &tok,
@@ -6031,6 +6055,8 @@ pub fn funcall(
         cont_label: None,
         case_next: None,
         default_case: None,
+        begin: 0,
+        end: 0,
         asm_str: None,
     };
     let mut cur = &mut head;

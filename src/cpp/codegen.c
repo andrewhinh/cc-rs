@@ -1159,10 +1159,20 @@ static void gen_stmt(Node *node) {
   case ND_SWITCH:
     gen_expr(node->cond);
 
+    char *ax = (node->cond->ty->size == 8) ? "%rax" : "%eax";
+    char *di = (node->cond->ty->size == 8) ? "%rdi" : "%edi";
+
     for (Node *n = node->case_next; n; n = n->case_next) {
-      char *reg = (node->cond->ty->size == 8) ? "%rax" : "%eax";
-      println("  cmp $%ld, %s", n->val, reg);
-      println("  je %s", n->label);
+      if (n->begin == n->end) {
+        println("  cmp $%ld, %s", n->begin, ax);
+        println("  je %s", n->label);
+        continue;
+      }
+
+      println("  mov %s, %s", ax, di);
+      println("  sub $%ld, %s", n->begin, di);
+      println("  cmp $%ld, %s", n->end - n->begin, di);
+      println("  jbe %s", n->label);
     }
 
     if (node->default_case)

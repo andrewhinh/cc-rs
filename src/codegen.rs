@@ -1636,15 +1636,21 @@ fn gen_stmt(
                 depth,
             )?;
 
+            let is_64 = node.cond.as_ref().unwrap().ty.as_ref().unwrap().size == 8;
+            let ax = if is_64 { "%rax" } else { "%eax" };
+            let di = if is_64 { "%rdi" } else { "%edi" };
+
             let mut case_node = node.case_next.as_ref();
             while let Some(cn) = case_node {
-                let reg = if node.cond.as_ref().unwrap().ty.as_ref().unwrap().size == 8 {
-                    "%rax"
+                if cn.begin == cn.end {
+                    result.push_str(&format!("  cmp ${}, {}\n", cn.begin, ax));
+                    result.push_str(&format!("  je {}\n", cn.label.as_ref().unwrap()));
                 } else {
-                    "%eax"
-                };
-                result.push_str(&format!("  cmp ${}, {}\n", cn.val, reg));
-                result.push_str(&format!("  je {}\n", cn.label.as_ref().unwrap()));
+                    result.push_str(&format!("  mov {}, {}\n", ax, di));
+                    result.push_str(&format!("  sub ${}, {}\n", cn.begin, di));
+                    result.push_str(&format!("  cmp ${}, {}\n", cn.end - cn.begin, di));
+                    result.push_str(&format!("  jbe {}\n", cn.label.as_ref().unwrap()));
+                }
                 case_node = cn.case_next.as_ref();
             }
 

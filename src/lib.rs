@@ -660,6 +660,8 @@ pub struct Node {
     pub cont_label: Option<String>,
     pub case_next: Option<Box<Node>>,
     pub default_case: Option<Box<Node>>,
+    pub begin: i64,
+    pub end: i64,
     pub asm_str: Option<String>,
 }
 

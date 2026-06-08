@@ -377,7 +377,7 @@ cargo run
 - [x] Add _Generic
 - [x] [GNU] Allow sizeof(<function type>)
 - [x] Add basic "asm" statement
-- [ ] [GNU] Support case ranges
+- [x] [GNU] Support case ranges
 - [ ] Add atomic_compare_exchange
 - [ ] Add atomic_exchange
 - [ ] Add _Atomic and atomic ++, -- and op= operators

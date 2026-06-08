@@ -258,9 +258,13 @@ struct Node {
   char *unique_label;
   Node *goto_next;
 
-  // Switch-cases
+  // Switch
   Node *case_next;
   Node *default_case;
+
+  // Case
+  int64_t begin;
+  int64_t end;
 
   // "asm" string literal
   char *asm_str;
