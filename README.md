@@ -240,7 +240,7 @@ cargo run
 - [x] Add union designated initializer
 - [x] Handle struct designator for anonymous struct member
 - [x] Add offsetof
-- [ ] [GNU] Support array range designator
+- [x] [GNU] Support array range designator
 - [ ] Add __attribute__((packed))
 - [ ] Add __attribute__((aligned(N)) for struct declaration
 - [ ] Make struct member access to work with = and ?:

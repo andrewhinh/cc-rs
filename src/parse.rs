@@ -600,18 +600,45 @@ fn array_designator(
     ty: &Type,
     tag_scope_stack: &mut [Vec<TagScope>],
     scope_stack: &mut Vec<Vec<VarScope>>,
-) -> Result<(usize, Token), String> {
+) -> Result<(usize, usize, Token), String> {
     let start = tok.clone();
-    let (idx, tok) = bracket_const_expr(files, tok, tag_scope_stack, scope_stack)?;
-    if ty.array_len >= 0 && (idx < 0 || idx >= ty.array_len) {
+    let (begin, mut tok) = bracket_const_expr(files, tok, tag_scope_stack, scope_stack)?;
+    if ty.array_len >= 0 && (begin < 0 || begin >= ty.array_len) {
         return Err(error_tok(
             files,
             &start,
             "array designator index exceeds array bounds",
         ));
     }
+
+    let end = if equal(files, &tok, "...") {
+        let expr_tok = tok
+            .next
+            .as_ref()
+            .ok_or_else(|| error_tok(files, &tok, "premature end of input"))?;
+        let (end, tok2) = const_expr(files, expr_tok.as_ref(), tag_scope_stack, scope_stack)?;
+        if ty.array_len >= 0 && (end < 0 || end >= ty.array_len) {
+            return Err(error_tok(
+                files,
+                &tok2,
+                "array designator index exceeds array bounds",
+            ));
+        }
+        if end < begin {
+            return Err(error_tok(
+                files,
+                &tok2,
+                &format!("array designator range [{begin}, {end}] is empty"),
+            ));
+        }
+        tok = tok2;
+        end
+    } else {
+        begin
+    };
+
     let tok = skip(files, &tok, "]")?;
-    Ok((idx as usize, tok))
+    Ok((begin as usize, end as usize, tok))
 }
 
 fn struct_designator(files: &[File], dot_tok: &Token, ty: &Type) -> Result<(i64, Token), String> {
@@ -715,20 +742,8 @@ fn count_array_init_elements(
         first = false;
 
         if equal(files, &tok, "[") {
-            let (idx_val, mut t) =
-                bracket_const_expr(files, &tok, tag_scope_stack.as_mut_slice(), scope_stack)?;
-            i = idx_val;
-            if equal(files, &t, "...") {
-                let expr_tok2 = t
-                    .next
-                    .as_ref()
-                    .ok_or_else(|| error_tok(files, &t, "premature end of input"))?;
-                let (idx_hi, t2) =
-                    const_expr(files, expr_tok2.as_ref(), tag_scope_stack, scope_stack)?;
-                i = idx_hi;
-                t = t2;
-            }
-            t = skip(files, &t, "]")?;
+            let (_begin, end, t) = array_designator(files, &tok, ty, tag_scope_stack, scope_stack)?;
+            i = end as i64;
             tok = designation(
                 files,
                 &t,
@@ -867,17 +882,22 @@ fn array_initializer1(
         first = false;
 
         if equal(files, &tok, "[") {
-            let (idx, t) = array_designator(files, &tok, &init.ty, tag_scope_stack, scope_stack)?;
-            tok = designation(
-                files,
-                &t,
-                &mut init.children[idx],
-                locals,
-                globals,
-                scope_stack,
-                tag_scope_stack,
-            )?;
-            i = idx + 1;
+            let (begin, end, t) =
+                array_designator(files, &tok, &init.ty, tag_scope_stack, scope_stack)?;
+            let mut tok2 = t.clone();
+            for j in begin..=end {
+                tok2 = designation(
+                    files,
+                    &t,
+                    &mut init.children[j],
+                    locals,
+                    globals,
+                    scope_stack,
+                    tag_scope_stack,
+                )?;
+            }
+            tok = tok2;
+            i = end + 1;
             continue;
         }
 
@@ -964,26 +984,29 @@ fn designation(
             ));
         }
 
-        let (i, tok) = array_designator(files, tok, &init.ty, tag_scope_stack, scope_stack)?;
-        let tok = designation(
-            files,
-            &tok,
-            &mut init.children[i],
-            locals,
-            globals,
-            scope_stack,
-            tag_scope_stack,
-        )?;
+        let (begin, end, t) = array_designator(files, tok, &init.ty, tag_scope_stack, scope_stack)?;
+        let mut tok2 = t.clone();
+        for j in begin..=end {
+            tok2 = designation(
+                files,
+                &t,
+                &mut init.children[j],
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+        }
 
         return array_initializer2(
             files,
-            &tok,
+            &tok2,
             init,
             locals,
             globals,
             scope_stack,
             tag_scope_stack,
-            i + 1,
+            begin + 1,
         );
     }
 
