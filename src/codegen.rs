@@ -1253,6 +1253,13 @@ fn gen_expr(
             result.push_str(&format!("{}:\n", l_end));
             return Ok(());
         }
+        NodeKind::LabelVal => {
+            result.push_str(&format!(
+                "  lea {}(%rip), %rax\n",
+                node.unique_label.as_ref().unwrap()
+            ));
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -1468,7 +1475,9 @@ fn gen_expr(
         | NodeKind::Cast
         | NodeKind::Cond
         | NodeKind::Goto
+        | NodeKind::GotoExpr
         | NodeKind::Label
+        | NodeKind::LabelVal
         | NodeKind::Switch
         | NodeKind::Case
         | NodeKind::NullExpr
@@ -1622,6 +1631,10 @@ fn gen_stmt(
         }
         NodeKind::Goto => {
             result.push_str(&format!("  jmp {}\n", node.unique_label.as_ref().unwrap()));
+        }
+        NodeKind::GotoExpr => {
+            gen_expr(node.lhs.as_ref().unwrap(), result, files, current_fn, depth)?;
+            result.push_str("  jmp *%rax\n");
         }
         NodeKind::Label => {
             result.push_str(&format!("{}:\n", node.unique_label.as_ref().unwrap()));

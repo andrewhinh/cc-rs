@@ -1700,6 +1700,13 @@ static Node *stmt(Token **rest, Token *tok) {
     return asm_stmt(rest, tok);
 
   if (equal(tok, "goto")) {
+    if (equal(tok->next, "*")) {
+      Node *node = new_node(ND_GOTO_EXPR, tok);
+      node->lhs = expr(&tok, tok->next->next);
+      *rest = skip(tok, ";");
+      return node;
+    }
+
     Node *node = new_node(ND_GOTO, tok);
     node->label = get_ident(tok->next);
     node->goto_next = gotos;
@@ -2402,6 +2409,7 @@ static Node *cast(Token **rest, Token *tok) {
 
 // unary = ("+" | "-" | "*" | "&" | "!" | "~") cast
 //       | ("++" | "--") unary
+//       | "&&" ident
 //       | postfix
 static Node *unary(Token **rest, Token *tok) {
   if (equal(tok, "+"))
@@ -2443,6 +2451,15 @@ static Node *unary(Token **rest, Token *tok) {
   // Read --i as i-=1
   if (equal(tok, "--"))
     return to_assign(new_sub(unary(rest, tok->next), new_num(1, tok), tok));
+
+  if (equal(tok, "&&")) {
+    Node *node = new_node(ND_LABEL_VAL, tok);
+    node->label = get_ident(tok->next);
+    node->goto_next = gotos;
+    gotos = node;
+    *rest = tok->next->next;
+    return node;
+  }
 
   return postfix(rest, tok);
 }
@@ -2999,7 +3016,7 @@ static void create_param_lvars(Type *param) {
   }
 }
 
-// This function matches gotos with labels.
+// This function matches gotos or labels-as-values with labels.
 //
 // We cannot resolve gotos as we parse a function because gotos
 // can refer a label that appears later in the function.

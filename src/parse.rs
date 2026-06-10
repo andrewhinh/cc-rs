@@ -76,6 +76,11 @@ fn gotos_set(node: Option<Box<Node>>) {
     GOTOS.with(|g| g.set(node));
 }
 
+fn push_pending_goto(node: &mut Node) {
+    node.goto_next = gotos_get();
+    gotos_set(Some(Box::new(node.clone())));
+}
+
 fn labels_get() -> Option<Box<Node>> {
     LABELS.with(|l| l.take())
 }
@@ -2829,6 +2834,7 @@ fn is_const_expr(files: &[File], node: &mut Node) -> Result<bool, String> {
             is_const_expr(files, node.lhs.as_mut().unwrap())
         }
         NodeKind::Num => Ok(true),
+        NodeKind::LabelVal => Ok(false),
         _ => Ok(false),
     }
 }
@@ -3514,6 +3520,10 @@ pub fn create_param_lvars(
     Ok(())
 }
 
+// Matches gotos and labels-as-values with labels.
+//
+// We cannot resolve gotos as we parse a function because gotos
+// can refer to a label that appears later in the function.
 fn resolve_goto_labels(files: &[File], body: &mut Node) -> Result<(), String> {
     let mut gotos_vec: Vec<Node> = Vec::new();
     let mut labels_vec: Vec<Node> = Vec::new();
@@ -3533,28 +3543,28 @@ fn resolve_goto_labels(files: &[File], body: &mut Node) -> Result<(), String> {
     gotos_set(None);
     labels_set(None);
 
-    for goto in &mut gotos_vec {
+    for label_use in &mut gotos_vec {
         let mut found = false;
         for label in &labels_vec {
-            if goto.label == label.label {
-                set_unique_label(body, &goto.label, &label.unique_label);
+            if label_use.label == label.label {
+                set_unique_label(body, &label_use.label, &label.unique_label);
                 found = true;
                 break;
             }
         }
         if !found {
-            let label_name = goto.label.as_ref().unwrap();
+            let label_name = label_use.label.as_ref().unwrap();
             let tok = Token {
                 kind: TokenKind::Ident,
                 next: None,
                 val: 0,
                 fval: 0.0,
-                loc: goto.tok_loc,
-                file_no: goto.file_no,
+                loc: label_use.tok_loc,
+                file_no: label_use.file_no,
                 len: label_name.len(),
                 ty: None,
                 str: None,
-                line_no: goto.line_no,
+                line_no: label_use.line_no,
                 line_delta: 0,
                 at_bol: false,
                 has_space: false,
@@ -3569,7 +3579,7 @@ fn resolve_goto_labels(files: &[File], body: &mut Node) -> Result<(), String> {
 }
 
 fn set_unique_label(node: &mut Node, label: &Option<String>, unique_label: &Option<String>) {
-    if node.kind == NodeKind::Goto && node.label == *label {
+    if matches!(node.kind, NodeKind::Goto | NodeKind::LabelVal) && node.label == *label {
         node.unique_label = unique_label.clone();
     }
     if let Some(lhs) = &mut node.lhs {
@@ -4161,12 +4171,25 @@ pub fn stmt(
         let tok_loc = tok.loc;
         let file_no = tok.file_no;
         let line_no = tok.line_no;
+        let next = tok.next.as_ref().unwrap();
+        if equal(files, next, "*") {
+            let mut node = new_node(NodeKind::GotoExpr, tok_loc, file_no, line_no);
+            let (expr, tok) = expr(
+                files,
+                next.next.as_ref().unwrap(),
+                locals,
+                globals,
+                scope_stack,
+                tag_scope_stack,
+            )?;
+            node.lhs = Some(Box::new(expr));
+            let tok = skip(files, &tok, ";")?;
+            return Ok((node, tok));
+        }
         let mut node = new_node(NodeKind::Goto, tok_loc, file_no, line_no);
-        let label_tok = tok.next.as_ref().unwrap();
-        node.label = Some(get_ident(files, label_tok)?);
-        node.goto_next = gotos_get();
-        gotos_set(Some(Box::new(node.clone())));
-        let tok = skip(files, label_tok.next.as_ref().unwrap(), ";")?;
+        node.label = Some(get_ident(files, next)?);
+        push_pending_goto(&mut node);
+        let tok = skip(files, next.next.as_ref().unwrap(), ";")?;
         return Ok((node, tok));
     }
     if equal(files, tok, "break") {
@@ -5866,6 +5889,18 @@ pub fn unary(
         return Ok((to_assign(binary, locals, scope_stack), tok));
     }
 
+    if equal(files, tok, "&&") {
+        let tok_loc = tok.loc;
+        let file_no = tok.file_no;
+        let line_no = tok.line_no;
+        let label_tok = tok.next.as_ref().unwrap();
+        let mut node = new_node(NodeKind::LabelVal, tok_loc, file_no, line_no);
+        node.label = Some(get_ident(files, label_tok)?);
+        push_pending_goto(&mut node);
+        let rest = label_tok.next.as_ref().unwrap().as_ref().clone();
+        return Ok((node, rest));
+    }
+
     postfix(files, tok, locals, globals, scope_stack, tag_scope_stack)
 }
 
@@ -6789,6 +6824,7 @@ pub fn add_type(node: &mut Node) {
         | NodeKind::ExprStmt
         | NodeKind::Cast
         | NodeKind::Goto
+        | NodeKind::GotoExpr
         | NodeKind::Label
         | NodeKind::Switch
         | NodeKind::Case
@@ -6843,6 +6879,9 @@ pub fn add_type(node: &mut Node) {
                     node.ty = stmt.lhs.as_ref().unwrap().ty.clone();
                 }
             }
+        }
+        NodeKind::LabelVal => {
+            node.ty = Some(pointer_to(Type::new_void()));
         }
     }
 }

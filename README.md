@@ -81,7 +81,7 @@ cargo run
 - [x] Add return that doesn't take any value
 - [x] Add do ... while
 - [x] Make "main" to implicitly return 0
-- [ ] [GNU] Support labels-as-values
+- [x] [GNU] Support labels-as-values
 - [ ] [GNU] Treat labels-as-values as compile-time constant
 
 ### Functions, Calls, and Calling Convention
