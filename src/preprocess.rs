@@ -1,11 +1,13 @@
 use std::cell::Cell;
 use std::collections::HashSet;
+use std::ffi::c_void;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicI32, Ordering};
 
 use chrono::{DateTime, Local};
 
+use crate::hashmap::{HashMap, hashmap_delete, hashmap_get, hashmap_put2};
 use crate::tokenize::{line_delta_for_file, update_file_line_marker};
 use crate::{
     File, Token, TokenKind, add_input_file, const_expr, consume, convert_pp_number, equal,
@@ -52,19 +54,17 @@ struct MacroArg {
 
 #[derive(Debug, Clone)]
 struct Macro {
-    next: Option<Box<Macro>>,
     name: String,
     is_objlike: bool,
     params: Option<Box<MacroParam>>,
     va_args_name: Option<String>,
     body: Token,
-    deleted: bool,
     handler: Option<MacroHandler>,
 }
 
 thread_local! {
     static COND_INCL: Cell<Option<Box<CondIncl>>> = const { Cell::new(None) };
-    static MACROS: Cell<Option<Box<Macro>>> = const { Cell::new(None) };
+    static MACROS: Cell<Option<HashMap>> = const { Cell::new(None) };
 }
 
 fn cond_incl_get() -> Option<Box<CondIncl>> {
@@ -75,12 +75,12 @@ fn cond_incl_set(ci: Option<Box<CondIncl>>) {
     COND_INCL.with(|c| c.set(ci));
 }
 
-fn macros_get() -> Option<Box<Macro>> {
-    MACROS.with(|m| m.take())
+fn macros_get() -> HashMap {
+    MACROS.with(|m| m.take().unwrap_or_default())
 }
 
-fn macros_set(m: Option<Box<Macro>>) {
-    MACROS.with(|cell| cell.set(m));
+fn macros_set(m: HashMap) {
+    MACROS.with(|cell| cell.set(Some(m)));
 }
 
 fn find_macro(files: &[File], tok: &Token) -> Option<Macro> {
@@ -90,20 +90,14 @@ fn find_macro(files: &[File], tok: &Token) -> Option<Macro> {
     let file = files.iter().find(|f| f.file_no == tok.file_no)?;
     let name: String = file.contents.chars().skip(tok.loc).take(tok.len).collect();
 
-    let macros = macros_get();
-    let mut result: Option<Macro> = None;
-    let mut m = &macros;
-    while let Some(current) = m {
-        if current.name == name {
-            if !current.deleted {
-                result = Some((**current).clone());
-            }
-            break;
-        }
-        m = &current.next;
+    let map = macros_get();
+    let ptr = hashmap_get(&map, &name);
+    macros_set(map);
+
+    if ptr.is_null() {
+        return None;
     }
-    macros_set(macros);
-    result
+    Some(unsafe { (*(ptr as *mut Macro)).clone() })
 }
 
 fn add_macro(
@@ -112,20 +106,28 @@ fn add_macro(
     params: Option<Box<MacroParam>>,
     va_args_name: Option<String>,
     body: Token,
-    deleted: bool,
     handler: Option<MacroHandler>,
 ) {
     let m = Macro {
-        next: macros_get(),
         name,
         is_objlike,
         params,
         va_args_name,
         body,
-        deleted,
         handler,
     };
-    macros_set(Some(Box::new(m)));
+    let ptr = Box::into_raw(Box::new(m));
+    let mut map = macros_get();
+    unsafe {
+        let m_ref = &*ptr;
+        hashmap_put2(
+            &mut map,
+            m_ref.name.as_ptr(),
+            m_ref.name.len() as i32,
+            ptr as *mut c_void,
+        );
+    }
+    macros_set(map);
 }
 
 pub fn define_macro(name: &str, body: &str) {
@@ -133,15 +135,13 @@ pub fn define_macro(name: &str, body: &str) {
     let file = new_file("<built-in>".to_string(), file_no, body.to_string());
     add_input_file(file.clone());
     let tok = tokenize(&file);
-    add_macro(name.to_string(), true, None, None, tok, false, None);
+    add_macro(name.to_string(), true, None, None, tok, None);
 }
 
 pub fn undef_macro(name: &str) {
-    let file_no = get_file_no();
-    let file = new_file("<built-in>".to_string(), file_no, String::new());
-    add_input_file(file.clone());
-    let tok = tokenize(&file);
-    add_macro(name.to_string(), true, None, None, tok, true, None);
+    let mut map = macros_get();
+    hashmap_delete(&mut map, name);
+    macros_set(map);
 }
 
 fn add_builtin(name: &str, handler: MacroHandler) {
@@ -149,15 +149,7 @@ fn add_builtin(name: &str, handler: MacroHandler) {
     let file = new_file("<built-in>".to_string(), file_no, String::new());
     add_input_file(file.clone());
     let tok = tokenize(&file);
-    add_macro(
-        name.to_string(),
-        true,
-        None,
-        None,
-        tok,
-        false,
-        Some(handler),
-    );
+    add_macro(name.to_string(), true, None, None, tok, Some(handler));
 }
 
 fn detached_token(tok: &Token) -> Token {
@@ -865,12 +857,12 @@ fn read_macro_definition(files: &[File], tok: &Token) -> Result<Token, String> {
         let (params, tok) =
             read_macro_params(files, next_tok.next.as_ref().unwrap(), &mut va_args_name)?;
         let (body, rest) = copy_line(files, &tok);
-        add_macro(name, false, params, va_args_name, body, false, None);
+        add_macro(name, false, params, va_args_name, body, None);
         return Ok(rest);
     }
 
     let (body, rest) = copy_line(files, next_tok);
-    add_macro(name, true, None, None, body, false, None);
+    add_macro(name, true, None, None, body, None);
     Ok(rest)
 }
 
