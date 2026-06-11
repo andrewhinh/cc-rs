@@ -263,6 +263,7 @@ pub fn new_node(kind: NodeKind, tok_loc: usize, file_no: usize, line_no: usize) 
         member: None,
         label: None,
         unique_label: None,
+        label_slot: None,
         goto_next: None,
         brk_label: None,
         cont_label: None,
@@ -2464,7 +2465,7 @@ fn write_buf(buf: &mut [u8], offset: usize, val: u64, sz: i64) {
 
 fn write_gvar_data(
     files: &[File],
-    init: &Initializer,
+    init: &mut Initializer,
     ty: &Type,
     buf: &mut [u8],
     offset: usize,
@@ -2476,7 +2477,7 @@ fn write_gvar_data(
         for i in 0..ty.array_len as usize {
             write_gvar_data(
                 files,
-                &init.children[i],
+                &mut init.children[i],
                 &base_ty,
                 buf,
                 offset + sz * i,
@@ -2504,7 +2505,7 @@ fn write_gvar_data(
             } else {
                 write_gvar_data(
                     files,
-                    &init.children[mem.idx as usize],
+                    &mut init.children[mem.idx as usize],
                     &mem.ty,
                     buf,
                     offset + mem.offset as usize,
@@ -2521,7 +2522,14 @@ fn write_gvar_data(
             return Ok(());
         };
         let idx = mem.idx as usize;
-        return write_gvar_data(files, &init.children[idx], &mem.ty, buf, offset, rel_head);
+        return write_gvar_data(
+            files,
+            &mut init.children[idx],
+            &mem.ty,
+            buf,
+            offset,
+            rel_head,
+        );
     }
 
     if init.expr.is_none() {
@@ -2549,9 +2557,9 @@ fn write_gvar_data(
         return Ok(());
     }
 
-    let mut expr = init.expr.as_ref().unwrap().clone();
-    let mut label: Option<String> = None;
-    let val = eval2(files, &mut expr, Some(&mut label))?;
+    let expr = init.expr.as_mut().unwrap();
+    let mut label: Option<crate::RelocLabel> = None;
+    let val = eval2(files, expr, Some(&mut label))?;
 
     if label.is_none() {
         write_buf(buf, offset, val as u64, ty.size);
@@ -2589,7 +2597,7 @@ fn gvar_initializer(
 ) -> Result<Token, String> {
     let mut empty_locals: Vec<Obj> = Vec::new();
     let mut scope_stack_vec: Vec<Vec<VarScope>> = scope_stack.to_vec();
-    let (init, new_ty, tok) = initializer(
+    let (mut init, new_ty, tok) = initializer(
         files,
         tok,
         &var.ty,
@@ -2602,7 +2610,7 @@ fn gvar_initializer(
     var.ty = new_ty;
     let mut buf = vec![0u8; var.ty.size as usize];
     let mut rel_head: Option<Box<crate::Relocation>> = None;
-    write_gvar_data(files, &init, &var.ty, &mut buf, 0, &mut rel_head)?;
+    write_gvar_data(files, &mut init, &var.ty, &mut buf, 0, &mut rel_head)?;
     var.init_data = Some(buf);
     var.rel = rel_head;
     Ok(tok)
@@ -3221,6 +3229,7 @@ pub fn declaration(
         member: None,
         label: None,
         unique_label: None,
+        label_slot: None,
         goto_next: None,
         brk_label: None,
         cont_label: None,
@@ -3547,6 +3556,9 @@ fn resolve_goto_labels(files: &[File], body: &mut Node) -> Result<(), String> {
         let mut found = false;
         for label in &labels_vec {
             if label_use.label == label.label {
+                if let Some(slot) = &label_use.label_slot {
+                    slot.borrow_mut().clone_from(&label.unique_label);
+                }
                 set_unique_label(body, &label_use.label, &label.unique_label);
                 found = true;
                 break;
@@ -3843,6 +3855,7 @@ pub fn compound_stmt(
         member: None,
         label: None,
         unique_label: None,
+        label_slot: None,
         goto_next: None,
         brk_label: None,
         cont_label: None,
@@ -4480,7 +4493,7 @@ pub fn eval(files: &[File], node: &mut Node) -> Result<i64, String> {
 pub fn eval2(
     files: &[File],
     node: &mut Node,
-    label: Option<&mut Option<String>>,
+    label: Option<&mut Option<crate::RelocLabel>>,
 ) -> Result<i64, String> {
     add_type(node);
 
@@ -4656,6 +4669,23 @@ pub fn eval2(
             }
         }
         NodeKind::Addr => eval_rval(files, node.lhs.as_mut().unwrap(), label),
+        NodeKind::LabelVal => {
+            if label.is_none() {
+                return Err(error_at(
+                    files,
+                    node.file_no,
+                    node.tok_loc,
+                    "not a compile-time constant",
+                ));
+            }
+            let slot = node
+                .label_slot
+                .get_or_insert_with(|| Rc::new(RefCell::new(None)));
+            if let Some(l) = label {
+                *l = Some(crate::RelocLabel::Late(slot.clone()));
+            }
+            Ok(0)
+        }
         NodeKind::Member => {
             if label.is_none() {
                 return Err(error_at(
@@ -4698,7 +4728,7 @@ pub fn eval2(
                 ));
             }
             if let Some(l) = label {
-                *l = Some(var.name.clone());
+                *l = Some(crate::RelocLabel::Symbol(var.name.clone()));
             }
             Ok(0)
         }
@@ -4715,7 +4745,7 @@ pub fn eval2(
 fn eval_rval(
     files: &[File],
     node: &mut Node,
-    label: Option<&mut Option<String>>,
+    label: Option<&mut Option<crate::RelocLabel>>,
 ) -> Result<i64, String> {
     match node.kind {
         NodeKind::Var => {
@@ -4729,7 +4759,7 @@ fn eval_rval(
                 ));
             }
             if let Some(l) = label {
-                *l = Some(var.name.clone());
+                *l = Some(crate::RelocLabel::Symbol(var.name.clone()));
             }
             Ok(0)
         }
@@ -6108,6 +6138,7 @@ pub fn funcall(
         member: None,
         label: None,
         unique_label: None,
+        label_slot: None,
         goto_next: None,
         brk_label: None,
         cont_label: None,

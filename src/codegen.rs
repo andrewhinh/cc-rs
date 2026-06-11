@@ -1920,7 +1920,18 @@ pub fn emit_assembly(opt_include: &[String]) -> Result<String, String> {
                 if let Some(ref r) = rel
                     && r.offset as usize == pos
                 {
-                    result.push_str(&format!("  .quad {}+{}\n", r.label, r.addend));
+                    match &r.label {
+                        crate::RelocLabel::Symbol(name) => {
+                            result.push_str(&format!("  .quad {}+{}\n", name, r.addend));
+                        }
+                        crate::RelocLabel::Late(slot) => {
+                            let resolved = slot.borrow();
+                            let name = resolved.as_deref().ok_or_else(|| {
+                                format!("unresolved label relocation at offset {}", r.offset)
+                            })?;
+                            result.push_str(&format!("  .quad {}+{}\n", name, r.addend));
+                        }
+                    }
                     rel = r.next.clone();
                     pos += 8;
                     continue;

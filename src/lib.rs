@@ -596,10 +596,16 @@ impl Type {
 }
 
 #[derive(Debug, Clone)]
+pub enum RelocLabel {
+    Symbol(String),
+    Late(Rc<RefCell<Option<String>>>),
+}
+
+#[derive(Debug, Clone)]
 pub struct Relocation {
     pub next: Option<Box<Relocation>>,
     pub offset: i64,
-    pub label: String,
+    pub label: RelocLabel,
     pub addend: i64,
 }
 
@@ -657,6 +663,7 @@ pub struct Node {
     pub member: Option<Box<Member>>,
     pub label: Option<String>,
     pub unique_label: Option<String>,
+    pub label_slot: Option<Rc<RefCell<Option<String>>>>,
     pub goto_next: Option<Box<Node>>,
     pub brk_label: Option<String>,
     pub cont_label: Option<String>,
