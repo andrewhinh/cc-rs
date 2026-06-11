@@ -7,7 +7,8 @@ use std::{
 
 use cc_rs::{
     Token, TokenKind, add_include_path, codegen::emit_assembly, define_macro, get_input_files,
-    init_macros, preprocess::preprocess, set_opt_fcommon, tokenize_input, undef_macro,
+    hashmap::hashmap_test, init_macros, preprocess::preprocess, set_opt_fcommon, tokenize_input,
+    undef_macro,
 };
 use tempfile::NamedTempFile;
 
@@ -207,6 +208,11 @@ fn parse_args() -> Result<Args, String> {
             idirafter_paths.push(args[i].clone());
             i += 1;
             continue;
+        }
+
+        if args[i] == "-hashmap-test" {
+            hashmap_test();
+            process::exit(0);
         }
 
         if args[i] == "-include" {

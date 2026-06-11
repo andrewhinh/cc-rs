@@ -231,4 +231,7 @@ echo 'void foo(); void bar(); int main() { foo(); bar(); }' > $tmp/main.c
 $compiler -o $tmp/foo $tmp/main.c $tmp/foo.so
 check '.so'
 
+$compiler -hashmap-test
+check 'hashmap'
+
 echo OK

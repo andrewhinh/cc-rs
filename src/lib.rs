@@ -1,4 +1,5 @@
 pub mod codegen;
+pub mod hashmap;
 pub mod parse;
 pub mod preprocess;
 pub mod tokenize;

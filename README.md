@@ -324,7 +324,7 @@ cargo run
 - [x] [GNU] Support GCC-style variadic macro
 - [x] Add -idirafter option
 - [x] Add -include option
-- [ ] Add string hashmap
+- [x] Add string hashmap
 - [ ] Use hashmap for macro name lookup
 - [ ] Cache file search results
 - [ ] Add include guard optimization
