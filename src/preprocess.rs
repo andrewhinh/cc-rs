@@ -10,9 +10,9 @@ use chrono::{DateTime, Local};
 use crate::hashmap::{HashMap, hashmap_delete, hashmap_get, hashmap_put2};
 use crate::tokenize::{line_delta_for_file, update_file_line_marker};
 use crate::{
-    File, Token, TokenKind, add_input_file, const_expr, consume, convert_pp_number, equal,
-    error_tok, get_file_no, get_include_paths, get_input_files, is_integer, new_file, skip,
-    tokenize, tokenize_file, tokenize_string_literal, warn_tok,
+    File, ScopeTags, ScopeVars, Token, TokenKind, add_input_file, const_expr, consume,
+    convert_pp_number, equal, error_tok, get_file_no, get_include_paths, get_input_files,
+    is_integer, new_file, skip, tokenize, tokenize_file, tokenize_string_literal, warn_tok,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1252,8 +1252,8 @@ fn eval_const_expr(files: &[File], tok: &Token) -> Result<(i64, Token), String> 
 
     let expr = replace_idents_with_zero(expr);
 
-    let mut empty_tag_scope_stack: Vec<Vec<crate::TagScope>> = Vec::new();
-    let mut empty_scope_stack: Vec<Vec<crate::VarScope>> = Vec::new();
+    let mut empty_tag_scope_stack: Vec<ScopeTags> = Vec::new();
+    let mut empty_scope_stack: Vec<ScopeVars> = Vec::new();
     let (val, rest2) = const_expr(
         &files,
         &expr,

@@ -3,7 +3,7 @@ use crate::parse::{declare_builtin_functions, mark_live_globals, scan_globals};
 use crate::preprocess::{preprocess, reset_counter};
 use crate::tokenize_input;
 use crate::{
-    Node, NodeKind, Obj, TagScope, TokenKind, Type, TypeKind, VarAttr, VarScope, error_at,
+    Node, NodeKind, Obj, ScopeTags, ScopeVars, TokenKind, Type, TypeKind, VarAttr, error_at,
 };
 use crate::{declspec, function, global_variable, is_function, new_unique_name, parse_typedef};
 use crate::{get_input_files, get_opt_fcommon};
@@ -1816,8 +1816,8 @@ pub fn emit_assembly(opt_include: &[String]) -> Result<String, String> {
 
     let mut globals: Vec<Obj> = Vec::new();
     declare_builtin_functions(&mut globals);
-    let mut tag_scope_stack: Vec<Vec<TagScope>> = vec![Vec::new()];
-    let mut scope_stack: Vec<Vec<VarScope>> = vec![Vec::new()];
+    let mut tag_scope_stack: Vec<ScopeTags> = vec![ScopeTags::default()];
+    let mut scope_stack: Vec<ScopeVars> = vec![ScopeVars::default()];
 
     let files = get_input_files();
 

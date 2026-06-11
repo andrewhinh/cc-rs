@@ -752,18 +752,14 @@ pub fn new_var_unique_id() -> u64 {
 
 #[derive(Debug, Clone)]
 pub struct VarScope {
-    pub name: String,
     pub var: Option<Obj>,
     pub type_def: Option<Rc<RefCell<Type>>>,
     pub enum_ty: Option<Type>,
     pub enum_val: i64,
 }
 
-#[derive(Debug, Clone)]
-pub struct TagScope {
-    pub name: String,
-    pub ty: Rc<RefCell<Type>>,
-}
+pub type ScopeVars = hashmap::HashMap;
+pub type ScopeTags = hashmap::HashMap;
 
 #[derive(Debug, Clone, Default)]
 pub struct VarAttr {
