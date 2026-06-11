@@ -169,6 +169,19 @@ pub fn hashmap_put(map: &mut HashMap, key: &str, val: *mut c_void) {
     hashmap_put_bytes(map, key.as_bytes(), val);
 }
 
+pub fn populate_keywords(map: &mut HashMap, keywords: &[&str]) {
+    if map.capacity != 0 {
+        return;
+    }
+    for kw in keywords {
+        hashmap_put(map, kw, std::ptr::dangling_mut::<c_void>());
+    }
+}
+
+pub fn hashmap_contains_bytes(map: &HashMap, key: &[u8]) -> bool {
+    !hashmap_get_bytes(map, key).is_null()
+}
+
 pub fn hashmap_delete2(map: &mut HashMap, key: *const u8, keylen: i32) {
     if let Some(idx) = get_entry(map, key, keylen) {
         map.buckets[idx].key = TOMBSTONE;

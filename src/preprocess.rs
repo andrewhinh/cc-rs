@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::ffi::c_void;
 use std::fs;
@@ -7,8 +8,10 @@ use std::sync::atomic::{AtomicI32, Ordering};
 
 use chrono::{DateTime, Local};
 
-use crate::hashmap::{HashMap, hashmap_delete, hashmap_get, hashmap_put2};
-use crate::tokenize::{line_delta_for_file, update_file_line_marker};
+use crate::hashmap::{
+    HashMap, hashmap_contains_bytes, hashmap_delete, hashmap_get, hashmap_put2, populate_keywords,
+};
+use crate::tokenize::{line_delta_for_file, token_lexeme_bytes, update_file_line_marker};
 use crate::{
     File, ScopeTags, ScopeVars, Token, TokenKind, add_input_file, const_expr, consume,
     convert_pp_number, equal, error_tok, get_file_no, get_include_paths, get_input_files,
@@ -927,54 +930,64 @@ fn set_origin(tok: &mut Token, origin: &Token) {
     }
 }
 
-fn is_keyword(name: &str) -> bool {
-    matches!(
-        name,
-        "return"
-            | "if"
-            | "else"
-            | "for"
-            | "while"
-            | "int"
-            | "sizeof"
-            | "char"
-            | "short"
-            | "struct"
-            | "union"
-            | "long"
-            | "void"
-            | "typedef"
-            | "_Bool"
-            | "enum"
-            | "static"
-            | "goto"
-            | "break"
-            | "continue"
-            | "switch"
-            | "case"
-            | "default"
-            | "extern"
-            | "_Alignof"
-            | "_Generic"
-            | "_Alignas"
-            | "do"
-            | "signed"
-            | "unsigned"
-            | "const"
-            | "volatile"
-            | "auto"
-            | "register"
-            | "restrict"
-            | "__restrict"
-            | "__restrict__"
-            | "_Noreturn"
-            | "float"
-            | "double"
-            | "typeof"
-            | "asm"
-            | "_Thread_local"
-            | "__thread"
-    )
+thread_local! {
+    static KEYWORDS: RefCell<HashMap> = RefCell::new(HashMap::default());
+}
+
+fn is_keyword_bytes(lexeme: &[u8]) -> bool {
+    KEYWORDS.with(|cell| {
+        let mut map = cell.borrow_mut();
+        populate_keywords(
+            &mut map,
+            &[
+                "return",
+                "if",
+                "else",
+                "for",
+                "while",
+                "int",
+                "sizeof",
+                "char",
+                "struct",
+                "union",
+                "short",
+                "long",
+                "void",
+                "typedef",
+                "_Bool",
+                "enum",
+                "static",
+                "goto",
+                "break",
+                "continue",
+                "switch",
+                "case",
+                "default",
+                "extern",
+                "_Alignof",
+                "_Generic",
+                "_Alignas",
+                "do",
+                "signed",
+                "unsigned",
+                "const",
+                "volatile",
+                "auto",
+                "register",
+                "restrict",
+                "__restrict",
+                "__restrict__",
+                "_Noreturn",
+                "float",
+                "double",
+                "typeof",
+                "asm",
+                "_Thread_local",
+                "__thread",
+            ],
+        );
+        hashmap_contains_bytes(&map, lexeme)
+    })
 }
 
 fn is_hash(files: &[File], tok: &Token) -> bool {
@@ -1279,15 +1292,10 @@ fn push_cond_incl(tok: &Token, included: bool) {
 fn convert_pp_tokens(files: &[File], tok: &mut Token) {
     let mut cur = tok;
     loop {
-        if cur.kind == TokenKind::Ident {
-            let file = match files.iter().find(|f| f.file_no == cur.file_no) {
-                Some(f) => f,
-                None => break,
-            };
-            let name: String = file.contents.chars().skip(cur.loc).take(cur.len).collect();
-            if is_keyword(&name) {
-                cur.kind = TokenKind::Keyword;
-            }
+        if cur.kind == TokenKind::Ident
+            && token_lexeme_bytes(files, cur).is_some_and(is_keyword_bytes)
+        {
+            cur.kind = TokenKind::Keyword;
         } else if cur.kind == TokenKind::PpNum
             && let Err(e) = convert_pp_number(files, cur)
         {

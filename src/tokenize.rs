@@ -1286,6 +1286,13 @@ fn make_error_token(file_no: usize, loc: usize, msg: &str) -> Token {
     }
 }
 
+pub fn token_lexeme_bytes<'a>(files: &'a [File], tok: &Token) -> Option<&'a [u8]> {
+    let file = files.iter().find(|f| f.file_no == tok.file_no)?;
+    let start = char_index_to_byte_offset(&file.contents, tok.loc);
+    let end = char_index_to_byte_offset(&file.contents, tok.loc + tok.len);
+    Some(&file.contents.as_bytes()[start..end])
+}
+
 pub fn equal(files: &[File], tok: &Token, s: &str) -> bool {
     let file = match files.iter().find(|f| f.file_no == tok.file_no) {
         Some(f) => f,

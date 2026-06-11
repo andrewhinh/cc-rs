@@ -3,7 +3,10 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::rc::Rc;
 
-use crate::hashmap::{hashmap_get, hashmap_get2, hashmap_put2};
+use crate::hashmap::{
+    HashMap, hashmap_contains_bytes, hashmap_get, hashmap_get2, hashmap_put2, populate_keywords,
+};
+use crate::tokenize::token_lexeme_bytes;
 use crate::{
     File, Node, NodeKind, Obj, ScopeTags, ScopeVars, Token, TokenKind, Type, TypeKind, VarAttr,
     VarScope, align_to, error_at, error_tok, new_unique_name, new_var_unique_id,
@@ -2473,37 +2476,60 @@ pub fn declspec(
     Ok((ty, tok))
 }
 
+thread_local! {
+    static TYPE_KEYWORDS: RefCell<HashMap> = RefCell::new(HashMap::default());
+}
+
+fn type_keyword_hit(lexeme: &[u8]) -> bool {
+    TYPE_KEYWORDS.with(|cell| {
+        let mut map = cell.borrow_mut();
+        populate_keywords(
+            &mut map,
+            &[
+                "void",
+                "_Bool",
+                "char",
+                "short",
+                "int",
+                "long",
+                "struct",
+                "union",
+                "typedef",
+                "enum",
+                "static",
+                "extern",
+                "_Alignas",
+                "signed",
+                "unsigned",
+                "const",
+                "volatile",
+                "auto",
+                "register",
+                "restrict",
+                "__restrict",
+                "__restrict__",
+                "_Noreturn",
+                "float",
+                "double",
+                "typeof",
+                "inline",
+                "_Thread_local",
+                "__thread",
+            ],
+        );
+        hashmap_contains_bytes(&map, lexeme)
+    })
+}
+
 pub fn is_typename(files: &[File], tok: &Token, scope_stack: &[ScopeVars]) -> bool {
-    equal(files, tok, "void")
-        || equal(files, tok, "_Bool")
-        || equal(files, tok, "char")
-        || equal(files, tok, "short")
-        || equal(files, tok, "int")
-        || equal(files, tok, "long")
-        || equal(files, tok, "struct")
-        || equal(files, tok, "union")
-        || equal(files, tok, "typedef")
-        || equal(files, tok, "enum")
-        || equal(files, tok, "static")
-        || equal(files, tok, "extern")
-        || equal(files, tok, "inline")
-        || equal(files, tok, "_Thread_local")
-        || equal(files, tok, "__thread")
-        || equal(files, tok, "_Alignas")
-        || equal(files, tok, "signed")
-        || equal(files, tok, "unsigned")
-        || equal(files, tok, "const")
-        || equal(files, tok, "volatile")
-        || equal(files, tok, "auto")
-        || equal(files, tok, "register")
-        || equal(files, tok, "restrict")
-        || equal(files, tok, "__restrict")
-        || equal(files, tok, "__restrict__")
-        || equal(files, tok, "_Noreturn")
-        || equal(files, tok, "float")
-        || equal(files, tok, "double")
-        || equal(files, tok, "typeof")
-        || find_typedef(scope_stack, tok, files).is_some()
+    if matches!(
+        tok.kind,
+        TokenKind::Punct | TokenKind::Keyword | TokenKind::Ident
+    ) && token_lexeme_bytes(files, tok).is_some_and(type_keyword_hit)
+    {
+        return true;
+    }
+    find_typedef(scope_stack, tok, files).is_some()
 }
 
 pub fn get_number(tok: &Token) -> Result<i64, String> {

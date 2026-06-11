@@ -256,7 +256,7 @@ cargo run
 - [x] Recognize wide character literal
 - [x] Tokenize numeric tokens as pp-numbers
 - [x] Precompute line number for each token
-- [ ] Use hashmap for keyword lookup
+- [x] Use hashmap for keyword lookup
 - [x] Canonicalize newline character
 - [x] Add \u and \U escape sequences
 - [x] Accept multibyte character as wide character literal
