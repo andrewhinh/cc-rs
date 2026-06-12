@@ -245,4 +245,18 @@ grep -qF "$tmp/out2.h" $tmp/deps
 grep -qF "$tmp/out3.h" $tmp/deps
 check -M
 
+# -MF
+$compiler -MF $tmp/mf -M -I$tmp $tmp/out.c
+grep -q 'out.o:' $tmp/mf
+grep -qF "$tmp/out.c" $tmp/mf
+grep -qF "$tmp/out2.h" $tmp/mf
+grep -qF "$tmp/out3.h" $tmp/mf
+check -MF
+
+rm -f $tmp/mf $tmp/wrong
+$compiler -MF $tmp/mf -M -o $tmp/wrong -I$tmp $tmp/out.c
+grep -q 'out.o:' $tmp/mf
+[ ! -f $tmp/wrong ]
+check '-MF over -o'
+
 echo OK

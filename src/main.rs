@@ -35,6 +35,7 @@ struct Args {
     opt_e: bool,
     opt_m: bool,
     opt_hash_hash_hash: bool,
+    opt_mf: Option<String>,
     opt_o: Option<String>,
     base_file: Option<String>,
     output_file: Option<String>,
@@ -84,6 +85,7 @@ fn parse_args() -> Result<Args, String> {
     let mut opt_e = false;
     let mut opt_m = false;
     let mut opt_hash_hash_hash = false;
+    let mut opt_mf: Option<String> = None;
     let mut opt_o: Option<String> = None;
     let mut base_file: Option<String> = None;
     let mut output_file: Option<String> = None;
@@ -141,6 +143,16 @@ fn parse_args() -> Result<Args, String> {
 
         if args[i] == "-M" {
             opt_m = true;
+            i += 1;
+            continue;
+        }
+
+        if args[i] == "-MF" {
+            i += 1;
+            if i >= args.len() {
+                usage(1);
+            }
+            opt_mf = Some(args[i].clone());
             i += 1;
             continue;
         }
@@ -335,6 +347,7 @@ fn parse_args() -> Result<Args, String> {
         opt_e,
         opt_m,
         opt_hash_hash_hash,
+        opt_mf,
         opt_o,
         base_file,
         output_file,
@@ -401,8 +414,8 @@ fn run_cc1(
     run_subprocess(opt_hash_hash_hash, &new_args)
 }
 
-fn print_dependencies(base_file: &str, opt_o: Option<&String>) -> Result<(), String> {
-    let mut out = open_output_file(opt_o);
+fn print_dependencies(base_file: &str, output: Option<&String>) -> Result<(), String> {
+    let mut out = open_output_file(output);
     let target = replace_extn_basename(base_file, ".o");
     write!(out, "{target}:").map_err(|e| format!("write error: {e}"))?;
 
@@ -472,7 +485,8 @@ fn cc1(args: &Args) -> Result<(), String> {
         let tok = tokenize_input(input, &args.opt_include)?;
         let tok = preprocess(tok)?;
         if args.opt_m {
-            return print_dependencies(input, args.opt_o.as_ref());
+            let output = args.opt_mf.as_ref().or(args.opt_o.as_ref());
+            return print_dependencies(input, output);
         }
         return print_tokens(&tok, args.opt_o.as_ref());
     }
