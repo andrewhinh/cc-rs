@@ -355,7 +355,7 @@ cargo run
 - [x] Add -l option
 - [x] Add -s option
 - [x] Recognize .a and .so files
-- [ ] Add -M option
+- [x] Add -M option
 - [ ] Add -MF option
 - [ ] Add -MP option
 - [ ] Add -MT option

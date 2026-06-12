@@ -33,6 +33,7 @@ struct Args {
     opt_s: bool,
     opt_c: bool,
     opt_e: bool,
+    opt_m: bool,
     opt_hash_hash_hash: bool,
     opt_o: Option<String>,
     base_file: Option<String>,
@@ -81,6 +82,7 @@ fn parse_args() -> Result<Args, String> {
     let mut opt_s = false;
     let mut opt_c = false;
     let mut opt_e = false;
+    let mut opt_m = false;
     let mut opt_hash_hash_hash = false;
     let mut opt_o: Option<String> = None;
     let mut base_file: Option<String> = None;
@@ -133,6 +135,12 @@ fn parse_args() -> Result<Args, String> {
 
         if args[i] == "-E" {
             opt_e = true;
+            i += 1;
+            continue;
+        }
+
+        if args[i] == "-M" {
+            opt_m = true;
             i += 1;
             continue;
         }
@@ -325,6 +333,7 @@ fn parse_args() -> Result<Args, String> {
         opt_s,
         opt_c,
         opt_e,
+        opt_m,
         opt_hash_hash_hash,
         opt_o,
         base_file,
@@ -338,6 +347,10 @@ fn parse_args() -> Result<Args, String> {
         opt_x,
         ld_extra_args,
     })
+}
+
+fn wants_preprocess_only(args: &Args) -> bool {
+    args.opt_e || args.opt_m
 }
 
 fn open_output_file(path: Option<&String>) -> Box<dyn Write> {
@@ -386,6 +399,21 @@ fn run_cc1(
     }
 
     run_subprocess(opt_hash_hash_hash, &new_args)
+}
+
+fn print_dependencies(base_file: &str, opt_o: Option<&String>) -> Result<(), String> {
+    let mut out = open_output_file(opt_o);
+    let target = replace_extn_basename(base_file, ".o");
+    write!(out, "{target}:").map_err(|e| format!("write error: {e}"))?;
+
+    for file in get_input_files() {
+        if file.name.starts_with('<') {
+            continue;
+        }
+        write!(out, " \\\n  {}", file.name).map_err(|e| format!("write error: {e}"))?;
+    }
+    write!(out, "\n\n").map_err(|e| format!("write error: {e}"))?;
+    Ok(())
 }
 
 fn print_tokens(tok: &Token, opt_o: Option<&String>) -> Result<(), String> {
@@ -440,9 +468,12 @@ fn cc1(args: &Args) -> Result<(), String> {
         add_default_include_paths(&argv0);
     }
 
-    if args.opt_e {
+    if wants_preprocess_only(args) {
         let tok = tokenize_input(input, &args.opt_include)?;
         let tok = preprocess(tok)?;
+        if args.opt_m {
+            return print_dependencies(input, args.opt_o.as_ref());
+        }
         return print_tokens(&tok, args.opt_o.as_ref());
     }
 
@@ -462,6 +493,14 @@ fn replace_extn(path: &str, extn: &str) -> String {
         None => path,
     };
     format!("{}{}", base, extn)
+}
+
+fn replace_extn_basename(path: &str, extn: &str) -> String {
+    let filename = Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path);
+    replace_extn(filename, extn)
 }
 
 fn create_tmpfile() -> Result<(NamedTempFile, String), String> {
@@ -657,7 +696,7 @@ fn run() -> Result<(), String> {
             continue;
         }
 
-        if args.opt_e {
+        if wants_preprocess_only(&args) {
             run_cc1(args.opt_hash_hash_hash, &orig_args, Some(input), None)?;
             continue;
         }

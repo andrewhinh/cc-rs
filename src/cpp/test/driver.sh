@@ -234,4 +234,15 @@ check '.so'
 $compiler -hashmap-test
 check 'hashmap'
 
+# -M
+echo '#include "out2.h"' > $tmp/out.c
+echo '#include "out3.h"' >> $tmp/out.c
+touch $tmp/out2.h $tmp/out3.h
+$compiler -M -I$tmp $tmp/out.c > $tmp/deps
+grep -q 'out.o:' $tmp/deps
+grep -qF "$tmp/out.c" $tmp/deps
+grep -qF "$tmp/out2.h" $tmp/deps
+grep -qF "$tmp/out3.h" $tmp/deps
+check -M
+
 echo OK

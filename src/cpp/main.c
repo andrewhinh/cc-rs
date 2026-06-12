@@ -10,6 +10,7 @@ bool opt_fcommon = true;
 static FileType opt_x;
 static StringArray opt_include;
 static bool opt_E;
+static bool opt_M;
 static bool opt_S;
 static bool opt_c;
 static bool opt_cc1;
@@ -128,6 +129,11 @@ static void parse_args(int argc, char **argv) {
 
     if (!strcmp(argv[i], "-E")) {
       opt_E = true;
+      continue;
+    }
+
+    if (!strcmp(argv[i], "-M")) {
+      opt_M = true;
       continue;
     }
 
@@ -325,6 +331,18 @@ static void print_tokens(Token *tok) {
   fprintf(out, "\n");
 }
 
+// Print makefile dependencies. Used for -M.
+static void print_dependencies(void) {
+  FILE *out = open_file(opt_o ? opt_o : "-");
+  fprintf(out, "%s:", replace_extn(base_file, ".o"));
+
+  File **files = get_input_files();
+
+  for (int i = 0; files[i]; i++)
+    fprintf(out, " \\\n  %s", files[i]->name);
+  fprintf(out, "\n\n");
+}
+
 static Token *must_tokenize_file(char *path) {
   Token *tok = tokenize_file(path);
   if (!tok)
@@ -366,8 +384,11 @@ static void cc1(void) {
   tok = append_tokens(tok, tok2);
   tok = preprocess(tok);
 
-  // If -E is given, print out preprocessed C code as a result.
-  if (opt_E) {
+  if (opt_M || opt_E) {
+    if (opt_M) {
+      print_dependencies();
+      return;
+    }
     print_tokens(tok);
     return;
   }
@@ -551,7 +572,7 @@ int main(int argc, char **argv) {
     assert(type == FILE_C);
 
     // Just preprocess
-    if (opt_E) {
+    if (opt_E || opt_M) {
       run_cc1(argc, argv, input, NULL);
       continue;
     }
